@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     database_pool_size:int = Field(default=0)
     database_max_overflow:int = Field(default=20)
 
+    redis_url: str=Field(default="redis://127.0.0.1:6379/0")
+
     api_v1_prefix: str = Field(default="/api/v1")
 
     model_config = SettingsConfigDict(

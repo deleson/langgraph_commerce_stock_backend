@@ -5,9 +5,12 @@ description = "Backend service for the LangGraph commerce project."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "alembic>=1.14",
     "fastapi>=0.136.0",
+    "psycopg[binary]>=3.2",
     "pydantic>=2.13.2",
     "pydantic-settings>=2.13.1",
+    "sqlalchemy>=2.0",
     "uvicorn>=0.44.0",
 ]
 

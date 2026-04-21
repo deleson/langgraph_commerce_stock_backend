@@ -38,5 +38,5 @@ def create_application() -> FastAPI:
     application.include_router(api_router)
 
     logger.info("Application configured successfully")
-    return  application
+    return application
 

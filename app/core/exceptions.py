@@ -44,3 +44,32 @@ class BadRequestException(AppException):
             status_code=400,
             details=details,
         )
+
+class ConflictException(AppException):
+    def __init__(
+            self,
+            message:str = "resource conflict",
+            code:int = 10009,
+            details:list[dict[str,Any] | None] = None,
+                 ) -> None:
+        super().__init__(
+            message=message,
+            code=code,
+            status_code=409,
+            details=details,
+        )
+
+
+class UnauthorizedException(AppException):
+    def __init__(
+            self,
+            message:str = "unauthorized",
+            code:int=10010,
+            details:list[dict[str,Any] | None] =None,
+    ):
+        super().__init__(
+            message=message,
+            code=code,
+            status_code=401,
+            details=details,
+        )

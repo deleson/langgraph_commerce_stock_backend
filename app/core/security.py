@@ -1,8 +1,16 @@
+from datetime import UTC,datetime,timedelta
+from typing import Any
+
+from jose import JWTError,jwt
 from pwdlib import PasswordHash
 
-from app.core.exceptions import BadRequestException
+
+from app.core.config import get_settings
+from app.core.exceptions import BadRequestException,UnauthorizedException
+from app.schemas.auth import TokenPayload
 
 password_hash = PasswordHash.recommended()
+settings = get_settings()
 
 MIN_PASSWORD_LENGTH = 8
 MAX_PASSWORD_LENGTH = 128
@@ -35,3 +43,45 @@ def hash_password(password:str) -> str:
 
 def verify_password(plain_password:str,hashed_password:str) -> bool:
     return password_hash.verify(plain_password,hashed_password)
+
+
+def create_access_token(
+        *,
+        subject:str,
+        user_id:int,
+        is_superuser:bool,
+        expires_delta:timedelta | None = None,
+) -> str:
+    expire = datetime.now(UTC) + (
+        expires_delta
+        if expires_delta is not None
+        else timedelta(minutes=settings.jwt_access_token_expire_minutes)
+    )
+
+    payload:dict[str,Any] = {
+        "sub": subject,
+        "user_id": user_id,
+        "is_superuser": is_superuser,
+        "exp":expire,
+    }
+
+    return jwt.encode(
+        payload,
+        settings.jwt_secret_key,
+        algorithm=settings.jwt_algorithm,
+    )
+
+
+def decode_access_token(token:str) -> TokenPayload:
+    try:
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm]
+        )
+        return TokenPayload(**payload)
+    except JWTError as exc:
+        raise UnauthorizedException(
+            message = "invalide or expired token",
+            details=[{"field":"authorization","reason":"token is invalid or expired"}]
+        ) from exc

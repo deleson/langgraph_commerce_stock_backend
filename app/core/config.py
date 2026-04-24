@@ -22,6 +22,11 @@ class Settings(BaseSettings):
 
     redis_url: str=Field(default="redis://127.0.0.1:6379/0")
 
+    jwt_secret_key: str = Field(default="change-this-in-production")
+    jwt_algorithm: str = Field(default="HS256")
+    jwt_access_token_expire_minutes: int = Field(default=60)
+
+
     api_v1_prefix: str = Field(default="/api/v1")
 
     model_config = SettingsConfigDict(

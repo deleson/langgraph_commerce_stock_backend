@@ -20,7 +20,7 @@ class User(Base):
     timezone:Mapped[str|None] =mapped_column(String(50),nullable=True)
     risk_preference:Mapped[str|None] = mapped_column(String(20),nullable=True)
 
-    create_at: Mapped[datetime] = mapped_column(
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
         nullable=False,

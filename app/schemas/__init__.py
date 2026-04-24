@@ -1,5 +1,7 @@
 from app.schemas.auth import (
     AuthenticatedUser,
+    RefreshTokenRequest,
+    TokenPairResponse,
     TokenPayload,
     TokenResponse,
     UserLoginRequest,
@@ -19,4 +21,6 @@ __all__ = [
     "AuthenticatedUser",
     "UserResponse",
     "UserUpdateRequest",
+    "RefreshTokenRequest",
+    "TokenPairResponse",
 ]

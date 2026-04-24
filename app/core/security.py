@@ -9,6 +9,9 @@ from app.core.config import get_settings
 from app.core.exceptions import BadRequestException,UnauthorizedException
 from app.schemas.auth import TokenPayload
 
+import hashlib
+import secrets
+
 password_hash = PasswordHash.recommended()
 settings = get_settings()
 
@@ -85,3 +88,20 @@ def decode_access_token(token:str) -> TokenPayload:
             message = "invalide or expired token",
             details=[{"field":"authorization","reason":"token is invalid or expired"}]
         ) from exc
+
+
+
+def generate_refresh_token() -> str:
+    return secrets.token_urlsafe(48)
+
+
+def hash_refresh_token(refresh_token: str) -> str:
+    return hashlib.sha256(refresh_token.encode("utf-8")).hexdigest()
+
+
+def verify_refresh_token(refresh_token: str, refresh_token_hash: str) -> bool:
+    return hash_refresh_token(refresh_token) == refresh_token_hash
+
+
+def get_refresh_token_expires_at() -> datetime:
+    return datetime.now(UTC) + timedelta(days=settings.jwt_refresh_token_expire_days)

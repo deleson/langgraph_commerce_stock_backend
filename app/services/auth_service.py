@@ -1,13 +1,11 @@
 from sqlalchemy.orm import Session
 
-
-from app.core.exceptions import ConflictException,UnauthorizedException
-from app.core.security import hash_password,verify_password
+from app.core.exceptions import ConflictException, UnauthorizedException
+from app.core.security import create_access_token, generate_refresh_token, hash_password, verify_password
 from app.models.user import User
 from app.repositories.user_repo import UserRepository
-from app.schemas.auth import UserLoginRequest,UserRegisterRequest
-
-
+from app.schemas.auth import UserLoginRequest, UserRegisterRequest
+from app.services.session_service import SessionService
 
 class AuthService:
     def __init__(self,db:Session) ->None:
@@ -72,6 +70,18 @@ class AuthService:
                 message="user is not allowed to sign in",
                 details=[{"field":"status","reason":"user is inactive or suspended"}]
             )
-
-
         return user
+
+
+    def issue_token_pair(self, user: User) -> tuple[str, str]:
+        access_token = create_access_token(
+            subject=user.email,
+            user_id=user.id,
+            is_superuser=user.is_superuser,
+        )
+        refresh_token = generate_refresh_token()
+        SessionService(self.db).create_refresh_session(
+            user_id=user.id,
+            refresh_token=refresh_token,
+        )
+        return access_token, refresh_token

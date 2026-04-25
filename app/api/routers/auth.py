@@ -1,17 +1,17 @@
-from datetime import timedelta
-
 from fastapi import APIRouter
 
-from app.api.deps import DBSession
-from app.core.config import get_settings
-from app.core.security import create_access_token
-from app.schemas.auth import TokenResponse, UserLoginRequest, UserRegisterRequest
+from app.api.deps import CurrentToken, CurrentUser, DBSession
+from app.schemas.auth import (
+    LogoutRequest,
+    RefreshTokenRequest,
+    TokenPairResponse,
+    UserLoginRequest,
+    UserRegisterRequest,
+)
 from app.schemas.common import ApiResponse
 from app.schemas.user import UserResponse
 from app.services.auth_service import AuthService
 from app.utils.responses import success_response
-
-settings = get_settings()
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -32,24 +32,54 @@ def register_user(
 @router.post(
     "/login",
     summary="Login User",
-    response_model=ApiResponse[TokenResponse],
+    response_model=ApiResponse[TokenPairResponse],
 )
 def login_user(
     payload: UserLoginRequest,
     db: DBSession,
 ):
     user = AuthService(db).authenticate_user(payload)
-
-    access_token = create_access_token(
-        subject=user.email,
-        user_id=user.id,
-        is_superuser=user.is_superuser,
-        expires_delta=timedelta(minutes=settings.jwt_access_token_expire_minutes),
-    )
+    access_token, refresh_token = AuthService(db).issue_token_pair(user)
 
     return success_response(
-        data=TokenResponse(
+        data=TokenPairResponse(
             access_token=access_token,
+            refresh_token=refresh_token,
             token_type="bearer",
         )
     )
+
+
+@router.post(
+    "/refresh",
+    summary="Refresh Token Pair",
+    response_model=ApiResponse[TokenPairResponse],
+)
+def refresh_token_pair(
+    payload: RefreshTokenRequest,
+    db: DBSession,
+):
+    access_token, refresh_token = AuthService(db).refresh_user_tokens(payload.refresh_token)
+
+    return success_response(
+        data=TokenPairResponse(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            token_type="bearer",
+        )
+    )
+
+
+@router.post(
+    "/logout",
+    summary="Logout Current Session",
+    response_model=ApiResponse[dict[str, str]],
+)
+def logout_user(
+    payload: LogoutRequest,
+    db: DBSession,
+    current_user: CurrentUser,
+    current_token: CurrentToken,
+):
+    AuthService(db).logout_user(payload.refresh_token, current_token)
+    return success_response(data={"message": "logout success"})

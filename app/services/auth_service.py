@@ -6,6 +6,7 @@ from app.models.user import User
 from app.repositories.user_repo import UserRepository
 from app.schemas.auth import UserLoginRequest, UserRegisterRequest
 from app.services.session_service import SessionService
+from app.services.token_blacklist_service import TokenBlacklistService
 
 class AuthService:
     def __init__(self,db:Session) ->None:
@@ -85,3 +86,23 @@ class AuthService:
             refresh_token=refresh_token,
         )
         return access_token, refresh_token
+
+    def refresh_user_tokens(self,refresh_token:str) -> tuple[str,str]:
+        session = SessionService(self.db).validate_refresh_token(refresh_token)
+        user = self.user_repo.get_by_id(session.user_id)
+
+        if user is None or not user.is_active or user.status !="active":
+            raise UnauthorizedException(
+                message="user is not allow to refresh token",
+                details=[{"field":"refresh_token","reason":"user is invalid or inactive"}]
+            )
+
+        SessionService(self.db).revoke_refresh_session(refresh_token)
+        return self.issue_token_pair(user)
+
+
+    def logout_user(self,refresh_token:str,access_token:str) -> None:
+        SessionService(self.db).revoke_refresh_session(refresh_token)
+        TokenBlacklistService().blacklist_access_token(access_token)
+
+

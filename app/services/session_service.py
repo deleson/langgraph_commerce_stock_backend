@@ -52,3 +52,9 @@ class SessionService:
             )
 
         return session
+
+    def revoke_refresh_session(self,refresh_token:str) -> UserSession:
+        session = self.validate_refresh_token(refresh_token)
+        return self.session_repo.revoke(session)
+
+

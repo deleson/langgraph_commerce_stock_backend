@@ -12,6 +12,8 @@ from app.schemas.auth import TokenPayload
 import hashlib
 import secrets
 
+from uuid import uuid4
+
 password_hash = PasswordHash.recommended()
 settings = get_settings()
 
@@ -65,6 +67,7 @@ def create_access_token(
         "sub": subject,
         "user_id": user_id,
         "is_superuser": is_superuser,
+        "jti":uuid4().hex,
         "exp":expire,
     }
 
@@ -72,6 +75,7 @@ def create_access_token(
         payload,
         settings.jwt_secret_key,
         algorithm=settings.jwt_algorithm,
+
     )
 
 

@@ -17,6 +17,8 @@ class TokenPayload(BaseModel):
     sub:str
     user_id: int
     is_superuser: bool = False
+    jti: str
+    exp: int
 
 class TokenResponse(BaseModel):
     access_token:str
@@ -37,6 +39,8 @@ class AuthenticatedUser(BaseModel):
 class RefreshTokenRequest(BaseModel):
     refresh_token: str
 
+class LogoutRequest(BaseModel):
+    refresh_token: str
 
 class TokenPairResponse(BaseModel):
     access_token: str

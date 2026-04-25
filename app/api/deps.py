@@ -9,17 +9,24 @@ from app.core.exceptions import UnauthorizedException
 from app.core.security import decode_access_token
 from app.models.user import User
 from app.repositories.user_repo import UserRepository
+from app.services.token_blacklist_service import TokenBlacklistService
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 DBSession = Annotated[Session, Depends(get_db_session)]
-
+CurrentToken = Annotated[str,Depends(oauth2_scheme)]
 
 def get_current_user(
     db: DBSession,
     token: Annotated[str, Depends(oauth2_scheme)],
 ) -> User:
     payload = decode_access_token(token)
+    if TokenBlacklistService().is_access_token_blacklisted(payload.jti):
+        raise UnauthorizedException(
+            message="token has been revoked",
+            details=[{"field":"authorization","reason":"token is blacklisted"}],
+        )
+
     user = UserRepository(db).get_by_id(payload.user_id)
 
     if user is None:

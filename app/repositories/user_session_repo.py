@@ -37,3 +37,10 @@ class UserSessionRepository:
         self.db.commit()
         self.db.refresh(session)
         return session
+
+    def revoke(self,session:UserSession) -> UserSession:
+        session.is_revoked = True
+        self.db.add(session)
+        self.db.commit()
+        self.db.refresh(session)
+        return session

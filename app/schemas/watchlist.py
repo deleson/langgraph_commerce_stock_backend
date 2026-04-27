@@ -11,7 +11,7 @@ class WatchlistCreateRequest(BaseModel):
     market:MarketCode
     name:str | None  = Field(default=None,max_length=100)
     notes:str | None = Field(default=None,max_length=500)
-    alert_enabled: bool = False
+    alert_enabled: bool | None = None
 
     @field_validator("symbol","market",mode="before")
     @classmethod

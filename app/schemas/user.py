@@ -12,12 +12,9 @@ class UserResponse(BaseModel):
     is_active: bool
     is_superuser: bool
     status: str
-    timezone: str | None
-    risk_preference: str | None
     created_at: datetime
     updated_at: datetime
 
 
 class UserUpdateRequest(BaseModel):
-    timezone: str | None = Field(default=None, max_length=50)
-    risk_preference: str | None = Field(default=None, max_length=20)
+    username: str | None = Field(default=None, min_length=3, max_length=50)

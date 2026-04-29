@@ -17,8 +17,6 @@ class User(Base):
     is_superuser: Mapped[bool] = mapped_column(Boolean,default=False,nullable=False)
 
     status:Mapped[str] = mapped_column(String(20),default="active",nullable=False)
-    timezone:Mapped[str|None] =mapped_column(String(50),nullable=True)
-    risk_preference:Mapped[str|None] = mapped_column(String(20),nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

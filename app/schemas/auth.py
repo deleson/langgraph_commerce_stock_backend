@@ -4,8 +4,6 @@ class UserRegisterRequest(BaseModel):
     email:EmailStr
     username: str = Field(min_length=3,max_length=50)
     password: str = Field(min_length=3,max_length=128)
-    timezone: str | None = Field(default=None,max_length=50)
-    risk_preference:str | None = Field(default=None,max_length=20)
 
 
 class UserLoginRequest(BaseModel):

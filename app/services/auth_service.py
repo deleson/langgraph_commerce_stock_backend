@@ -7,6 +7,7 @@ from app.repositories.user_repo import UserRepository
 from app.schemas.auth import UserLoginRequest, UserRegisterRequest
 from app.services.session_service import SessionService
 from app.services.token_blacklist_service import TokenBlacklistService
+from app.repositories.user_preference_repo import UserPreferenceRepository
 
 class AuthService:
     def __init__(self,db:Session) ->None:
@@ -39,16 +40,16 @@ class AuthService:
 
         hashed_password = hash_password(payload.password)
 
-        return self.user_repo.create(
+        user = self.user_repo.create(
             email=email,
             username=username,
             hashed_password=hashed_password,
-            timezone=payload.timezone,
-            risk_preference=payload.risk_preference,
             is_active=True,
             is_superuser=False,
             status="active",
         )
+        UserPreferenceRepository(self.db).create_default(user.id)
+        return user
 
     def authenticate_user(self,payload:UserLoginRequest) -> User:
         email = self._normalize_email(payload.email)

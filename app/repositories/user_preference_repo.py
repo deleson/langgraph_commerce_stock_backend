@@ -12,11 +12,17 @@ class UserPreferenceRepository:
         stmt = select(UserPreference).where(UserPreference.user_id == user_id)
         return self.db.execute(stmt).scalar_one_or_none()
 
-    def create_default(self, user_id: int) -> UserPreference:
+    def create_default(
+        self,
+        user_id: int,
+        *,
+        timezone: str = "Asia/Shanghai",
+        risk_preference: str = "balanced",
+    ) -> UserPreference:
         preference = UserPreference(
             user_id=user_id,
-            risk_preference="balanced",
-            timezone="Asia/Shanghai",
+            risk_preference=risk_preference,
+            timezone=timezone,
             daily_report_enabled=False,
             abnormal_alert_enabled=False,
             default_watchlist_alert_enabled=False,

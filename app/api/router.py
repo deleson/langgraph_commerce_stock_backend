@@ -5,6 +5,7 @@ from app.api.routers.health import router as health_router
 from app.api.routers.preferences import router as preferences_router
 from app.api.routers.users import router as users_router
 from app.api.routers.watchlist import router as watchlist_router
+from app.api.routers.analysis_records import router as analysis_records_router
 from app.core.config import get_settings
 
 settings = get_settings()
@@ -16,3 +17,4 @@ api_router.include_router(auth_router)
 api_router.include_router(users_router)
 api_router.include_router(watchlist_router)
 api_router.include_router(preferences_router)
+api_router.include_router(analysis_records_router)

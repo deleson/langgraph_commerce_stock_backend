@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.routers.analysis_records import router as analysis_records_router
 from app.api.routers.auth import router as auth_router
+from app.api.routers.devices import router as devices_router
 from app.api.routers.health import router as health_router
 from app.api.routers.notifications import router as notifications_router
 from app.api.routers.preferences import router as preferences_router
@@ -20,3 +21,4 @@ api_router.include_router(watchlist_router)
 api_router.include_router(preferences_router)
 api_router.include_router(analysis_records_router)
 api_router.include_router(notifications_router)
+api_router.include_router(devices_router)

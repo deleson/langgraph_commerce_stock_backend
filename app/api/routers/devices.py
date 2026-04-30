@@ -1,0 +1,61 @@
+from fastapi import APIRouter, status
+
+from app.api.deps import CurrentUser, DBSession
+from app.schemas.common import ApiResponse
+from app.schemas.device import DeviceRegisterRequest, DeviceResponse
+from app.services.device_service import DeviceService
+from app.utils.responses import success_response
+
+router = APIRouter(prefix="/devices", tags=["devices"])
+
+
+@router.post(
+    "",
+    summary="Register Or Update My Device",
+    response_model=ApiResponse[DeviceResponse],
+    status_code=status.HTTP_201_CREATED,
+)
+def register_or_update_my_device(
+    payload: DeviceRegisterRequest,
+    current_user: CurrentUser,
+    db: DBSession,
+):
+    # Device registration is idempotent: the same platform/token updates the existing row.
+    device = DeviceService(db).register_or_update_device(
+        user=current_user,
+        payload=payload,
+    )
+    return success_response(data=DeviceResponse.model_validate(device))
+
+
+@router.get(
+    "",
+    summary="List My Devices",
+    response_model=ApiResponse[list[DeviceResponse]],
+)
+def list_my_devices(
+    current_user: CurrentUser,
+    db: DBSession,
+):
+    devices = DeviceService(db).list_my_devices(current_user)
+    return success_response(
+        data=[DeviceResponse.model_validate(device) for device in devices]
+    )
+
+
+@router.patch(
+    "/{device_id}/deactivate",
+    summary="Deactivate My Device",
+    response_model=ApiResponse[DeviceResponse],
+)
+def deactivate_my_device(
+    device_id: int,
+    current_user: CurrentUser,
+    db: DBSession,
+):
+    # Deactivation keeps the device record for audit/history but excludes it from future push.
+    device = DeviceService(db).deactivate_my_device(
+        user=current_user,
+        device_id=device_id,
+    )
+    return success_response(data=DeviceResponse.model_validate(device))

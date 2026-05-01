@@ -8,6 +8,7 @@ from app.services.user_preference_service import UserPreferenceService
 from app.services.user_service import UserService
 from app.services.watchlist_service import WatchlistService
 from app.services.market_data_service import MockMarketDataService
+from app.services.indicator_service import IndicatorService
 
 __all__ = [
     "AnalysisRecordService",
@@ -20,4 +21,5 @@ __all__ = [
     "WatchlistService",
     "UserPreferenceService",
     "MockMarketDataService",
+    "IndicatorService",
 ]

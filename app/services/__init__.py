@@ -7,6 +7,7 @@ from app.services.token_blacklist_service import TokenBlacklistService
 from app.services.user_preference_service import UserPreferenceService
 from app.services.user_service import UserService
 from app.services.watchlist_service import WatchlistService
+from app.services.market_data_service import MockMarketDataService
 
 __all__ = [
     "AnalysisRecordService",
@@ -18,4 +19,5 @@ __all__ = [
     "UserService",
     "WatchlistService",
     "UserPreferenceService",
+    "MockMarketDataService",
 ]

@@ -13,7 +13,7 @@ class StockAnalysisState(TypedDict,total=False):
     symbol: str
     market: MarketCode
     analysis_type: Literal["stock_basic"]
-    risk_preference: Literal["conservative","blanced","aggressive"]
+    risk_preference: Literal["conservative","balanced","aggressive"]
 
     market_snapshot: MarketSnapshot
     indicators: IndicatorSnapshot

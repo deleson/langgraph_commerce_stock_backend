@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field,SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     jwt_algorithm: str = Field(default="HS256")
     jwt_access_token_expire_minutes: int = Field(default=60)
     jwt_refresh_token_expire_days: int = Field(default=7)
+    deepseek_api_key: SecretStr | None = Field(default=None)
+    llm_provider: str = Field(default="deepseek")
+    llm_model: str = Field(default="deepseek-chat")
+    llm_base_url: str = Field(default="https://api.deepseek.com")
+    llm_temperature: float = Field(default=0.3)
 
 
     api_v1_prefix: str = Field(default="/api/v1")

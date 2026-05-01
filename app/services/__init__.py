@@ -9,6 +9,8 @@ from app.services.user_service import UserService
 from app.services.watchlist_service import WatchlistService
 from app.services.market_data_service import MockMarketDataService
 from app.services.indicator_service import IndicatorService
+from app.services.stock_analysis_service import StockAnalysisService
+
 
 __all__ = [
     "AnalysisRecordService",
@@ -22,4 +24,5 @@ __all__ = [
     "UserPreferenceService",
     "MockMarketDataService",
     "IndicatorService",
+    "StockAnalysisService",
 ]

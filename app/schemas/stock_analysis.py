@@ -10,6 +10,7 @@ TrendDirection = Literal["bullish", "bearish", "neutral"]
 RiskLevel = Literal["low", "medium", "high"]
 
 
+# service中发出请求的响应，调用图运转的请求参数
 class StockAnalysisRequest(BaseModel):
     symbol: str = Field(min_length=1, max_length=20, examples=["AAPL"])
     market: MarketCode = Field(examples=["US"])
@@ -21,6 +22,7 @@ class StockAnalysisRequest(BaseModel):
         return value.strip().upper()
 
 
+# 图结构中的读取当前股票参数响应
 class MarketSnapshot(BaseModel):
     symbol: str
     market: MarketCode
@@ -34,7 +36,7 @@ class MarketSnapshot(BaseModel):
     volume: int
     as_of: datetime
 
-
+# 图结构中的指标响应
 class IndicatorSnapshot(BaseModel):
     price_change: float
     price_change_percent: float
@@ -44,6 +46,7 @@ class IndicatorSnapshot(BaseModel):
     trend: TrendDirection
 
 
+# 经过llm节点后的图结构分析响应
 class StockAnalysisResult(BaseModel):
     summary: str
     risk_level: RiskLevel
@@ -53,6 +56,7 @@ class StockAnalysisResult(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+# 通过service调用图后的响应
 class StockAnalysisResponse(BaseModel):
     record_id: int | None = None
     symbol: str

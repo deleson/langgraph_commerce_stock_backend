@@ -16,6 +16,14 @@ from app.schemas.device import DeviceRegisterRequest, DeviceResponse
 from app.schemas.notification import NotificationCreateRequest, NotificationResponse
 from app.schemas.preference import UserPreferenceResponse, UserPreferenceUpdateRequest
 from app.schemas.user import UserResponse, UserUpdateRequest
+from app.schemas.stock_analysis import (
+    IndicatorSnapshot,
+    MarketSnapshot,
+    StockAnalysisGraphState,
+    StockAnalysisRequest,
+    StockAnalysisResponse,
+    StockAnalysisResult,
+)
 from app.schemas.watchlist import (
     WatchlistCreateRequest,
     WatchlistResponse,
@@ -46,4 +54,10 @@ __all__ = [
     "NotificationResponse",
     "DeviceRegisterRequest",
     "DeviceResponse",
+    "IndicatorSnapshot",
+    "MarketSnapshot",
+    "StockAnalysisGraphState",
+    "StockAnalysisRequest",
+    "StockAnalysisResponse",
+    "StockAnalysisResult",
 ]

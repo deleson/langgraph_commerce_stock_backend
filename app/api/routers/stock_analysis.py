@@ -15,13 +15,13 @@ router = APIRouter(prefix="/analysis", tags=["stock-analysis"])
     response_model=ApiResponse[StockAnalysisResponse],
     status_code=status.HTTP_201_CREATED,
 )
-def analyze_stock(
+async def analyze_stock(
     payload: StockAnalysisRequest,
     current_user: CurrentUser,
     db: DBSession,
 ):
     # Stock analysis is user-scoped: records and notifications belong to CurrentUser.
-    result = StockAnalysisService(db).analyze_stock(
+    result = await StockAnalysisService(db).analyze_stock_async(
         user=current_user,
         payload=payload,
     )

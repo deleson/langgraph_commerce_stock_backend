@@ -67,6 +67,33 @@ def analyze_with_llm_node(state: StockAnalysisState) -> StockAnalysisState:
     }
 
 
+async def analyze_with_llm_node_async(state: StockAnalysisState) -> StockAnalysisState:
+    market_snapshot = state.get("market_snapshot")
+    indicators = state.get("indicators")
+
+    if market_snapshot is None or indicators is None:
+        raise BadRequestException(message="market_snapshot and indicators are required")
+
+    risk_preference = state.get("risk_preference", "balanced")
+
+    messages = _build_stock_analysis_messages(
+        symbol=market_snapshot.symbol,
+        market=market_snapshot.market,
+        risk_preference=risk_preference,
+        market_data=market_snapshot.model_dump(mode="json"),
+        indicators=indicators.model_dump(mode="json"),
+    )
+
+    llm = get_chat_model()
+    response = await llm.ainvoke(messages)
+
+    result = _parse_stock_analysis_result(response.content)
+
+    return {
+        "result": result,
+    }
+
+
 def _build_stock_analysis_messages(
     symbol: str,
     market: str,
@@ -146,3 +173,4 @@ def _strip_markdown_code_block(content: str) -> str:
         lines = lines[:-1]
 
     return "\n".join(lines).strip()
+

@@ -22,5 +22,5 @@ class StockAnalysisState(TypedDict,total=False):
     record_id: int
     notification_id: int
     error_message: str
-    meatdata: dict[str,Any]
+    metadata: dict[str,Any]
 

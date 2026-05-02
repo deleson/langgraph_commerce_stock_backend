@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     llm_base_url: str = Field(default="https://api.deepseek.com")
     llm_temperature: float = Field(default=0.3)
 
+    http_client_timeout_seconds: float = Field(default=20.0)
+    http_client_connect_timeout_seconds: float = Field(default=5.0)
+
 
     api_v1_prefix: str = Field(default="/api/v1")
 

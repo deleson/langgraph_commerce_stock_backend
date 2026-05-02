@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     jwt_refresh_token_expire_days: int = Field(default=7)
     deepseek_api_key: SecretStr | None = Field(default=None)
     llm_provider: str = Field(default="deepseek")
-    llm_model: str = Field(default="deepseek-chat")
+    llm_model: str = Field(default="deepseek-v4-flash")
     llm_base_url: str = Field(default="https://api.deepseek.com")
     llm_temperature: float = Field(default=0.3)
 

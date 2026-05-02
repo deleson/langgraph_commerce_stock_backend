@@ -113,6 +113,7 @@ def _build_stock_analysis_messages(
     6. JSON 字段名必须使用英文，字段内容必须使用简体中文。
     7. risk_level 只能是 "low"、"medium"、"high"。
     8. trend 只能是 "bullish"、"bearish"、"neutral"。
+    9. 所有 JSON 字段都必须出现，无法明确判断时 trend 使用 "neutral"，risk_level 使用 "medium"，列表字段使用 []。
     """.strip()
 
     human_prompt = f"""
@@ -160,7 +161,80 @@ def _parse_stock_analysis_result(content: str) -> StockAnalysisResult:
     except json.JSONDecodeError as exc:
         raise BadRequestException(message="llm returned invalid json") from exc
 
-    return StockAnalysisResult.model_validate(payload)
+    if isinstance(payload, dict) and isinstance(payload.get("result"), dict):
+        payload = payload["result"]
+
+    if not isinstance(payload, dict):
+        raise BadRequestException(message="llm returned invalid payload")
+
+    return StockAnalysisResult.model_validate(
+        _normalize_stock_analysis_payload(payload)
+    )
+
+
+def _normalize_stock_analysis_payload(payload: dict) -> dict:
+    """Keep LLM format drift from becoming a 500 response."""
+    warnings = _normalize_string_list(payload.get("warnings"))
+
+    return {
+        "summary": str(payload.get("summary") or "暂未生成明确摘要。"),
+        "risk_level": _normalize_risk_level(payload.get("risk_level")),
+        "trend": _normalize_trend(payload.get("trend")),
+        "key_points": _normalize_string_list(payload.get("key_points")),
+        "suggestion": str(payload.get("suggestion") or "建议结合更多信息谨慎观察。"),
+        "warnings": warnings
+        or ["当前分析基于模拟行情数据，不构成投资建议。"],
+    }
+
+
+def _normalize_risk_level(value: object) -> str:
+    normalized = str(value or "").strip().lower()
+    mapping = {
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "低": "low",
+        "低风险": "low",
+        "中": "medium",
+        "中等": "medium",
+        "中风险": "medium",
+        "中等风险": "medium",
+        "高": "high",
+        "高风险": "high",
+    }
+    return mapping.get(normalized, "medium")
+
+
+def _normalize_trend(value: object) -> str:
+    normalized = str(value or "").strip().lower()
+    mapping = {
+        "bullish": "bullish",
+        "bearish": "bearish",
+        "neutral": "neutral",
+        "看涨": "bullish",
+        "偏多": "bullish",
+        "多头": "bullish",
+        "上涨": "bullish",
+        "看跌": "bearish",
+        "偏空": "bearish",
+        "空头": "bearish",
+        "下跌": "bearish",
+        "中性": "neutral",
+        "震荡": "neutral",
+        "观望": "neutral",
+    }
+    return mapping.get(normalized, "neutral")
+
+
+def _normalize_string_list(value: object) -> list[str]:
+    if value is None:
+        return []
+
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+
+    text = str(value).strip()
+    return [text] if text else []
 
 
 def _strip_markdown_code_block(content: str) -> str:

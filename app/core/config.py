@@ -12,13 +12,18 @@ class Settings(BaseSettings):
     app_host: str = Field(default="127.0.0.1")
     app_port: int = Field(default=8000)
     app_log_level:str = Field(default="INFO")
-    database_url:str = Field(
+    database_url: str = Field(
         default="postgresql+psycopg://postgres:postgres@127.0.0.1:5432/langgraph_commerce"
+    )
+    database_async_url: str = Field(
+        default="postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/langgraph_commerce"
     )
     database_echo:bool = Field(default=False)
     database_pool_pre_ping:bool=Field(default=True)
-    database_pool_size:int = Field(default=0)
-    database_max_overflow:int = Field(default=20)
+    database_pool_size:int = Field(default=5)
+    database_max_overflow:int = Field(default=10)
+    database_pool_timeout_seconds: int = Field(default=30)
+
 
     redis_url: str=Field(default="redis://127.0.0.1:6379/0")
 

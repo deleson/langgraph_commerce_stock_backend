@@ -1,8 +1,8 @@
 from fastapi import APIRouter
-from app.api.deps import CurrentUser,DBSession
+from app.api.deps import CurrentUser,AsyncDBSession
 from app.schemas.common import ApiResponse
 from app.schemas.preference import UserPreferenceResponse,UserPreferenceUpdateRequest
-from app.services.user_preference_service import UserPreferenceService
+from app.services.user_preference_service import AsyncUserPreferenceService
 from app.utils.responses import success_response
 
 router = APIRouter(prefix="/preferences",tags=["preferences"])
@@ -12,24 +12,27 @@ router = APIRouter(prefix="/preferences",tags=["preferences"])
     summary="Get My Preference",
     response_model=ApiResponse[UserPreferenceResponse],
 )
-def get_my_preference(
-        current_user:CurrentUser,
-        db:DBSession,
+async def get_my_preference(
+    current_user: CurrentUser,
+    db: AsyncDBSession,
 ):
-    preference = UserPreferenceService(db).get_or_create_my_preference(current_user)
+    preference = await AsyncUserPreferenceService(db).get_or_create_my_preference(
+        current_user
+    )
     return success_response(data=UserPreferenceResponse.model_validate(preference))
+
 
 @router.patch(
     "/me",
     summary="Update My Preference",
     response_model=ApiResponse[UserPreferenceResponse],
 )
-def update_my_preference(
-        payload:UserPreferenceUpdateRequest,
-        current_user:CurrentUser,
-        db:DBSession
+async def update_my_preference(
+    payload: UserPreferenceUpdateRequest,
+    current_user: CurrentUser,
+    db: AsyncDBSession,
 ):
-    preference = UserPreferenceService(db).update_my_preference(
+    preference = await AsyncUserPreferenceService(db).update_my_preference(
         user=current_user,
         payload=payload,
     )

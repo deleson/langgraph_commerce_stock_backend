@@ -63,3 +63,15 @@ class AsyncUserPreferenceRepository:
         await self.db.commit()
         await self.db.refresh(preference)
         return preference
+
+    async def get_by_user_id(self,user_id: int) -> UserPreference | None:
+        stmt = select(UserPreference).where(UserPreference.user_id == user_id)
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def save(self, preference: UserPreference) -> UserPreference:
+        self.db.add(preference)
+        await self.db.commit()
+        await self.db.refresh(preference)
+        return preference
+

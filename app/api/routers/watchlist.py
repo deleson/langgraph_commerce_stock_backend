@@ -1,13 +1,13 @@
 from fastapi import APIRouter, status
 
-from app.api.deps import CurrentUser, DBSession
+from app.api.deps import CurrentUser, AsyncDBSession
 from app.schemas.common import ApiResponse
 from app.schemas.watchlist import (
     WatchlistCreateRequest,
     WatchlistResponse,
     WatchlistUpdateRequest,
 )
-from app.services.watchlist_service import WatchlistService
+from app.services.watchlist_service import AsyncWatchlistService
 from app.utils.responses import success_response
 
 router = APIRouter(prefix="/watchlist", tags=["watchlist"])
@@ -19,12 +19,12 @@ router = APIRouter(prefix="/watchlist", tags=["watchlist"])
     response_model=ApiResponse[WatchlistResponse],
     status_code=status.HTTP_201_CREATED,
 )
-def create_watchlist_item(
+async def create_watchlist_item(
     payload: WatchlistCreateRequest,
     current_user: CurrentUser,
-    db: DBSession,
+    db: AsyncDBSession,
 ):
-    item = WatchlistService(db).create_watchlist_item(
+    item =await AsyncWatchlistService(db).create_watchlist_item(
         user=current_user,
         payload=payload,
     )
@@ -36,11 +36,11 @@ def create_watchlist_item(
     summary="List My Watchlist Items",
     response_model=ApiResponse[list[WatchlistResponse]],
 )
-def list_my_watchlist_items(
+async def list_my_watchlist_items(
     current_user: CurrentUser,
-    db: DBSession,
+    db: AsyncDBSession,
 ):
-    items = WatchlistService(db).list_my_watchlist(current_user)
+    items = await AsyncWatchlistService(db).list_my_watchlist(current_user)
     return success_response(
         data=[WatchlistResponse.model_validate(item) for item in items]
     )
@@ -51,12 +51,12 @@ def list_my_watchlist_items(
     summary="Get My Watchlist Item",
     response_model=ApiResponse[WatchlistResponse],
 )
-def get_my_watchlist_item(
+async def get_my_watchlist_item(
     item_id: int,
     current_user: CurrentUser,
-    db: DBSession,
+    db: AsyncDBSession,
 ):
-    item = WatchlistService(db).get_my_watchlist_item(
+    item = await AsyncWatchlistService(db).get_my_watchlist_item(
         user=current_user,
         item_id=item_id,
     )
@@ -68,13 +68,13 @@ def get_my_watchlist_item(
     summary="Update My Watchlist Item",
     response_model=ApiResponse[WatchlistResponse],
 )
-def update_my_watchlist_item(
+async def update_my_watchlist_item(
     item_id: int,
     payload: WatchlistUpdateRequest,
     current_user: CurrentUser,
-    db: DBSession,
+    db: AsyncDBSession,
 ):
-    item = WatchlistService(db).update_watchlist_item(
+    item = await AsyncWatchlistService(db).update_watchlist_item(
         user=current_user,
         item_id=item_id,
         payload=payload,
@@ -87,12 +87,12 @@ def update_my_watchlist_item(
     summary="Delete My Watchlist Item",
     response_model=ApiResponse[dict[str, str]],
 )
-def delete_my_watchlist_item(
+async def delete_my_watchlist_item(
     item_id: int,
     current_user: CurrentUser,
-    db: DBSession,
+    db: AsyncDBSession,
 ):
-    WatchlistService(db).delete_watchlist_item(
+    await AsyncWatchlistService(db).delete_watchlist_item(
         user=current_user,
         item_id=item_id,
     )

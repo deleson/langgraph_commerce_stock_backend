@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.deps import CurrentToken, CurrentUser, DBSession
+from app.api.deps import AsyncDBSession, CurrentToken, CurrentUser, DBSession
 from app.schemas.auth import (
     LogoutRequest,
     RefreshTokenRequest,
@@ -10,7 +10,7 @@ from app.schemas.auth import (
 )
 from app.schemas.common import ApiResponse
 from app.schemas.user import UserResponse
-from app.services.auth_service import AuthService
+from app.services.auth_service import AsyncAuthService, AuthService
 from app.utils.responses import success_response
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -21,11 +21,11 @@ router = APIRouter(prefix="/auth", tags=["auth"])
     summary="Register User",
     response_model=ApiResponse[UserResponse],
 )
-def register_user(
+async def register_user(
     payload: UserRegisterRequest,
-    db: DBSession,
+    db: AsyncDBSession,
 ):
-    user = AuthService(db).register_user(payload)
+    user = await AsyncAuthService(db).register_user(payload)
     return success_response(data=UserResponse.model_validate(user))
 
 
@@ -34,12 +34,13 @@ def register_user(
     summary="Login User",
     response_model=ApiResponse[TokenPairResponse],
 )
-def login_user(
+async def login_user(
     payload: UserLoginRequest,
-    db: DBSession,
+    db: AsyncDBSession,
 ):
-    user = AuthService(db).authenticate_user(payload)
-    access_token, refresh_token = AuthService(db).issue_token_pair(user)
+    auth_service = AsyncAuthService(db)
+    user = await auth_service.authenticate_user(payload)
+    access_token, refresh_token = await auth_service.issue_token_pair(user)
 
     return success_response(
         data=TokenPairResponse(
@@ -55,11 +56,13 @@ def login_user(
     summary="Refresh Token Pair",
     response_model=ApiResponse[TokenPairResponse],
 )
-def refresh_token_pair(
+async def refresh_token_pair(
     payload: RefreshTokenRequest,
-    db: DBSession,
+    db: AsyncDBSession,
 ):
-    access_token, refresh_token = AuthService(db).refresh_user_tokens(payload.refresh_token)
+    access_token, refresh_token = await AsyncAuthService(db).refresh_user_tokens(
+        payload.refresh_token
+    )
 
     return success_response(
         data=TokenPairResponse(

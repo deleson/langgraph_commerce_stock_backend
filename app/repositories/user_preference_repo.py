@@ -1,4 +1,5 @@
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.models.user_preference import UserPreference
@@ -36,4 +37,29 @@ class UserPreferenceRepository:
         self.db.add(preference)
         self.db.commit()
         self.db.refresh(preference)
+        return preference
+
+
+class AsyncUserPreferenceRepository:
+    def __init__(self, db: AsyncSession) -> None:
+        self.db = db
+
+    async def create_default(
+        self,
+        user_id: int,
+        *,
+        timezone: str = "Asia/Shanghai",
+        risk_preference: str = "balanced",
+    ) -> UserPreference:
+        preference = UserPreference(
+            user_id=user_id,
+            risk_preference=risk_preference,
+            timezone=timezone,
+            daily_report_enabled=False,
+            abnormal_alert_enabled=False,
+            default_watchlist_alert_enabled=False,
+        )
+        self.db.add(preference)
+        await self.db.commit()
+        await self.db.refresh(preference)
         return preference

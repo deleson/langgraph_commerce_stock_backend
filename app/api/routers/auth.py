@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.deps import AsyncDBSession, CurrentToken, AsyncCurrentUser, DBSession
+from app.api.deps import AsyncDBSession, CurrentToken, AsyncCurrentUser
 from app.schemas.auth import (
     LogoutRequest,
     RefreshTokenRequest,
@@ -10,7 +10,7 @@ from app.schemas.auth import (
 )
 from app.schemas.common import ApiResponse
 from app.schemas.user import UserResponse
-from app.services.auth_service import AsyncAuthService, AuthService
+from app.services.auth_service import AsyncAuthService
 from app.utils.responses import success_response
 
 router = APIRouter(prefix="/auth", tags=["auth"])

@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.deps import AsyncDBSession, CurrentToken, CurrentUser, DBSession
+from app.api.deps import AsyncDBSession, CurrentToken, AsyncCurrentUser, DBSession
 from app.schemas.auth import (
     LogoutRequest,
     RefreshTokenRequest,
@@ -78,11 +78,11 @@ async def refresh_token_pair(
     summary="Logout Current Session",
     response_model=ApiResponse[dict[str, str]],
 )
-def logout_user(
+async def logout_user(
     payload: LogoutRequest,
-    db: DBSession,
-    current_user: CurrentUser,
+    db: AsyncDBSession,
+    current_user: AsyncCurrentUser,
     current_token: CurrentToken,
 ):
-    AuthService(db).logout_user(payload.refresh_token, current_token)
+    await AsyncAuthService(db).logout_user(payload.refresh_token, current_token)
     return success_response(data={"message": "logout success"})

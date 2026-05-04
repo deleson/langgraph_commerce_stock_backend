@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Query
 
-from app.api.deps import CurrentUser, AsyncDBSession
+from app.api.deps import AsyncCurrentUser, AsyncDBSession
 from app.schemas.common import ApiResponse
 from app.schemas.notification import NotificationResponse
 from app.services.notification_service import AsyncNotificationService
@@ -15,7 +15,7 @@ router = APIRouter(prefix="/notifications", tags=["notifications"])
     response_model=ApiResponse[list[NotificationResponse]],
 )
 async def list_my_notifications(
-    current_user: CurrentUser,
+    current_user: AsyncCurrentUser,
     db: AsyncDBSession,
     unread_only: bool = Query(default=False, description="Only return unread notifications"),
 ):
@@ -39,7 +39,7 @@ async def list_my_notifications(
 )
 async def get_my_notification(
     notification_id: int,
-    current_user: CurrentUser,
+    current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ):
     notification = await AsyncNotificationService(db).get_my_notification(
@@ -56,7 +56,7 @@ async def get_my_notification(
 )
 async def mark_my_notification_as_read(
     notification_id: int,
-    current_user: CurrentUser,
+    current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ):
     # Mark-read is idempotent: reading an already-read notification returns it unchanged.
@@ -73,7 +73,7 @@ async def mark_my_notification_as_read(
     response_model=ApiResponse[dict[str, int]],
 )
 async def mark_all_my_notifications_as_read(
-    current_user: CurrentUser,
+    current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ):
     updated_count = await AsyncNotificationService(db).mark_all_my_notifications_as_read(current_user)

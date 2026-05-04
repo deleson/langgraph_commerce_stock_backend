@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.deps import CurrentUser,AsyncDBSession
+from app.api.deps import AsyncCurrentUser,AsyncDBSession
 from app.schemas.common import ApiResponse
 from app.schemas.preference import UserPreferenceResponse,UserPreferenceUpdateRequest
 from app.services.user_preference_service import AsyncUserPreferenceService
@@ -13,7 +13,7 @@ router = APIRouter(prefix="/preferences",tags=["preferences"])
     response_model=ApiResponse[UserPreferenceResponse],
 )
 async def get_my_preference(
-    current_user: CurrentUser,
+    current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ):
     preference = await AsyncUserPreferenceService(db).get_or_create_my_preference(
@@ -29,7 +29,7 @@ async def get_my_preference(
 )
 async def update_my_preference(
     payload: UserPreferenceUpdateRequest,
-    current_user: CurrentUser,
+    current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ):
     preference = await AsyncUserPreferenceService(db).update_my_preference(

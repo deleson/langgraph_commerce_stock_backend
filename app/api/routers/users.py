@@ -1,9 +1,9 @@
 from fastapi import APIRouter
 
-from app.api.deps import CurrentUser,DBSession
+from app.api.deps import AsyncCurrentUser,AsyncDBSession
 from app.schemas.common import ApiResponse
 from app.schemas.user import UserResponse,UserUpdateRequest
-from app.services.user_service import UserService
+from app.services.user_service import AsyncUserService
 from app.utils.responses import success_response
 
 router = APIRouter(prefix="/users",tags=["users"])
@@ -13,8 +13,8 @@ router = APIRouter(prefix="/users",tags=["users"])
     summary="Get Current User",
     response_model=ApiResponse[UserResponse],
 )
-def get_current_user_profile(
-        current_user:CurrentUser,
+async def get_current_user_profile(
+        current_user:AsyncCurrentUser,
 ):
     return success_response(data=UserResponse.model_validate(current_user))
 
@@ -23,11 +23,11 @@ def get_current_user_profile(
     summary="update Current User Profile",
     response_model=ApiResponse[UserResponse]
 )
-def update_current_user_profile(
+async def update_current_user_profile(
         payload:UserUpdateRequest,
-        current_user:CurrentUser,
-        db:DBSession,
+        current_user:AsyncCurrentUser,
+        db:AsyncDBSession,
 ):
-    user = UserService(db).update_user_profile(current_user,payload)
+    user = await AsyncUserService(db).update_user_profile(current_user,payload)
     return success_response(data=UserResponse.model_validate(user))
 

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, status
 
-from app.api.deps import CurrentUser, AsyncDBSession
+from app.api.deps import AsyncCurrentUser, AsyncDBSession
 from app.schemas.common import ApiResponse
 from app.schemas.stock_analysis import StockAnalysisRequest, StockAnalysisResponse
 from app.services.stock_analysis_service import AsyncStockAnalysisService
@@ -17,7 +17,7 @@ router = APIRouter(prefix="/analysis", tags=["stock-analysis"])
 )
 async def analyze_stock(
     payload: StockAnalysisRequest,
-    current_user: CurrentUser,
+    current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ):
     # Stock analysis is user-scoped: records and notifications belong to CurrentUser.

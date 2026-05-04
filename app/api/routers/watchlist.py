@@ -1,6 +1,6 @@
 from fastapi import APIRouter, status
 
-from app.api.deps import CurrentUser, AsyncDBSession
+from app.api.deps import AsyncCurrentUser, AsyncDBSession
 from app.schemas.common import ApiResponse
 from app.schemas.watchlist import (
     WatchlistCreateRequest,
@@ -21,7 +21,7 @@ router = APIRouter(prefix="/watchlist", tags=["watchlist"])
 )
 async def create_watchlist_item(
     payload: WatchlistCreateRequest,
-    current_user: CurrentUser,
+    current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ):
     item =await AsyncWatchlistService(db).create_watchlist_item(
@@ -37,7 +37,7 @@ async def create_watchlist_item(
     response_model=ApiResponse[list[WatchlistResponse]],
 )
 async def list_my_watchlist_items(
-    current_user: CurrentUser,
+    current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ):
     items = await AsyncWatchlistService(db).list_my_watchlist(current_user)
@@ -53,7 +53,7 @@ async def list_my_watchlist_items(
 )
 async def get_my_watchlist_item(
     item_id: int,
-    current_user: CurrentUser,
+    current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ):
     item = await AsyncWatchlistService(db).get_my_watchlist_item(
@@ -71,7 +71,7 @@ async def get_my_watchlist_item(
 async def update_my_watchlist_item(
     item_id: int,
     payload: WatchlistUpdateRequest,
-    current_user: CurrentUser,
+    current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ):
     item = await AsyncWatchlistService(db).update_watchlist_item(
@@ -89,7 +89,7 @@ async def update_my_watchlist_item(
 )
 async def delete_my_watchlist_item(
     item_id: int,
-    current_user: CurrentUser,
+    current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ):
     await AsyncWatchlistService(db).delete_watchlist_item(

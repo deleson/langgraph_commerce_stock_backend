@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.deps import CurrentUser, AsyncDBSession
+from app.api.deps import AsyncCurrentUser, AsyncDBSession
 from app.schemas.analysis_record import AnalysisRecordResponse
 from app.schemas.common import ApiResponse
 from app.services.analysis_record_service import AsyncAnalysisRecordService
@@ -15,7 +15,7 @@ router = APIRouter(prefix="/analysis-records", tags=["analysis-records"])
     response_model=ApiResponse[list[AnalysisRecordResponse]],
 )
 async def list_my_analysis_records(
-    current_user: CurrentUser,
+    current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ):
     # Analysis records are user-owned audit data, so every query is scoped by CurrentUser.
@@ -32,7 +32,7 @@ async def list_my_analysis_records(
 )
 async def get_my_analysis_record(
     record_id: int,
-    current_user: CurrentUser,
+    current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ):
     # Do not query by record_id alone; user scope prevents horizontal privilege leaks.

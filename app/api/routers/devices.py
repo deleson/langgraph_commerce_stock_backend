@@ -1,6 +1,6 @@
 from fastapi import APIRouter, status
 
-from app.api.deps import CurrentUser, AsyncDBSession
+from app.api.deps import AsyncCurrentUser, AsyncDBSession
 from app.schemas.common import ApiResponse
 from app.schemas.device import DeviceRegisterRequest, DeviceResponse
 from app.services.device_service import AsyncDeviceService
@@ -17,7 +17,7 @@ router = APIRouter(prefix="/devices", tags=["devices"])
 )
 async def register_or_update_my_device(
     payload: DeviceRegisterRequest,
-    current_user: CurrentUser,
+    current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ):
     # Device registration is idempotent: the same platform/token updates the existing row.
@@ -34,7 +34,7 @@ async def register_or_update_my_device(
     response_model=ApiResponse[list[DeviceResponse]],
 )
 async def list_my_devices(
-    current_user: CurrentUser,
+    current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ):
     devices = await AsyncDeviceService(db).list_my_devices(current_user)
@@ -50,7 +50,7 @@ async def list_my_devices(
 )
 async def deactivate_my_device(
     device_id: int,
-    current_user: CurrentUser,
+    current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ):
     # Deactivation keeps the device record for audit/history but excludes it from future push.

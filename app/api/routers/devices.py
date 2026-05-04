@@ -1,9 +1,9 @@
 from fastapi import APIRouter, status
 
-from app.api.deps import CurrentUser, DBSession
+from app.api.deps import CurrentUser, AsyncDBSession
 from app.schemas.common import ApiResponse
 from app.schemas.device import DeviceRegisterRequest, DeviceResponse
-from app.services.device_service import DeviceService
+from app.services.device_service import AsyncDeviceService
 from app.utils.responses import success_response
 
 router = APIRouter(prefix="/devices", tags=["devices"])
@@ -15,13 +15,13 @@ router = APIRouter(prefix="/devices", tags=["devices"])
     response_model=ApiResponse[DeviceResponse],
     status_code=status.HTTP_201_CREATED,
 )
-def register_or_update_my_device(
+async def register_or_update_my_device(
     payload: DeviceRegisterRequest,
     current_user: CurrentUser,
-    db: DBSession,
+    db: AsyncDBSession,
 ):
     # Device registration is idempotent: the same platform/token updates the existing row.
-    device = DeviceService(db).register_or_update_device(
+    device = await AsyncDeviceService(db).register_or_update_device(
         user=current_user,
         payload=payload,
     )
@@ -33,11 +33,11 @@ def register_or_update_my_device(
     summary="List My Devices",
     response_model=ApiResponse[list[DeviceResponse]],
 )
-def list_my_devices(
+async def list_my_devices(
     current_user: CurrentUser,
-    db: DBSession,
+    db: AsyncDBSession,
 ):
-    devices = DeviceService(db).list_my_devices(current_user)
+    devices = await AsyncDeviceService(db).list_my_devices(current_user)
     return success_response(
         data=[DeviceResponse.model_validate(device) for device in devices]
     )
@@ -48,13 +48,13 @@ def list_my_devices(
     summary="Deactivate My Device",
     response_model=ApiResponse[DeviceResponse],
 )
-def deactivate_my_device(
+async def deactivate_my_device(
     device_id: int,
     current_user: CurrentUser,
-    db: DBSession,
+    db: AsyncDBSession,
 ):
     # Deactivation keeps the device record for audit/history but excludes it from future push.
-    device = DeviceService(db).deactivate_my_device(
+    device = await AsyncDeviceService(db).deactivate_my_device(
         user=current_user,
         device_id=device_id,
     )

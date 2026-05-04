@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.device import Device
 
@@ -76,4 +77,79 @@ class DeviceRepository:
         self.db.add(device)
         self.db.commit()
         self.db.refresh(device)
+        return device
+
+class AsyncDeviceRepository:
+    def __init__(self, db: AsyncSession) -> None:
+        self.db = db
+
+    async def list_by_user_id(self, user_id: int) -> list[Device]:
+        stmt = (
+            select(Device)
+            .where(Device.user_id == user_id)
+            .order_by(Device.created_at.desc())
+        )
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_by_id_for_user(
+        self,
+        *,
+        device_id: int,
+        user_id: int,
+    ) -> Device | None:
+        stmt = select(Device).where(
+            Device.id == device_id,
+            Device.user_id == user_id,
+        )
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_by_platform_token_for_user(
+        self,
+        *,
+        user_id: int,
+        platform: str,
+        push_token: str,
+    ) -> Device | None:
+        stmt = select(Device).where(
+            Device.user_id == user_id,
+            Device.platform == platform,
+            Device.push_token == push_token,
+        )
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def create(
+        self,
+        *,
+        user_id: int,
+        platform: str,
+        push_token: str,
+        device_name: str | None = None,
+    ) -> Device:
+        device = Device(
+            user_id=user_id,
+            platform=platform,
+            push_token=push_token,
+            device_name=device_name,
+            is_active=True,
+            last_seen_at=datetime.now(timezone.utc),
+        )
+        self.db.add(device)
+        await self.db.commit()
+        await self.db.refresh(device)
+        return device
+
+    async def save(self, device: Device) -> Device:
+        self.db.add(device)
+        await self.db.commit()
+        await self.db.refresh(device)
+        return device
+
+    async def deactivate(self, device: Device) -> Device:
+        device.is_active = False
+        self.db.add(device)
+        await self.db.commit()
+        await self.db.refresh(device)
         return device

@@ -40,6 +40,25 @@ class Settings(BaseSettings):
     http_client_timeout_seconds: float = Field(default=20.0)
     http_client_connect_timeout_seconds: float = Field(default=5.0)
 
+    market_data_enable_real_provider: bool = Field(default=False)
+    market_data_primary_provider: str = Field(default="mock")
+    market_data_fallback_providers: str = Field(default="mock")
+    market_data_default_market: str = Field(default="CN")
+    market_data_default_timeframe: str = Field(default="1d")
+    market_data_candle_sync_limit: int = Field(default=250)
+    market_data_quote_cache_ttl_seconds: int = Field(default=60)
+    market_data_request_timeout_seconds: float = Field(default=20.0)
+
+    baostock_enabled: bool = Field(default=True)
+
+    akshare_enabled: bool = Field(default=True)
+
+    tushare_enabled: bool = Field(default=False)
+    tushare_token: SecretStr | None = Field(default=None)
+
+    alpha_vantage_enabled: bool = Field(default=False)
+    alpha_vantage_api_key: SecretStr | None = Field(default=None)
+
 
     api_v1_prefix: str = Field(default="/api/v1")
 

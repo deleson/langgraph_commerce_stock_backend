@@ -24,6 +24,16 @@ from app.schemas.stock_analysis import (
     StockAnalysisResponse,
     StockAnalysisResult,
 )
+from app.schemas.market import (
+    CandleTimeframe,
+    MarketCandle,
+    MarketCandleListResponse,
+    MarketIndicatorResponse,
+    MarketOverviewResponse,
+    MarketQuoteResponse,
+    MarketStockSearchItem,
+    MarketSymbolRequest,
+)
 from app.schemas.watchlist import (
     WatchlistCreateRequest,
     WatchlistResponse,
@@ -60,4 +70,12 @@ __all__ = [
     "StockAnalysisRequest",
     "StockAnalysisResponse",
     "StockAnalysisResult",
+    "CandleTimeframe",
+    "MarketCandle",
+    "MarketCandleListResponse",
+    "MarketIndicatorResponse",
+    "MarketOverviewResponse",
+    "MarketQuoteResponse",
+    "MarketStockSearchItem",
+    "MarketSymbolRequest",
 ]

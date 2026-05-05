@@ -1,0 +1,173 @@
+from fastapi import APIRouter, Path, Query
+
+from app.api.deps import AsyncCurrentUser
+from app.schemas.common import ApiResponse
+from app.schemas.market import (
+    CandleTimeframe,
+    MarketCandleListResponse,
+    MarketCode,
+    MarketIndicatorResponse,
+    MarketOverviewResponse,
+    MarketQuoteResponse,
+    MarketStockSearchItem,
+)
+from app.services.market_service import MarketService
+from app.utils.responses import success_response
+
+
+router = APIRouter(prefix="/market", tags=["market"])
+
+
+@router.get(
+    "/stocks/search",
+    summary="Search Stocks",
+    response_model=ApiResponse[list[MarketStockSearchItem]],
+)
+async def search_stocks(
+    current_user: AsyncCurrentUser,
+    keyword: str | None = Query(
+        default=None,
+        max_length=50,
+        description="Search keyword for stock symbol or name",
+    ),
+    market: MarketCode | None = Query(
+        default=None,
+        description="Optional market filter: US, CN, or HK",
+    ),
+):
+    # Authentication is required now so this endpoint can support quotas later.
+    _ = current_user
+
+    stocks = await MarketService().search_stocks(
+        keyword=keyword,
+        market=market,
+    )
+    return success_response(data=stocks)
+
+
+@router.get(
+    "/stocks/{symbol}/quote",
+    summary="Get Stock Quote",
+    response_model=ApiResponse[MarketQuoteResponse],
+)
+async def get_stock_quote(
+    current_user: AsyncCurrentUser,
+    symbol: str = Path(
+        min_length=1,
+        max_length=20,
+        description="Stock symbol, for example AAPL, 600519, or 0700",
+    ),
+    market: MarketCode = Query(
+        default="US",
+        description="Market code: US, CN, or HK",
+    ),
+):
+    _ = current_user
+
+    quote = await MarketService().get_quote(
+        symbol=symbol,
+        market=market,
+    )
+    return success_response(data=quote)
+
+
+@router.get(
+    "/stocks/{symbol}/candles",
+    summary="Get Stock Candles",
+    response_model=ApiResponse[MarketCandleListResponse],
+)
+async def get_stock_candles(
+    current_user: AsyncCurrentUser,
+    symbol: str = Path(
+        min_length=1,
+        max_length=20,
+        description="Stock symbol, for example AAPL, 600519, or 0700",
+    ),
+    market: MarketCode = Query(
+        default="US",
+        description="Market code: US, CN, or HK",
+    ),
+    timeframe: CandleTimeframe = Query(
+        default="1d",
+        description="Candle timeframe: 1d, 1h, or 5m",
+    ),
+    limit: int = Query(
+        default=30,
+        ge=1,
+        le=200,
+        description="Number of candles to return",
+    ),
+):
+    _ = current_user
+
+    candles = await MarketService().get_candles(
+        symbol=symbol,
+        market=market,
+        timeframe=timeframe,
+        limit=limit,
+    )
+    return success_response(data=candles)
+
+
+@router.get(
+    "/stocks/{symbol}/indicators",
+    summary="Get Stock Indicators",
+    response_model=ApiResponse[MarketIndicatorResponse],
+)
+async def get_stock_indicators(
+    current_user: AsyncCurrentUser,
+    symbol: str = Path(
+        min_length=1,
+        max_length=20,
+        description="Stock symbol, for example AAPL, 600519, or 0700",
+    ),
+    market: MarketCode = Query(
+        default="US",
+        description="Market code: US, CN, or HK",
+    ),
+):
+    _ = current_user
+
+    indicators = await MarketService().get_indicators(
+        symbol=symbol,
+        market=market,
+    )
+    return success_response(data=indicators)
+
+
+@router.get(
+    "/stocks/{symbol}/overview",
+    summary="Get Stock Overview",
+    response_model=ApiResponse[MarketOverviewResponse],
+)
+async def get_stock_overview(
+    current_user: AsyncCurrentUser,
+    symbol: str = Path(
+        min_length=1,
+        max_length=20,
+        description="Stock symbol, for example AAPL, 600519, or 0700",
+    ),
+    market: MarketCode = Query(
+        default="US",
+        description="Market code: US, CN, or HK",
+    ),
+    timeframe: CandleTimeframe = Query(
+        default="1d",
+        description="Candle timeframe: 1d, 1h, or 5m",
+    ),
+    limit: int = Query(
+        default=30,
+        ge=1,
+        le=200,
+        description="Number of candles to include in overview",
+    ),
+):
+    _ = current_user
+
+    overview = await MarketService().get_overview(
+        symbol=symbol,
+        market=market,
+        timeframe=timeframe,
+        limit=limit,
+    )
+    return success_response(data=overview)

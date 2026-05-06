@@ -40,6 +40,19 @@ from app.schemas.watchlist import (
     WatchlistUpdateRequest,
 )
 
+from app.schemas.market_data import (
+    AdjustType,
+    MarketCandleCreate,
+    MarketCandleDB,
+    MarketCandleQuery,
+    MarketDataSource,
+    MarketProviderCandle,
+    MarketSymbolCreate,
+    MarketSymbolDB,
+    MarketSymbolUpdate,
+)
+
+
 __all__ = [
     "ApiResponse",
     "ErrorDetail",
@@ -78,4 +91,13 @@ __all__ = [
     "MarketQuoteResponse",
     "MarketStockSearchItem",
     "MarketSymbolRequest",
+    "AdjustType",
+    "MarketCandleCreate",
+    "MarketCandleDB",
+    "MarketCandleQuery",
+    "MarketDataSource",
+    "MarketProviderCandle",
+    "MarketSymbolCreate",
+    "MarketSymbolDB",
+    "MarketSymbolUpdate",
 ]

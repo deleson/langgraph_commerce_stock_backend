@@ -4,7 +4,7 @@ from app.core.redis import get_redis_client
 from app.core.security import decode_access_token
 
 
-ACCESS_TOKEN_BLACKLIST_PRFEIX = "auth:balcklist:access"
+ACCESS_TOKEN_BLACKLIST_PRFEIX = "auth:blacklist:access"
 
 class TokenBlacklistService:
     def __init__(self) -> None:

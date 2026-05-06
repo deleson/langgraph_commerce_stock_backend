@@ -5,6 +5,7 @@ from app.repositories.user_preference_repo import UserPreferenceRepository
 from app.repositories.user_repo import UserRepository
 from app.repositories.user_session_repo import UserSessionRepository
 from app.repositories.watchlist_repo import WatchlistRepository
+from app.repositories.market_repo import AsyncMarketRepository
 
 __all__ = [
     "AnalysisRecordRepository",
@@ -14,4 +15,5 @@ __all__ = [
     "UserSessionRepository",
     "WatchlistRepository",
     "UserPreferenceRepository",
+    "AsyncMarketRepository",
 ]

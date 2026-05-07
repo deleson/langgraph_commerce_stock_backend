@@ -10,7 +10,13 @@ from app.services.watchlist_service import WatchlistService
 from app.services.market_data_service import MockMarketDataService
 from app.services.indicator_service import IndicatorService
 from app.services.market_service import MarketService
-from app.services.market_providers import MarketDataProvider,MockMarketDataProvider,BaoStockProvider,TushareProvider
+from app.services.market_providers import (
+    BaoStockProvider,
+    MarketDataProvider,
+    MockMarketDataProvider,
+    TushareProvider,
+)
+from app.services.market_data_quality_service import MarketDataQualityService
 # from app.services.stock_analysis_service import StockAnalysisService
 
 
@@ -31,5 +37,6 @@ __all__ = [
     "MockMarketDataProvider",
     "BaoStockProvider",
     "TushareProvider",
+    "MarketDataQualityService",
     # "StockAnalysisService",
 ]

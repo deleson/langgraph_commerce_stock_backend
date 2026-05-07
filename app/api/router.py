@@ -10,6 +10,7 @@ from app.api.routers.preferences import router as preferences_router
 from app.api.routers.stock_analysis import router as stock_analysis_router
 from app.api.routers.users import router as users_router
 from app.api.routers.watchlist import router as watchlist_router
+from app.api.routers.market_sync import router as market_sync_router
 from app.core.config import get_settings
 
 settings = get_settings()
@@ -25,3 +26,4 @@ api_router.include_router(notifications_router)
 api_router.include_router(devices_router)
 api_router.include_router(stock_analysis_router)
 api_router.include_router(market_router)
+api_router.include_router(market_sync_router)

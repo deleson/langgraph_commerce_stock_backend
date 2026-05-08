@@ -51,6 +51,20 @@ from app.schemas.market_data import (
     MarketSymbolDB,
     MarketSymbolUpdate,
 )
+from app.schemas.technical_indicator import (
+    IndicatorStrength,
+    MacdSignal,
+    MacdSnapshot,
+    MomentumSnapshot,
+    MovingAverageSnapshot,
+    RsiSnapshot,
+    RsiStatus,
+    TechnicalIndicatorResponse,
+    TechnicalIndicatorSummary,
+    VolatilitySnapshot,
+    VolumeFactorSnapshot,
+    VolumeStatus,
+)
 
 
 __all__ = [
@@ -100,4 +114,16 @@ __all__ = [
     "MarketSymbolCreate",
     "MarketSymbolDB",
     "MarketSymbolUpdate",
+    "IndicatorStrength",
+    "MacdSignal",
+    "MacdSnapshot",
+    "MomentumSnapshot",
+    "MovingAverageSnapshot",
+    "RsiSnapshot",
+    "RsiStatus",
+    "TechnicalIndicatorResponse",
+    "TechnicalIndicatorSummary",
+    "VolatilitySnapshot",
+    "VolumeFactorSnapshot",
+    "VolumeStatus",
 ]

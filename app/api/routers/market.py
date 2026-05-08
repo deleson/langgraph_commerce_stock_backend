@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Path, Query
 
-from app.api.deps import AsyncCurrentUser
+from app.api.deps import AsyncCurrentUser, AsyncDBSession
 from app.schemas.common import ApiResponse
 from app.schemas.market import (
     CandleTimeframe,
@@ -25,6 +25,7 @@ router = APIRouter(prefix="/market", tags=["market"])
 )
 async def search_stocks(
     current_user: AsyncCurrentUser,
+    db: AsyncDBSession,
     keyword: str | None = Query(
         default=None,
         max_length=50,
@@ -35,10 +36,9 @@ async def search_stocks(
         description="Optional market filter: US, CN, or HK",
     ),
 ):
-    # Authentication is required now so this endpoint can support quotas later.
     _ = current_user
 
-    stocks = await MarketService().search_stocks(
+    stocks = await MarketService(db).search_stocks(
         keyword=keyword,
         market=market,
     )
@@ -52,6 +52,7 @@ async def search_stocks(
 )
 async def get_stock_quote(
     current_user: AsyncCurrentUser,
+    db: AsyncDBSession,
     symbol: str = Path(
         min_length=1,
         max_length=20,
@@ -64,7 +65,7 @@ async def get_stock_quote(
 ):
     _ = current_user
 
-    quote = await MarketService().get_quote(
+    quote = await MarketService(db).get_quote(
         symbol=symbol,
         market=market,
     )
@@ -78,6 +79,7 @@ async def get_stock_quote(
 )
 async def get_stock_candles(
     current_user: AsyncCurrentUser,
+    db: AsyncDBSession,
     symbol: str = Path(
         min_length=1,
         max_length=20,
@@ -100,7 +102,7 @@ async def get_stock_candles(
 ):
     _ = current_user
 
-    candles = await MarketService().get_candles(
+    candles = await MarketService(db).get_candles(
         symbol=symbol,
         market=market,
         timeframe=timeframe,
@@ -116,6 +118,7 @@ async def get_stock_candles(
 )
 async def get_stock_indicators(
     current_user: AsyncCurrentUser,
+    db: AsyncDBSession,
     symbol: str = Path(
         min_length=1,
         max_length=20,
@@ -128,7 +131,7 @@ async def get_stock_indicators(
 ):
     _ = current_user
 
-    indicators = await MarketService().get_indicators(
+    indicators = await MarketService(db).get_indicators(
         symbol=symbol,
         market=market,
     )
@@ -142,6 +145,7 @@ async def get_stock_indicators(
 )
 async def get_stock_overview(
     current_user: AsyncCurrentUser,
+    db: AsyncDBSession,
     symbol: str = Path(
         min_length=1,
         max_length=20,
@@ -164,7 +168,7 @@ async def get_stock_overview(
 ):
     _ = current_user
 
-    overview = await MarketService().get_overview(
+    overview = await MarketService(db).get_overview(
         symbol=symbol,
         market=market,
         timeframe=timeframe,

@@ -1,5 +1,13 @@
+from decimal import Decimal
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.market_candle import MarketCandle as MarketCandleModel
+from app.models.market_symbol import MarketSymbol
+from app.repositories.market_repo import AsyncMarketRepository
 from app.schemas.market import (
     CandleTimeframe,
+    MarketCandle,
     MarketCandleListResponse,
     MarketCode,
     MarketIndicatorResponse,
@@ -7,6 +15,7 @@ from app.schemas.market import (
     MarketQuoteResponse,
     MarketStockSearchItem,
 )
+from app.schemas.market_data import MarketCandleQuery
 from app.schemas.stock_analysis import MarketSnapshot
 from app.services.indicator_service import IndicatorService
 from app.services.market_data_service import MockMarketDataService
@@ -15,23 +24,41 @@ from app.services.market_data_service import MockMarketDataService
 class MarketService:
     """Coordinate market data for API responses.
 
-    This service keeps routers thin and hides the current mock data source.
-    Later, MockMarketDataService can be replaced by a real market data provider.
+    Market API now reads PostgreSQL first and falls back to mock data.
+    This keeps the public API stable while real providers are introduced.
     """
 
     def __init__(
         self,
+        db: AsyncSession | None = None,
         market_data_service: MockMarketDataService | None = None,
         indicator_service: IndicatorService | None = None,
+        repository: AsyncMarketRepository | None = None,
     ) -> None:
+        self.db = db
         self.market_data_service = market_data_service or MockMarketDataService()
         self.indicator_service = indicator_service or IndicatorService()
+        self.repository = repository or (AsyncMarketRepository(db) if db is not None else None)
 
     async def search_stocks(
         self,
         keyword: str | None = None,
         market: MarketCode | None = None,
     ) -> list[MarketStockSearchItem]:
+        if self.repository is not None:
+            db_symbols = await self.repository.list_symbols(
+                market=market,
+                keyword=keyword,
+                active_only=True,
+                limit=50,
+            )
+
+            if db_symbols:
+                return [
+                    self._build_search_item_from_model(symbol)
+                    for symbol in db_symbols
+                ]
+
         return self.market_data_service.search_stocks(
             keyword=keyword,
             market=market,
@@ -42,6 +69,14 @@ class MarketService:
         symbol: str,
         market: MarketCode,
     ) -> MarketQuoteResponse:
+        if self.repository is not None:
+            db_quote = await self._get_quote_from_db(
+                symbol=symbol,
+                market=market,
+            )
+            if db_quote is not None:
+                return db_quote
+
         snapshot = self.market_data_service.get_snapshot(
             symbol=symbol,
             market=market,
@@ -56,6 +91,16 @@ class MarketService:
         timeframe: CandleTimeframe = "1d",
         limit: int = 30,
     ) -> MarketCandleListResponse:
+        if self.repository is not None:
+            db_candles = await self._get_candles_from_db(
+                symbol=symbol,
+                market=market,
+                timeframe=timeframe,
+                limit=limit,
+            )
+            if db_candles is not None:
+                return db_candles
+
         candles = self.market_data_service.get_candles(
             symbol=symbol,
             market=market,
@@ -79,7 +124,7 @@ class MarketService:
         symbol: str,
         market: MarketCode,
     ) -> MarketIndicatorResponse:
-        snapshot = self.market_data_service.get_snapshot(
+        snapshot = await self._get_market_snapshot(
             symbol=symbol,
             market=market,
         )
@@ -94,7 +139,7 @@ class MarketService:
             moving_average_20=indicators.moving_average_20,
             volatility_level=indicators.volatility_level,
             trend=indicators.trend,
-            source="mock",
+            source="db" if self.repository is not None else "mock",
         )
 
     async def get_overview(
@@ -117,6 +162,155 @@ class MarketService:
             quote=quote,
             indicators=indicators,
             candles=candles_response.candles,
+        )
+
+    async def _get_quote_from_db(
+        self,
+        symbol: str,
+        market: MarketCode,
+    ) -> MarketQuoteResponse | None:
+        if self.repository is None:
+            return None
+
+        normalized_symbol = symbol.strip().upper()
+
+        market_symbol = await self.repository.get_symbol(
+            symbol=normalized_symbol,
+            market=market,
+        )
+        candles = await self.repository.list_candles(
+            MarketCandleQuery(
+                symbol=normalized_symbol,
+                market=market,
+                timeframe="1d",
+                limit=2,
+                adjust_type="none",
+                source=None,
+            )
+        )
+
+        if market_symbol is None or not candles:
+            return None
+
+        latest = candles[-1]
+        previous = candles[-2] if len(candles) >= 2 else latest
+
+        latest_price = self._decimal_to_float(latest.close_price)
+        previous_close = self._decimal_to_float(previous.close_price)
+        price_change = round(latest_price - previous_close, 4)
+        price_change_percent = self._safe_percent(
+            numerator=price_change,
+            denominator=previous_close,
+        )
+
+        return MarketQuoteResponse(
+            symbol=market_symbol.symbol,
+            market=market_symbol.market,
+            name=market_symbol.name,
+            currency=market_symbol.currency,
+            latest_price=latest_price,
+            previous_close=previous_close,
+            open_price=self._decimal_to_float(latest.open_price),
+            high_price=self._decimal_to_float(latest.high_price),
+            low_price=self._decimal_to_float(latest.low_price),
+            volume=latest.volume,
+            price_change=price_change,
+            price_change_percent=price_change_percent,
+            as_of=latest.candle_time,
+            source=latest.source,
+        )
+
+    async def _get_candles_from_db(
+        self,
+        symbol: str,
+        market: MarketCode,
+        timeframe: CandleTimeframe,
+        limit: int,
+    ) -> MarketCandleListResponse | None:
+        if self.repository is None:
+            return None
+
+        normalized_symbol = symbol.strip().upper()
+
+        candles = await self.repository.list_candles(
+            MarketCandleQuery(
+                symbol=normalized_symbol,
+                market=market,
+                timeframe=timeframe,
+                limit=limit,
+                adjust_type="none",
+                source=None,
+            )
+        )
+
+        if not candles:
+            return None
+
+        return MarketCandleListResponse(
+            symbol=normalized_symbol,
+            market=market,
+            timeframe=timeframe,
+            limit=len(candles),
+            candles=[
+                self._build_candle_response(candle)
+                for candle in candles
+            ],
+            source=candles[-1].source,
+        )
+
+    async def _get_market_snapshot(
+        self,
+        symbol: str,
+        market: MarketCode,
+    ) -> MarketSnapshot:
+        db_quote = await self._get_quote_from_db(
+            symbol=symbol,
+            market=market,
+        )
+
+        if db_quote is not None:
+            return MarketSnapshot(
+                symbol=db_quote.symbol,
+                market=db_quote.market,
+                name=db_quote.name,
+                currency=db_quote.currency,
+                latest_price=db_quote.latest_price,
+                previous_close=db_quote.previous_close,
+                open_price=db_quote.open_price,
+                high_price=db_quote.high_price,
+                low_price=db_quote.low_price,
+                volume=db_quote.volume,
+                as_of=db_quote.as_of,
+            )
+
+        return self.market_data_service.get_snapshot(
+            symbol=symbol,
+            market=market,
+        )
+
+    def _build_search_item_from_model(
+        self,
+        symbol: MarketSymbol,
+    ) -> MarketStockSearchItem:
+        return MarketStockSearchItem(
+            symbol=symbol.symbol,
+            market=symbol.market,
+            name=symbol.name,
+            currency=symbol.currency,
+            exchange=symbol.exchange,
+        )
+
+    def _build_candle_response(
+        self,
+        candle: MarketCandleModel,
+    ) -> MarketCandle:
+        return MarketCandle(
+            time=candle.candle_time,
+            open_price=self._decimal_to_float(candle.open_price),
+            high_price=self._decimal_to_float(candle.high_price),
+            low_price=self._decimal_to_float(candle.low_price),
+            close_price=self._decimal_to_float(candle.close_price),
+            volume=candle.volume,
         )
 
     def _build_quote_response(
@@ -148,6 +342,12 @@ class MarketService:
             as_of=snapshot.as_of,
             source="mock",
         )
+
+    def _decimal_to_float(
+        self,
+        value: Decimal,
+    ) -> float:
+        return float(value)
 
     def _safe_percent(
         self,

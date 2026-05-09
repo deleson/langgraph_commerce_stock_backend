@@ -15,10 +15,12 @@ from app.schemas.market import (
     MarketQuoteResponse,
     MarketStockSearchItem,
 )
-from app.schemas.market_data import MarketCandleQuery
+from app.schemas.market_data import AdjustType, MarketCandleQuery, MarketDataSource
 from app.schemas.stock_analysis import MarketSnapshot
+from app.schemas.technical_indicator import TechnicalIndicatorResponse
 from app.services.indicator_service import IndicatorService
 from app.services.market_data_service import MockMarketDataService
+from app.services.technical_indicator_query_service import TechnicalIndicatorQueryService
 
 
 class MarketService:
@@ -148,6 +150,11 @@ class MarketService:
         market: MarketCode,
         timeframe: CandleTimeframe = "1d",
         limit: int = 30,
+        *,
+        include_technical_indicators: bool = False,
+        technical_indicator_limit: int = 120,
+        adjust_type: AdjustType = "none",
+        technical_indicator_source: MarketDataSource | None = None,
     ) -> MarketOverviewResponse:
         quote = await self.get_quote(symbol=symbol, market=market)
         indicators = await self.get_indicators(symbol=symbol, market=market)
@@ -158,10 +165,21 @@ class MarketService:
             limit=limit,
         )
 
+        technical_indicators = await self._get_technical_indicators_for_overview(
+            symbol=symbol,
+            market=market,
+            timeframe=timeframe,
+            include_technical_indicators=include_technical_indicators,
+            technical_indicator_limit=technical_indicator_limit,
+            adjust_type=adjust_type,
+            technical_indicator_source=technical_indicator_source,
+        )
+
         return MarketOverviewResponse(
             quote=quote,
             indicators=indicators,
             candles=candles_response.candles,
+            technical_indicators=technical_indicators,
         )
 
     async def _get_quote_from_db(
@@ -358,3 +376,29 @@ class MarketService:
             return 0.0
 
         return round(numerator / denominator * 100, 4)
+
+    async def _get_technical_indicators_for_overview(
+        self,
+        *,
+        symbol: str,
+        market: MarketCode,
+        timeframe: CandleTimeframe,
+        include_technical_indicators: bool,
+        technical_indicator_limit: int,
+        adjust_type: AdjustType,
+        technical_indicator_source: MarketDataSource | None,
+    ) -> TechnicalIndicatorResponse | None:
+        if not include_technical_indicators:
+            return None
+
+        if self.db is None:
+            return None
+
+        return await TechnicalIndicatorQueryService(self.db).get_summary(
+            symbol=symbol,
+            market=market,
+            timeframe=timeframe,
+            limit=technical_indicator_limit,
+            adjust_type=adjust_type,
+            source=technical_indicator_source,
+        )

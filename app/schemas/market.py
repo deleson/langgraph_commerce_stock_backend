@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
+from app.schemas.technical_indicator import TechnicalIndicatorResponse
 
 
 MarketCode = Literal["US", "CN", "HK"]
@@ -81,3 +82,6 @@ class MarketOverviewResponse(BaseModel):
     quote: MarketQuoteResponse
     indicators: MarketIndicatorResponse
     candles: list[MarketCandle] = Field(default_factory=list)
+    technical_indicators: TechnicalIndicatorResponse | None = None
+
+

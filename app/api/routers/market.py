@@ -11,9 +11,9 @@ from app.schemas.market import (
     MarketQuoteResponse,
     MarketStockSearchItem,
 )
+from app.schemas.market_data import AdjustType, MarketDataSource
 from app.services.market_service import MarketService
 from app.utils.responses import success_response
-
 
 router = APIRouter(prefix="/market", tags=["market"])
 
@@ -165,6 +165,24 @@ async def get_stock_overview(
         le=200,
         description="Number of candles to include in overview",
     ),
+    include_technical_indicators: bool = Query(
+        default=False,
+        description="Whether to include full technical indicator summary",
+    ),
+    technical_indicator_limit: int = Query(
+        default=120,
+        ge=35,
+        le=1000,
+        description="Number of candles used for technical indicator calculation",
+    ),
+    adjust_type: AdjustType = Query(
+        default="none",
+        description="Adjustment type for technical indicators",
+    ),
+    technical_indicator_source: MarketDataSource | None = Query(
+        default=None,
+        description="Optional data source for technical indicators",
+    ),
 ):
     _ = current_user
 
@@ -173,5 +191,9 @@ async def get_stock_overview(
         market=market,
         timeframe=timeframe,
         limit=limit,
+        include_technical_indicators=include_technical_indicators,
+        technical_indicator_limit=technical_indicator_limit,
+        adjust_type=adjust_type,
+        technical_indicator_source=technical_indicator_source,
     )
     return success_response(data=overview)

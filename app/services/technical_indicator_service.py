@@ -7,8 +7,8 @@ from app.schemas.technical_indicator import (
     MovingAverageSnapshot,
     RsiSnapshot,
     VolatilitySnapshot,
+    VolumeFactorSnapshot,
 )
-
 
 class TechnicalIndicatorService:
     def calculate_moving_average(
@@ -122,6 +122,28 @@ class TechnicalIndicatorService:
             ),
         )
 
+    def calculate_volume_factor(
+        self,
+        df: pd.DataFrame,
+    ) -> VolumeFactorSnapshot:
+        self._validate_volume_dataframe(df)
+
+        volume = df["volume"]
+
+        volume_ma5 = self._latest_rolling_mean(volume, window=5)
+        volume_ma20 = self._latest_rolling_mean(volume, window=20)
+        volume_ratio = self._calculate_volume_ratio(
+            latest_volume=self._latest_value(volume),
+            volume_ma20=volume_ma20,
+        )
+
+        return VolumeFactorSnapshot(
+            volume_ma5=volume_ma5,
+            volume_ma20=volume_ma20,
+            volume_ratio=volume_ratio,
+            status=self._classify_volume_status(volume_ratio),
+        )
+
     def calculate_rsi(self, df: pd.DataFrame) -> RsiSnapshot:
         self._validate_price_dataframe(df)
 
@@ -219,6 +241,23 @@ class TechnicalIndicatorService:
 
         if (df["close_price"] <= 0).any():
             raise BadRequestException(message="indicator dataframe contains negative close_price")
+
+
+    def _validate_volume_dataframe(
+        self,
+        df: pd.DataFrame,
+    ) -> None:
+        if df.empty:
+            raise BadRequestException(message="indicator dataframe cannot be empty")
+
+        if "volume" not in df.columns:
+            raise BadRequestException(message="indicator dataframe missing volume column")
+
+        if df["volume"].isna().any():
+            raise BadRequestException(message="indicator dataframe contains invalid volume")
+
+        if (df["volume"] < 0).any():
+            raise BadRequestException(message="indicator dataframe contains negative volume")
 
     def _latest_rolling_mean(
         self,
@@ -384,3 +423,29 @@ class TechnicalIndicatorService:
 
         return "neutral"
 
+
+    def _calculate_volume_ratio(
+        self,
+        *,
+        latest_volume: float,
+        volume_ma20: float | None,
+    ) -> float | None:
+        if volume_ma20 is None or volume_ma20 == 0:
+            return None
+
+        return round(latest_volume / volume_ma20, 4)
+
+    def _classify_volume_status(
+        self,
+        volume_ratio: float | None,
+    ) -> str:
+        if volume_ratio is None:
+            return "normal"
+
+        if volume_ratio >= 1.5:
+            return "expanding"
+
+        if volume_ratio <= 0.5:
+            return "shrinking"
+
+        return "normal"

@@ -10,6 +10,7 @@ from app.schemas.technical_indicator import (
     VolumeFactorSnapshot,
 )
 
+
 class TechnicalIndicatorService:
     def calculate_moving_average(
         self,
@@ -240,7 +241,7 @@ class TechnicalIndicatorService:
             raise BadRequestException(message="indicator dataframe contains invalid close_price")
 
         if (df["close_price"] <= 0).any():
-            raise BadRequestException(message="indicator dataframe contains negative close_price")
+            raise BadRequestException(message="indicator dataframe contains non-positive close_price")
 
 
     def _validate_volume_dataframe(

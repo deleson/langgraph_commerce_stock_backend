@@ -6,6 +6,7 @@ from app.schemas.stock_analysis import (
     MarketCode,
     StockAnalysisResult,
 )
+from app.schemas.technical_indicator import TechnicalIndicatorResponse
 
 class StockAnalysisState(TypedDict,total=False):
     """Runtime state shared by stage-five stock analysis graph nodes."""
@@ -17,6 +18,7 @@ class StockAnalysisState(TypedDict,total=False):
 
     market_snapshot: MarketSnapshot
     indicators: IndicatorSnapshot
+    technical_indicators: TechnicalIndicatorResponse
     result: StockAnalysisResult
 
     record_id: int

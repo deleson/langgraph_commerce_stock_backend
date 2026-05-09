@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-
+from app.schemas.technical_indicator import TechnicalIndicatorResponse
 
 MarketCode = Literal["US", "CN", "HK"]
 AnalysisType = Literal["stock_basic"]
@@ -79,6 +79,7 @@ class StockAnalysisGraphState(BaseModel):
     risk_preference: Literal["conservative", "balanced", "aggressive"] = "balanced"
     market_snapshot: MarketSnapshot | None = None
     indicators: IndicatorSnapshot | None = None
+    technical_indicators: TechnicalIndicatorResponse | None = None
     result: StockAnalysisResult | None = None
     record_id: int | None = None
     notification_id: int | None = None

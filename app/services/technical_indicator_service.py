@@ -1,7 +1,13 @@
 import pandas as pd
 
 from app.core.exceptions import BadRequestException
-from app.schemas.technical_indicator import MovingAverageSnapshot, RsiSnapshot, MacdSnapshot
+from app.schemas.technical_indicator import (
+    MacdSnapshot,
+    MomentumSnapshot,
+    MovingAverageSnapshot,
+    RsiSnapshot,
+    VolatilitySnapshot,
+)
 
 
 class TechnicalIndicatorService:
@@ -68,6 +74,54 @@ class TechnicalIndicatorService:
             ),
         )
 
+    def calculate_volatility(
+        self,
+        df: pd.DataFrame,
+    ) -> VolatilitySnapshot:
+        self._validate_price_dataframe(df)
+
+        close = df["close_price"]
+        daily_returns = close.pct_change().dropna()
+
+        if len(daily_returns) < 2:
+            return VolatilitySnapshot(
+                daily_return_std=None,
+                annualized_volatility=None,
+                level="low",
+            )
+
+        daily_return_std = round(float(daily_returns.std()), 6)
+        annualized_volatility = round(float(daily_return_std * (252 ** 0.5)), 6)
+
+        return VolatilitySnapshot(
+            daily_return_std=daily_return_std,
+            annualized_volatility=annualized_volatility,
+            level=self._classify_volatility_level(annualized_volatility),
+        )
+
+    def calculate_momentum(
+        self,
+        df: pd.DataFrame,
+    ) -> MomentumSnapshot:
+        self._validate_price_dataframe(df)
+
+        close = df["close_price"]
+
+        momentum_5 = self._latest_momentum(close, window=5)
+        momentum_10 = self._latest_momentum(close, window=10)
+        momentum_20 = self._latest_momentum(close, window=20)
+
+        return MomentumSnapshot(
+            momentum_5=momentum_5,
+            momentum_10=momentum_10,
+            momentum_20=momentum_20,
+            direction=self._classify_momentum_direction(
+                momentum_5=momentum_5,
+                momentum_10=momentum_10,
+                momentum_20=momentum_20,
+            ),
+        )
+
     def calculate_rsi(self, df: pd.DataFrame) -> RsiSnapshot:
         self._validate_price_dataframe(df)
 
@@ -86,6 +140,70 @@ class TechnicalIndicatorService:
             ),
         )
 
+    def _classify_volatility_level(
+        self,
+        annualized_volatility: float | None,
+    ) -> str:
+        if annualized_volatility is None:
+            return "low"
+
+        if annualized_volatility >= 0.4:
+            return "high"
+
+        if annualized_volatility >= 0.2:
+            return "medium"
+
+        return "low"
+
+    def _latest_momentum(
+        self,
+        series: pd.Series,
+        *,
+        window: int,
+    ) -> float | None:
+        if len(series) <= window:
+            return None
+
+        value = series.iloc[-1] - series.iloc[-window - 1]
+        return round(float(value), 4)
+
+    def _classify_momentum_direction(
+        self,
+        *,
+        momentum_5: float | None,
+        momentum_10: float | None,
+        momentum_20: float | None,
+    ) -> str:
+        primary_momentum = self._select_primary_momentum(
+            momentum_20=momentum_20,
+            momentum_10=momentum_10,
+            momentum_5=momentum_5,
+        )
+
+        if primary_momentum is None:
+            return "neutral"
+
+        if primary_momentum > 0:
+            return "bullish"
+
+        if primary_momentum < 0:
+            return "bearish"
+
+        return "neutral"
+
+    def _select_primary_momentum(
+        self,
+        *,
+        momentum_20: float | None,
+        momentum_10: float | None,
+        momentum_5: float | None,
+    ) -> float | None:
+        for value in (momentum_20, momentum_10, momentum_5):
+            if value is not None:
+                return value
+
+        return None
+
     def _validate_price_dataframe(
         self,
         df: pd.DataFrame,
@@ -99,7 +217,7 @@ class TechnicalIndicatorService:
         if df["close_price"].isna().any():
             raise BadRequestException(message="indicator dataframe contains invalid close_price")
 
-        if (df["close_price"] < 0).any():
+        if (df["close_price"] <= 0).any():
             raise BadRequestException(message="indicator dataframe contains negative close_price")
 
     def _latest_rolling_mean(

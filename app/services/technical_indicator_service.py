@@ -1,7 +1,7 @@
 import pandas as pd
 
 from app.core.exceptions import BadRequestException
-from app.schemas.technical_indicator import MovingAverageSnapshot, RsiSnapshot
+from app.schemas.technical_indicator import MovingAverageSnapshot, RsiSnapshot, MacdSnapshot
 
 
 class TechnicalIndicatorService:
@@ -36,6 +36,36 @@ class TechnicalIndicatorService:
             ema12=ema12,
             ema26=ema26,
             trend=trend,
+        )
+
+    def calculate_macd(
+        self,
+        df: pd.DataFrame,
+    ) -> MacdSnapshot:
+        self._validate_price_dataframe(df)
+
+        close = df["close_price"]
+
+        macd_values = self._latest_macd(
+            close,
+            fast_span=12,
+            slow_span=26,
+            signal_span=9,
+        )
+
+        dif = macd_values["dif"]
+        dea = macd_values["dea"]
+        histogram = macd_values["histogram"]
+
+        return MacdSnapshot(
+            dif=dif,
+            dea=dea,
+            histogram=histogram,
+            signal=self._classify_macd_signal(
+                dif=dif,
+                dea=dea,
+                histogram=histogram,
+            ),
         )
 
     def calculate_rsi(self, df: pd.DataFrame) -> RsiSnapshot:
@@ -137,6 +167,53 @@ class TechnicalIndicatorService:
 
         return None
 
+    def _latest_macd(
+        self,
+        series: pd.Series,
+        *,
+        fast_span: int,
+        slow_span: int,
+        signal_span: int,
+    ) -> dict[str, float | None]:
+        min_required = slow_span + signal_span
+
+        if len(series) < min_required:
+            return {
+                "dif": None,
+                "dea": None,
+                "histogram": None,
+            }
+
+        ema_fast = series.ewm(span=fast_span, adjust=False).mean()
+        ema_slow = series.ewm(span=slow_span, adjust=False).mean()
+
+        dif_series = ema_fast - ema_slow
+        dea_series = dif_series.ewm(span=signal_span, adjust=False).mean()
+        histogram_series = 2 * (dif_series - dea_series)
+
+        return {
+            "dif": self._round_optional(dif_series.iloc[-1]),
+            "dea": self._round_optional(dea_series.iloc[-1]),
+            "histogram": self._round_optional(histogram_series.iloc[-1]),
+        }
+
+    def _classify_macd_signal(
+        self,
+        *,
+        dif: float | None,
+        dea: float | None,
+        histogram: float | None,
+    ) -> str:
+        if dif is None or dea is None or histogram is None:
+            return "neutral"
+
+        if dif > dea and histogram > 0:
+            return "bullish"
+
+        if dif < dea and histogram < 0:
+            return "bearish"
+
+        return "neutral"
 
     def _latest_ema(
         self,

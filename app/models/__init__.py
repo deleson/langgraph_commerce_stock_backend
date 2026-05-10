@@ -9,6 +9,8 @@ from app.models.user_session import UserSession
 from app.models.watchlist_item import WatchlistItem
 from app.models.market_symbol import MarketSymbol
 from app.models.market_candle import MarketCandle
+from app.models.market_data_sync_status import MarketDataSyncStatus
+
 
 __all__ = [
     "AnalysisRecord",
@@ -22,4 +24,5 @@ __all__ = [
     "WatchlistItem",
     "MarketSymbol",
     "MarketCandle",
+    "MarketDataSyncStatus",
 ]

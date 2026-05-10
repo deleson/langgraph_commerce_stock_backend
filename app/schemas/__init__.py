@@ -66,6 +66,19 @@ from app.schemas.technical_indicator import (
     VolumeStatus,
 )
 
+from app.schemas.market_data_sync import (
+    MarketDataSyncLogCreate,
+    MarketDataSyncLogQuery,
+    MarketDataSyncLogResponse,
+    MarketDataSyncLogStatus,
+    MarketDataSyncLogUpdate,
+    MarketDataSyncStatusCreate,
+    MarketDataSyncStatusQuery,
+    MarketDataSyncStatusResponse,
+    MarketDataSyncStatusUpdate,
+    MarketDataSyncStatusValue,
+)
+
 
 __all__ = [
     "ApiResponse",
@@ -126,4 +139,14 @@ __all__ = [
     "VolatilitySnapshot",
     "VolumeFactorSnapshot",
     "VolumeStatus",
+    "MarketDataSyncLogCreate",
+    "MarketDataSyncLogQuery",
+    "MarketDataSyncLogResponse",
+    "MarketDataSyncLogStatus",
+    "MarketDataSyncLogUpdate",
+    "MarketDataSyncStatusCreate",
+    "MarketDataSyncStatusQuery",
+    "MarketDataSyncStatusResponse",
+    "MarketDataSyncStatusUpdate",
+    "MarketDataSyncStatusValue",
 ]

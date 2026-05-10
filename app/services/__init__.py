@@ -22,6 +22,7 @@ from app.services.market_candle_series_service import MarketCandleSeriesService
 from app.services.indicator_dataframe_service import IndicatorDataFrameService
 from app.services.technical_indicator_service import TechnicalIndicatorService
 from app.services.technical_indicator_query_service import TechnicalIndicatorQueryService
+from app.services.market_data_quality_report_service import MarketDataQualityReportService
 # from app.services.stock_analysis_service import StockAnalysisService
 
 
@@ -48,5 +49,6 @@ __all__ = [
     "IndicatorDataFrameService",
     "TechnicalIndicatorService",
     "TechnicalIndicatorQueryService",
+    "MarketDataQualityReportService",
     # "StockAnalysisService",
 ]

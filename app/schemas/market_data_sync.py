@@ -166,3 +166,28 @@ class MarketDataSyncLogQuery(BaseModel):
         if isinstance(value, str):
             return value.strip().upper()
         return value
+
+
+class MarketDataQualityReport(BaseModel):
+    symbol: str = Field(min_length=1, max_length=20)
+    market: MarketCode
+    timeframe: CandleTimeframe
+    source: MarketDataSource | str | None = None
+    adjust_type: AdjustType = "none"
+    candle_count: int = Field(ge=0)
+    duplicate_count: int = Field(default=0, ge=0)
+    earliest_candle_time: datetime | None = None
+    latest_candle_time: datetime | None = None
+    is_empty: bool = False
+    is_enough: bool = True
+    is_stale: bool = False
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    checked_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    @field_validator("symbol", "market", mode="before")
+    @classmethod
+    def normalize_uppercase(cls, value: str) -> str:
+        if isinstance(value, str):
+            return value.strip().upper()
+        return value

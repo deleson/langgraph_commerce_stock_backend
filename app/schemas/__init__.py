@@ -77,6 +77,7 @@ from app.schemas.market_data_sync import (
     MarketDataSyncStatusResponse,
     MarketDataSyncStatusUpdate,
     MarketDataSyncStatusValue,
+    MarketDataQualityReport,
 )
 
 
@@ -149,4 +150,5 @@ __all__ = [
     "MarketDataSyncStatusResponse",
     "MarketDataSyncStatusUpdate",
     "MarketDataSyncStatusValue",
+    "MarketDataQualityReport",
 ]

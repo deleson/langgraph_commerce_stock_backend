@@ -48,6 +48,12 @@ class Settings(BaseSettings):
     market_data_candle_sync_limit: int = Field(default=250)
     market_data_quote_cache_ttl_seconds: int = Field(default=60)
     market_data_request_timeout_seconds: float = Field(default=20.0)
+    market_data_cache_enabled: bool = Field(default=True)
+    market_data_overview_cache_ttl_seconds: int = Field(default=60)
+    market_data_candles_cache_ttl_seconds: int = Field(default=300)
+    market_data_quality_cache_ttl_seconds: int = Field(default=300)
+    market_data_sync_status_cache_ttl_seconds: int = Field(default=60)
+    market_data_technical_indicator_cache_ttl_seconds: int = Field(default=300)
 
     baostock_enabled: bool = Field(default=True)
 

@@ -21,7 +21,12 @@ from app.schemas.technical_indicator import TechnicalIndicatorResponse
 from app.services.indicator_service import IndicatorService
 from app.services.market_data_service import MockMarketDataService
 from app.services.technical_indicator_query_service import TechnicalIndicatorQueryService
-
+from app.repositories.market_data_sync_repo import AsyncMarketDataSyncRepository
+from app.schemas.market_data_sync import (
+    MarketDataQualityReport,
+    MarketDataSyncStatusResponse,
+)
+from app.services.market_data_quality_report_service import MarketDataQualityReportService
 
 class MarketService:
     """Coordinate market data for API responses.
@@ -31,17 +36,20 @@ class MarketService:
     """
 
     def __init__(
-        self,
-        db: AsyncSession | None = None,
-        market_data_service: MockMarketDataService | None = None,
-        indicator_service: IndicatorService | None = None,
-        repository: AsyncMarketRepository | None = None,
+            self,
+            db: AsyncSession | None = None,
+            market_data_service: MockMarketDataService | None = None,
+            indicator_service: IndicatorService | None = None,
+            repository: AsyncMarketRepository | None = None,
+            sync_repository: AsyncMarketDataSyncRepository | None = None,
     ) -> None:
         self.db = db
         self.market_data_service = market_data_service or MockMarketDataService()
         self.indicator_service = indicator_service or IndicatorService()
         self.repository = repository or (AsyncMarketRepository(db) if db is not None else None)
-
+        self.sync_repository = sync_repository or (
+            AsyncMarketDataSyncRepository(db) if db is not None else None
+        )
     async def search_stocks(
         self,
         keyword: str | None = None,
@@ -122,14 +130,29 @@ class MarketService:
         )
 
     async def get_indicators(
-        self,
-        symbol: str,
-        market: MarketCode,
+            self,
+            symbol: str,
+            market: MarketCode,
     ) -> MarketIndicatorResponse:
-        snapshot = await self._get_market_snapshot(
+        quote = await self.get_quote(
             symbol=symbol,
             market=market,
         )
+
+        snapshot = MarketSnapshot(
+            symbol=quote.symbol,
+            market=quote.market,
+            name=quote.name,
+            currency=quote.currency,
+            latest_price=quote.latest_price,
+            previous_close=quote.previous_close,
+            open_price=quote.open_price,
+            high_price=quote.high_price,
+            low_price=quote.low_price,
+            volume=quote.volume,
+            as_of=quote.as_of,
+        )
+
         indicators = self.indicator_service.calculate(snapshot)
 
         return MarketIndicatorResponse(
@@ -141,20 +164,25 @@ class MarketService:
             moving_average_20=indicators.moving_average_20,
             volatility_level=indicators.volatility_level,
             trend=indicators.trend,
-            source="db" if self.repository is not None else "mock",
+            source=quote.source,
         )
 
     async def get_overview(
-        self,
-        symbol: str,
-        market: MarketCode,
-        timeframe: CandleTimeframe = "1d",
-        limit: int = 30,
-        *,
-        include_technical_indicators: bool = False,
-        technical_indicator_limit: int = 120,
-        adjust_type: AdjustType = "none",
-        technical_indicator_source: MarketDataSource | None = None,
+            self,
+            symbol: str,
+            market: MarketCode,
+            timeframe: CandleTimeframe = "1d",
+            limit: int = 30,
+            *,
+            include_technical_indicators: bool = False,
+            technical_indicator_limit: int = 120,
+            adjust_type: AdjustType = "none",
+            technical_indicator_source: MarketDataSource | None = None,
+            include_data_quality: bool = False,
+            include_sync_status: bool = False,
+            data_quality_source: MarketDataSource | None = None,
+            data_quality_min_required: int = 1,
+            data_quality_stale_after_days: int | None = None,
     ) -> MarketOverviewResponse:
         quote = await self.get_quote(symbol=symbol, market=market)
         indicators = await self.get_indicators(symbol=symbol, market=market)
@@ -175,11 +203,36 @@ class MarketService:
             technical_indicator_source=technical_indicator_source,
         )
 
+        data_quality = await self._get_data_quality_for_overview(
+            symbol=symbol,
+            market=market,
+            timeframe=timeframe,
+            limit=limit,
+            include_data_quality=include_data_quality,
+            adjust_type=adjust_type,
+            data_quality_source=data_quality_source,
+            data_quality_min_required=data_quality_min_required,
+            data_quality_stale_after_days=data_quality_stale_after_days,
+        )
+
+        sync_status = await self._get_sync_status_for_overview(
+            symbol=symbol,
+            market=market,
+            timeframe=timeframe,
+            include_sync_status=include_sync_status,
+            adjust_type=adjust_type,
+            preferred_source=data_quality_source,
+            quote_source=quote.source,
+            candles_source=candles_response.source,
+        )
+
         return MarketOverviewResponse(
             quote=quote,
             indicators=indicators,
             candles=candles_response.candles,
             technical_indicators=technical_indicators,
+            data_quality=data_quality,
+            sync_status=sync_status,
         )
 
     async def _get_quote_from_db(
@@ -402,3 +455,91 @@ class MarketService:
             adjust_type=adjust_type,
             source=technical_indicator_source,
         )
+
+    async def _get_data_quality_for_overview(
+            self,
+            *,
+            symbol: str,
+            market: MarketCode,
+            timeframe: CandleTimeframe,
+            limit: int,
+            include_data_quality: bool,
+            adjust_type: AdjustType,
+            data_quality_source: MarketDataSource | None,
+            data_quality_min_required: int,
+            data_quality_stale_after_days: int | None,
+    ) -> MarketDataQualityReport | None:
+        if not include_data_quality:
+            return None
+
+        if self.db is None:
+            return None
+
+        return await MarketDataQualityReportService(self.db).get_quality_report(
+            symbol=symbol,
+            market=market,
+            timeframe=timeframe,
+            limit=limit,
+            adjust_type=adjust_type,
+            source=data_quality_source,
+            min_required=data_quality_min_required,
+            stale_after_days=data_quality_stale_after_days,
+        )
+
+    async def _get_sync_status_for_overview(
+            self,
+            *,
+            symbol: str,
+            market: MarketCode,
+            timeframe: CandleTimeframe,
+            include_sync_status: bool,
+            adjust_type: AdjustType,
+            preferred_source: MarketDataSource | None,
+            quote_source: str,
+            candles_source: str,
+    ) -> MarketDataSyncStatusResponse | None:
+        if not include_sync_status:
+            return None
+
+        if self.sync_repository is None:
+            return None
+
+        source = (
+                preferred_source
+                or self._normalize_market_data_source(candles_source)
+                or self._normalize_market_data_source(quote_source)
+        )
+
+        if source is None:
+            return None
+
+        status = await self.sync_repository.get_status(
+            symbol=symbol.strip().upper(),
+            market=market,
+            timeframe=timeframe,
+            source=source,
+            adjust_type=adjust_type,
+        )
+
+        if status is None:
+            return None
+
+        return MarketDataSyncStatusResponse.model_validate(status)
+
+    def _normalize_market_data_source(
+            self,
+            source: str | None,
+    ) -> MarketDataSource | None:
+        allowed_sources = {
+            "mock",
+            "baostock",
+            "akshare",
+            "tushare",
+            "alpha_vantage",
+            "polygon",
+        }
+
+        if source in allowed_sources:
+            return source
+
+        return None

@@ -3,7 +3,10 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 from app.schemas.technical_indicator import TechnicalIndicatorResponse
-
+from app.schemas.market_data_sync import (
+    MarketDataQualityReport,
+    MarketDataSyncStatusResponse,
+)
 
 MarketCode = Literal["US", "CN", "HK"]
 CandleTimeframe = Literal["1d", "1h", "5m"]
@@ -83,5 +86,5 @@ class MarketOverviewResponse(BaseModel):
     indicators: MarketIndicatorResponse
     candles: list[MarketCandle] = Field(default_factory=list)
     technical_indicators: TechnicalIndicatorResponse | None = None
-
-
+    data_quality: MarketDataQualityReport | None = None
+    sync_status: MarketDataSyncStatusResponse | None = None

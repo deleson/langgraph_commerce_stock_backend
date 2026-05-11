@@ -183,6 +183,30 @@ async def get_stock_overview(
         default=None,
         description="Optional data source for technical indicators",
     ),
+    include_data_quality: bool = Query(
+        default=False,
+        description="Whether to include market data quality report",
+    ),
+    include_sync_status: bool = Query(
+        default=False,
+        description="Whether to include latest market data sync status",
+    ),
+    data_quality_source: MarketDataSource | None = Query(
+        default=None,
+        description="Optional data source for quality and sync status, for example baostock or tushare",
+    ),
+    data_quality_min_required: int = Query(
+        default=1,
+        ge=1,
+        le=1000,
+        description="Minimum candle count required for data quality check",
+    ),
+    data_quality_stale_after_days: int | None = Query(
+        default=None,
+        ge=1,
+        le=3650,
+        description="Mark data as stale if latest candle is older than this many days",
+    ),
 ):
     _ = current_user
 
@@ -195,5 +219,10 @@ async def get_stock_overview(
         technical_indicator_limit=technical_indicator_limit,
         adjust_type=adjust_type,
         technical_indicator_source=technical_indicator_source,
+        include_data_quality=include_data_quality,
+        include_sync_status=include_sync_status,
+        data_quality_source=data_quality_source,
+        data_quality_min_required=data_quality_min_required,
+        data_quality_stale_after_days=data_quality_stale_after_days,
     )
     return success_response(data=overview)

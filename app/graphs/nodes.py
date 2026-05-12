@@ -43,6 +43,7 @@ def calculate_indicators_node(state: StockAnalysisState) -> StockAnalysisState:
         "indicators": indicators,
     }
 
+
 def check_data_quality_node(state: StockAnalysisState) -> StockAnalysisState:
     quality_context = state.get("quality_context")
 
@@ -87,6 +88,96 @@ def check_data_quality_node(state: StockAnalysisState) -> StockAnalysisState:
         next_state["error_message"] = reason
 
     return next_state
+
+
+def prepare_degraded_context_node(state: StockAnalysisState) -> StockAnalysisState:
+    quality_context = state.get("quality_context")
+    degraded_reason = _resolve_degraded_reason(state)
+
+    warnings = _resolve_degraded_warnings(state)
+
+    metadata = {
+        **state.get("metadata", {}),
+        "degraded_analysis": {
+            "enabled": True,
+            "reason": degraded_reason,
+            "warnings": warnings,
+        },
+    }
+
+    if quality_context is not None:
+        quality_context = quality_context.model_copy(
+            update={
+                "graph_route": "degraded",
+                "route_reason": degraded_reason,
+                "warnings": _deduplicate_messages(
+                    [
+                        *quality_context.warnings,
+                        *warnings,
+                    ]
+                ),
+            },
+            deep=True,
+        )
+
+    return {
+        "graph_route": "degraded",
+        "quality_context": quality_context,
+        "degraded_reason": degraded_reason,
+        "route_reason": degraded_reason,
+        "metadata": metadata,
+    }
+
+def _resolve_degraded_reason(state: StockAnalysisState) -> str:
+    degraded_reason = state.get("degraded_reason")
+    if degraded_reason:
+        return degraded_reason
+
+    route_reason = state.get("route_reason")
+    if route_reason:
+        return route_reason
+
+    quality_context = state.get("quality_context")
+    if quality_context is not None:
+        if quality_context.route_reason:
+            return quality_context.route_reason
+
+        if quality_context.warnings:
+            return _join_messages(quality_context.warnings)
+
+        if quality_context.data_quality is not None and quality_context.data_quality.warnings:
+            return _join_messages(quality_context.data_quality.warnings)
+
+    return "market data quality is uncertain"
+
+
+def _resolve_degraded_warnings(state: StockAnalysisState) -> list[str]:
+    warnings: list[str] = []
+
+    degraded_reason = state.get("degraded_reason")
+    if degraded_reason:
+        warnings.append(degraded_reason)
+
+    route_reason = state.get("route_reason")
+    if route_reason:
+        warnings.append(route_reason)
+
+    quality_context = state.get("quality_context")
+    if quality_context is not None:
+        warnings.extend(quality_context.warnings)
+
+        if quality_context.data_quality is not None:
+            warnings.extend(quality_context.data_quality.warnings)
+
+            if not quality_context.data_quality.is_enough:
+                warnings.append("行情 K 线数量不足，分析结论需要降低置信度。")
+
+            if quality_context.data_quality.is_stale:
+                warnings.append("行情 K 线数据可能过旧，分析结论存在时效性风险。")
+
+    warnings.append("本次为降级分析，不构成投资建议。")
+
+    return _deduplicate_messages(warnings)
 
 def _resolve_quality_route(
     quality_context: StockAnalysisQualityContext,

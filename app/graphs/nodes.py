@@ -128,6 +128,117 @@ def prepare_degraded_context_node(state: StockAnalysisState) -> StockAnalysisSta
         "metadata": metadata,
     }
 
+
+def build_data_unavailable_result_node(state: StockAnalysisState) -> StockAnalysisState:
+    reason = _resolve_unavailable_reason(state)
+    warnings = _resolve_unavailable_warnings(state)
+
+    metadata = {
+        **state.get("metadata", {}),
+        "unavailable_analysis": {
+            "enabled": True,
+            "reason": reason,
+            "warnings": warnings,
+        },
+    }
+
+    quality_context = state.get("quality_context")
+    if quality_context is not None:
+        quality_context = quality_context.model_copy(
+            update={
+                "graph_route": "unavailable",
+                "route_reason": reason,
+                "errors": _deduplicate_messages(
+                    [
+                        *quality_context.errors,
+                        reason,
+                    ]
+                ),
+                "warnings": _deduplicate_messages(
+                    [
+                        *quality_context.warnings,
+                        *warnings,
+                    ]
+                ),
+            },
+            deep=True,
+        )
+
+    result = StockAnalysisResult(
+        summary="当前行情数据不足或不可用，暂时无法生成可靠的股票分析。",
+        risk_level="medium",
+        trend="neutral",
+        key_points=[
+            "系统未能获得足够可靠的行情数据。",
+            "为了避免误导，本次不进行强趋势判断。",
+        ],
+        suggestion="建议先同步或补充行情数据后再重新发起分析。",
+        warnings=warnings,
+    )
+
+    return {
+        "graph_route": "unavailable",
+        "quality_context": quality_context,
+        "route_reason": reason,
+        "error_message": reason,
+        "result": result,
+        "metadata": metadata,
+    }
+
+
+def _resolve_unavailable_reason(state: StockAnalysisState) -> str:
+    error_message = state.get("error_message")
+    if error_message:
+        return error_message
+
+    route_reason = state.get("route_reason")
+    if route_reason:
+        return route_reason
+
+    quality_context = state.get("quality_context")
+    if quality_context is not None:
+        if quality_context.errors:
+            return _join_messages(quality_context.errors)
+
+        if quality_context.route_reason:
+            return quality_context.route_reason
+
+        if quality_context.data_quality is not None:
+            data_quality = quality_context.data_quality
+
+            if data_quality.errors:
+                return _join_messages(data_quality.errors)
+
+            if data_quality.is_empty:
+                return f"market candles are empty for {data_quality.market}:{data_quality.symbol}"
+
+    return "market data is unavailable"
+
+
+def _resolve_unavailable_warnings(state: StockAnalysisState) -> list[str]:
+    warnings: list[str] = []
+
+    reason = _resolve_unavailable_reason(state)
+    warnings.append(reason)
+
+    quality_context = state.get("quality_context")
+    if quality_context is not None:
+        warnings.extend(quality_context.warnings)
+        warnings.extend(quality_context.errors)
+
+        if quality_context.data_quality is not None:
+            warnings.extend(quality_context.data_quality.warnings)
+            warnings.extend(quality_context.data_quality.errors)
+
+            if quality_context.data_quality.is_empty:
+                warnings.append("未查询到可用于分析的行情 K 线数据。")
+
+    warnings.append("本次未调用大模型生成强分析结论，以避免基于缺失数据误导用户。")
+    warnings.append("该结果不构成投资建议。")
+
+    return _deduplicate_messages(warnings)
+
+
 def _resolve_degraded_reason(state: StockAnalysisState) -> str:
     degraded_reason = state.get("degraded_reason")
     if degraded_reason:
@@ -178,6 +289,7 @@ def _resolve_degraded_warnings(state: StockAnalysisState) -> list[str]:
     warnings.append("本次为降级分析，不构成投资建议。")
 
     return _deduplicate_messages(warnings)
+
 
 def _resolve_quality_route(
     quality_context: StockAnalysisQualityContext,
@@ -237,6 +349,7 @@ def _deduplicate_messages(messages: list[str]) -> list[str]:
 def _join_messages(messages: list[str]) -> str:
     cleaned_messages = _deduplicate_messages(messages)
     return "; ".join(cleaned_messages) if cleaned_messages else "unknown reason"
+
 
 def analyze_with_llm_node(state: StockAnalysisState) -> StockAnalysisState:
     market_snapshot = state.get("market_snapshot")
@@ -345,7 +458,6 @@ def _build_stock_analysis_messages(
         SystemMessage(content=system_prompt),
         HumanMessage(content=human_prompt),
     ]
-
 
 
 def _parse_stock_analysis_result(content: str) -> StockAnalysisResult:

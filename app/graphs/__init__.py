@@ -5,6 +5,7 @@ from app.graphs.nodes import (
     load_market_data_node,
     prepare_degraded_context_node,
     check_data_quality_node,
+    build_data_unavailable_result_node,
 )
 from app.graphs.states import StockAnalysisState
 from app.graphs.stock_analysis_graph import (
@@ -28,4 +29,5 @@ __all__ = [
     "route_by_data_quality",
     "prepare_degraded_context_node",
     "check_data_quality_node",
+    "build_data_unavailable_result_node",
 ]

@@ -11,6 +11,7 @@ from app.graphs.stock_analysis_graph import (
     get_stock_analysis_graph_async,
     run_stock_analysis_graph,
 )
+from app.graphs.routers import route_by_data_quality
 
 __all__ = [
     "StockAnalysisState",
@@ -22,4 +23,5 @@ __all__ = [
     "get_stock_analysis_graph_async",
     "load_market_data_node",
     "run_stock_analysis_graph",
+    "route_by_data_quality"
 ]

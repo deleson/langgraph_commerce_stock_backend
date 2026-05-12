@@ -3,7 +3,11 @@ import json
 from app.core.exceptions import BadRequestException
 from app.core.llm import get_chat_model
 from app.graphs.states import StockAnalysisState
-from app.schemas.stock_analysis import StockAnalysisResult
+from app.schemas.stock_analysis import (
+    GraphRoute,
+    StockAnalysisQualityContext,
+    StockAnalysisResult,
+)
 from app.services.indicator_service import IndicatorService
 from app.services.market_data_service import MockMarketDataService
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -39,6 +43,109 @@ def calculate_indicators_node(state: StockAnalysisState) -> StockAnalysisState:
         "indicators": indicators,
     }
 
+def check_data_quality_node(state: StockAnalysisState) -> StockAnalysisState:
+    quality_context = state.get("quality_context")
+
+    if quality_context is None:
+        route: GraphRoute = "degraded"
+        reason = "market data quality context is missing"
+
+        fallback_context = StockAnalysisQualityContext(
+            graph_route=route,
+            route_reason=reason,
+            warnings=["未获取到行情数据质量报告，本次分析将按降级模式处理。"],
+            errors=[],
+        )
+
+        return {
+            "graph_route": route,
+            "quality_context": fallback_context,
+            "route_reason": reason,
+            "degraded_reason": reason,
+        }
+
+    route, reason = _resolve_quality_route(quality_context)
+
+    updated_context = quality_context.model_copy(
+        update={
+            "graph_route": route,
+            "route_reason": reason,
+        },
+        deep=True,
+    )
+
+    next_state: StockAnalysisState = {
+        "graph_route": route,
+        "quality_context": updated_context,
+        "route_reason": reason,
+    }
+
+    if route == "degraded":
+        next_state["degraded_reason"] = reason
+
+    if route in {"unavailable", "error"}:
+        next_state["error_message"] = reason
+
+    return next_state
+
+def _resolve_quality_route(
+    quality_context: StockAnalysisQualityContext,
+) -> tuple[GraphRoute, str]:
+    if quality_context.errors:
+        return "unavailable", _join_messages(quality_context.errors)
+
+    data_quality = quality_context.data_quality
+
+    if data_quality is None:
+        warnings = quality_context.warnings or ["market data quality report is missing"]
+        return "degraded", _join_messages(warnings)
+
+    if data_quality.errors:
+        return "unavailable", _join_messages(data_quality.errors)
+
+    if data_quality.is_empty:
+        return (
+            "unavailable",
+            f"market candles are empty for {data_quality.market}:{data_quality.symbol}",
+        )
+
+    warnings = [
+        *quality_context.warnings,
+        *data_quality.warnings,
+    ]
+
+    if not data_quality.is_enough:
+        warnings.append("market candle count is not enough")
+
+    if data_quality.is_stale:
+        warnings.append("market candle data is stale")
+
+    warnings = _deduplicate_messages(warnings)
+
+    if warnings:
+        return "degraded", _join_messages(warnings)
+
+    return "normal", "market data quality is acceptable"
+
+
+def _deduplicate_messages(messages: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+
+    for message in messages:
+        normalized = str(message).strip()
+        if not normalized or normalized in seen:
+            continue
+
+        result.append(normalized)
+        seen.add(normalized)
+
+    return result
+
+
+def _join_messages(messages: list[str]) -> str:
+    cleaned_messages = _deduplicate_messages(messages)
+    return "; ".join(cleaned_messages) if cleaned_messages else "unknown reason"
 
 def analyze_with_llm_node(state: StockAnalysisState) -> StockAnalysisState:
     market_snapshot = state.get("market_snapshot")

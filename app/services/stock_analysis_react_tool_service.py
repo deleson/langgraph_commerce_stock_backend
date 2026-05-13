@@ -6,8 +6,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import NotFoundException
 from app.models.analysis_record import AnalysisRecord
 from app.repositories.analysis_record_repo import AsyncAnalysisRecordRepository
+from app.schemas.market import CandleTimeframe, MarketCode, MarketOverviewResponse
+from app.schemas.market_data import AdjustType, MarketDataSource
 from app.schemas.stock_analysis_react import ReactObservation
-
+from app.services.market_service import MarketService
 
 class StockAnalysisReactToolService:
     """Business tool executor used by the stock analysis ReAct graph.
@@ -19,6 +21,7 @@ class StockAnalysisReactToolService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self.analysis_record_repo = AsyncAnalysisRecordRepository(db)
+        self.market_service = MarketService(db)
 
     async def get_analysis_record(
         self,
@@ -52,6 +55,57 @@ class StockAnalysisReactToolService:
             created_at=datetime.now(UTC),
         )
 
+    async def get_market_overview(
+        self,
+        *,
+        symbol: str,
+        market: MarketCode,
+        timeframe: CandleTimeframe = "1d",
+        limit: int = 30,
+        include_technical_indicators: bool = False,
+        include_data_quality: bool = True,
+        include_sync_status: bool = True,
+        technical_indicator_limit: int = 120,
+        adjust_type: AdjustType = "none",
+        source: MarketDataSource | None = None,
+    ) -> ReactObservation:
+        normalized_symbol = symbol.strip().upper()
+
+        overview = await self.market_service.get_overview(
+            symbol=normalized_symbol,
+            market=market,
+            timeframe=timeframe,
+            limit=limit,
+            include_technical_indicators=include_technical_indicators,
+            technical_indicator_limit=technical_indicator_limit,
+            adjust_type=adjust_type,
+            technical_indicator_source=source,
+            include_data_quality=include_data_quality,
+            include_sync_status=include_sync_status,
+            data_quality_source=source,
+            data_quality_min_required=1,
+            data_quality_stale_after_days=None,
+        )
+
+        return ReactObservation(
+            tool_name="get_market_overview",
+            tool_input={
+                "symbol": normalized_symbol,
+                "market": market,
+                "timeframe": timeframe,
+                "limit": limit,
+                "include_technical_indicators": include_technical_indicators,
+                "include_data_quality": include_data_quality,
+                "include_sync_status": include_sync_status,
+                "technical_indicator_limit": technical_indicator_limit,
+                "adjust_type": adjust_type,
+                "source": source,
+            },
+            tool_output=self._serialize_market_overview(overview),
+            success=True,
+            created_at=datetime.now(UTC),
+        )
+
     def _serialize_analysis_record(
         self,
         record: AnalysisRecord,
@@ -80,6 +134,18 @@ class StockAnalysisReactToolService:
             ),
             "created_at": record.created_at.isoformat() if record.created_at else None,
         }
+
+    def _serialize_market_overview(
+        self,
+        overview: MarketOverviewResponse,
+    ) -> dict[str, Any]:
+        payload = overview.model_dump(mode="json")
+
+        candles = payload.get("candles") or []
+        if len(candles) > 30:
+            payload["candles"] = candles[-30:]
+
+        return payload
 
     def _get_nested_value(
         self,

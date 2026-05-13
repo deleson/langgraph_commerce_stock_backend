@@ -44,6 +44,66 @@ def calculate_indicators_node(state: StockAnalysisState) -> StockAnalysisState:
     }
 
 
+def load_technical_indicators_node(state: StockAnalysisState) -> StockAnalysisState:
+    technical_indicators = state.get("technical_indicators")
+    metadata = state.get("metadata", {})
+
+    if technical_indicators is None:
+        return {
+            "metadata": {
+                **metadata,
+                "technical_indicators_context": {
+                    "available": False,
+                    "reason": "technical indicators are not available in graph state",
+                },
+            },
+        }
+
+    warnings = _build_technical_indicator_warnings(state)
+
+    return {
+        "technical_indicators": technical_indicators,
+        "metadata": {
+            **metadata,
+            "technical_indicators_context": {
+                "available": True,
+                "symbol": technical_indicators.symbol,
+                "market": technical_indicators.market,
+                "timeframe": technical_indicators.timeframe,
+                "source": technical_indicators.source,
+                "candle_count": technical_indicators.candle_count,
+                "adjust_type": technical_indicators.adjust_type,
+                "calculated_at": technical_indicators.calculated_at.isoformat(),
+                "warnings": warnings,
+            },
+        },
+    }
+
+
+def _build_technical_indicator_warnings(state: StockAnalysisState) -> list[str]:
+    technical_indicators = state.get("technical_indicators")
+    if technical_indicators is None:
+        return ["未获取到完整技术指标上下文。"]
+
+    warnings = [
+        *technical_indicators.summary.warnings,
+    ]
+
+    quality_context = state.get("quality_context")
+    if quality_context is not None:
+        warnings.extend(quality_context.warnings)
+
+        if quality_context.data_quality is not None:
+            warnings.extend(quality_context.data_quality.warnings)
+
+    if state.get("graph_route") == "degraded":
+        degraded_reason = state.get("degraded_reason")
+        if degraded_reason:
+            warnings.append(degraded_reason)
+
+    return _deduplicate_messages(warnings)
+
+
 def check_data_quality_node(state: StockAnalysisState) -> StockAnalysisState:
     quality_context = state.get("quality_context")
 

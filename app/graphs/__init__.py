@@ -6,6 +6,7 @@ from app.graphs.nodes import (
     prepare_degraded_context_node,
     check_data_quality_node,
     build_data_unavailable_result_node,
+    load_technical_indicators_node,
 )
 from app.graphs.states import StockAnalysisState
 from app.graphs.stock_analysis_graph import (
@@ -30,4 +31,5 @@ __all__ = [
     "prepare_degraded_context_node",
     "check_data_quality_node",
     "build_data_unavailable_result_node",
+    "load_technical_indicators_node",
 ]

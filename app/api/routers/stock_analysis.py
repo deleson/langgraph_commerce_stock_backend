@@ -2,7 +2,12 @@ from fastapi import APIRouter, status
 
 from app.api.deps import AsyncCurrentUser, AsyncDBSession
 from app.schemas.common import ApiResponse
-from app.schemas.stock_analysis import StockAnalysisRequest, StockAnalysisResponse
+from app.schemas.stock_analysis import (
+    StockAnalysisFollowUpRequest,
+    StockAnalysisFollowUpResponse,
+    StockAnalysisRequest,
+    StockAnalysisResponse,
+)
 from app.services.stock_analysis_service import AsyncStockAnalysisService
 from app.utils.responses import success_response
 
@@ -36,6 +41,35 @@ async def analyze_stock(
     """
 
     result = await AsyncStockAnalysisService(db).analyze_stock(
+        user=current_user,
+        payload=payload,
+    )
+    return success_response(data=result)
+
+
+@router.post(
+    "/stock/follow-up",
+    summary="Follow Up Stock Analysis",
+    description=(
+        "Ask a follow-up question based on a previous stock analysis thread. "
+        "The endpoint uses thread_id to find the current user's previous analysis context."
+    ),
+    response_model=ApiResponse[StockAnalysisFollowUpResponse],
+)
+async def follow_up_stock_analysis(
+    payload: StockAnalysisFollowUpRequest,
+    current_user: AsyncCurrentUser,
+    db: AsyncDBSession,
+) -> ApiResponse[StockAnalysisFollowUpResponse]:
+    """Answer a follow-up question for a previous stock analysis.
+
+    This is a minimal follow-up API:
+    - it reads previous analysis context from AnalysisRecord
+    - it does not run the full stock analysis graph again
+    - it does not implement full ReAct tool calling yet
+    """
+
+    result = await AsyncStockAnalysisService(db).follow_up_stock_analysis(
         user=current_user,
         payload=payload,
     )

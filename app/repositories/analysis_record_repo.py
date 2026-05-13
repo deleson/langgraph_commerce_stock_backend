@@ -31,6 +31,23 @@ class AnalysisRecordRepository:
         )
         return self.db.execute(stmt).scalar_one_or_none()
 
+    def get_latest_by_thread_id_for_user(
+        self,
+        *,
+        thread_id: str,
+        user_id: int,
+    ) -> AnalysisRecord | None:
+        stmt = (
+            select(AnalysisRecord)
+            .where(
+                AnalysisRecord.user_id == user_id,
+                AnalysisRecord.result_snapshot["thread_id"].as_string() == thread_id,
+            )
+            .order_by(AnalysisRecord.created_at.desc())
+            .limit(1)
+        )
+        return self.db.execute(stmt).scalar_one_or_none()
+
     def create(
         self,
         *,
@@ -87,6 +104,24 @@ class AsyncAnalysisRecordRepository:
         stmt = select(AnalysisRecord).where(
             AnalysisRecord.id == record_id,
             AnalysisRecord.user_id == user_id,
+        )
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_latest_by_thread_id_for_user(
+        self,
+        *,
+        thread_id: str,
+        user_id: int,
+    ) -> AnalysisRecord | None:
+        stmt = (
+            select(AnalysisRecord)
+            .where(
+                AnalysisRecord.user_id == user_id,
+                AnalysisRecord.result_snapshot["thread_id"].as_string() == thread_id,
+            )
+            .order_by(AnalysisRecord.created_at.desc())
+            .limit(1)
         )
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()

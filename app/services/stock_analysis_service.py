@@ -1,6 +1,11 @@
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from langchain_core.messages import HumanMessage, SystemMessage
+
+from app.core.exceptions import NotFoundException
+from app.core.llm import get_chat_model
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -13,6 +18,8 @@ from app.schemas.analysis_record import AnalysisRecordCreateRequest
 from app.schemas.notification import NotificationCreateRequest
 from app.schemas.stock_analysis import (
     StockAnalysisContextSnapshot,
+    StockAnalysisFollowUpRequest,
+    StockAnalysisFollowUpResponse,
     StockAnalysisQualityContext,
     StockAnalysisRequest,
     StockAnalysisResponse,
@@ -264,6 +271,53 @@ class AsyncStockAnalysisService:
             created_at=record.created_at,
         )
 
+    async def follow_up_stock_analysis(
+        self,
+        *,
+        user: User,
+        payload: StockAnalysisFollowUpRequest,
+    ) -> StockAnalysisFollowUpResponse:
+        record = await self.analysis_record_service.analysis_record_repo.get_latest_by_thread_id_for_user(
+            thread_id=payload.thread_id,
+            user_id=user.id,
+        )
+
+        if record is None:
+            raise NotFoundException(
+                message="stock analysis thread not found",
+                details=[
+                    {
+                        "field": "thread_id",
+                        "reason": "analysis thread does not exist or does not belong to current user",
+                    }
+                ],
+            )
+
+        result_snapshot = record.result_snapshot or {}
+        context_snapshot = result_snapshot.get("context_snapshot") or {}
+        result = result_snapshot.get("result") or {}
+
+        messages = self._build_follow_up_messages(
+            record_symbol=record.symbol,
+            record_market=record.market,
+            user_message=payload.message,
+            result=result,
+            context_snapshot=context_snapshot,
+            result_snapshot=result_snapshot,
+        )
+
+        llm = get_chat_model()
+        response = await llm.ainvoke(messages)
+
+        return StockAnalysisFollowUpResponse(
+            thread_id=payload.thread_id,
+            answer=str(response.content).strip(),
+            referenced_analysis_record_id=record.id,
+            referenced_symbol=record.symbol,
+            referenced_market=record.market,
+            created_at=datetime.now(UTC),
+        )
+
     async def _load_quality_context(
         self,
         *,
@@ -359,6 +413,56 @@ class AsyncStockAnalysisService:
             metadata=metadata,
             created_at=datetime.now(UTC),
         )
+
+    def _build_follow_up_messages(
+            self,
+            *,
+            record_symbol: str,
+            record_market: str,
+            user_message: str,
+            result: dict,
+            context_snapshot: dict,
+            result_snapshot: dict,
+    ) -> list[SystemMessage | HumanMessage]:
+        system_prompt = """
+你是一个谨慎、客观的中文股票分析助手，正在回答用户对“上一次股票分析结果”的追问。
+
+重要规则：
+1. 只能基于系统提供的历史分析上下文回答。
+2. 不要编造实时行情、新闻、财报或外部事实。
+3. 不要承诺收益。
+4. 不要给出“必须买入 / 必须卖出”的确定性指令。
+5. 如果上下文不足，要明确说明“当前上下文不足以判断”。
+6. 回答必须使用简体中文。
+7. 回答要适合普通用户理解，但保持专业和谨慎。
+""".strip()
+
+        human_prompt = f"""
+用户正在追问上一份股票分析。
+
+股票：
+symbol={record_symbol}
+market={record_market}
+
+用户追问：
+{user_message}
+
+上一次 AI 分析 result：
+{result}
+
+上一次分析 context_snapshot：
+{context_snapshot}
+
+完整 result_snapshot：
+{result_snapshot}
+
+请基于以上上下文，用简体中文回答用户追问。
+""".strip()
+
+        return [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=human_prompt),
+        ]
 
     def _dump_optional_model(self, value):
         if value is None:

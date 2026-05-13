@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -40,6 +41,7 @@ from app.services.user_preference_service import (
     UserPreferenceService,
 )
 
+logger = logging.getLogger(__name__)
 
 class StockAnalysisService:
     """Coordinate stock analysis graph execution, persistence, and notification."""
@@ -306,12 +308,21 @@ class AsyncStockAnalysisService:
             result_snapshot=result_snapshot,
         )
 
-        llm = get_chat_model()
-        response = await llm.ainvoke(messages)
+        try:
+            llm = get_chat_model()
+            response = await llm.ainvoke(messages)
+            answer = str(response.content).strip()
+        except Exception as exc:
+            logger.exception("stock analysis follow-up llm call failed")
+            answer = self._build_follow_up_fallback_answer(
+                symbol=record.symbol,
+                market=record.market,
+                reason=self._safe_exception_message(exc),
+            )
 
         return StockAnalysisFollowUpResponse(
             thread_id=payload.thread_id,
-            answer=str(response.content).strip(),
+            answer=answer,
             referenced_analysis_record_id=record.id,
             referenced_symbol=record.symbol,
             referenced_market=record.market,
@@ -463,6 +474,27 @@ market={record_market}
             SystemMessage(content=system_prompt),
             HumanMessage(content=human_prompt),
         ]
+
+    def _build_follow_up_fallback_answer(
+            self,
+            *,
+            symbol: str,
+            market: str,
+            reason: str,
+    ) -> str:
+        return (
+            f"当前暂时无法生成 {market}:{symbol} 的追问回答。"
+            "系统已找到上一份分析记录，但 AI 追问生成过程出现异常。"
+            "你可以稍后重试，或先查看原始分析结果、行情数据、技术指标和数据质量报告。"
+            f"内部原因摘要：{reason}"
+        )
+
+    def _safe_exception_message(self, exc: Exception) -> str:
+        message = str(exc).strip()
+        if not message:
+            message = exc.__class__.__name__
+
+        return f"{exc.__class__.__name__}: {message[:300]}"
 
     def _dump_optional_model(self, value):
         if value is None:

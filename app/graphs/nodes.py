@@ -1,4 +1,5 @@
 import json
+import logging
 
 from app.core.exceptions import BadRequestException
 from app.core.llm import get_chat_model
@@ -11,6 +12,8 @@ from app.schemas.stock_analysis import (
 from app.services.indicator_service import IndicatorService
 from app.services.market_data_service import MockMarketDataService
 from langchain_core.messages import HumanMessage, SystemMessage
+
+logger = logging.getLogger(__name__)
 
 
 def load_market_data_node(state: StockAnalysisState) -> StockAnalysisState:
@@ -416,7 +419,10 @@ def analyze_with_llm_node(state: StockAnalysisState) -> StockAnalysisState:
     indicators = state.get("indicators")
 
     if market_snapshot is None or indicators is None:
-        raise BadRequestException(message="market_snapshot and indicators are required")
+        return _build_llm_error_result_state(
+            state=state,
+            reason="market_snapshot and indicators are required before LLM analysis",
+        )
 
     risk_preference = state.get("risk_preference", "balanced")
 
@@ -428,10 +434,16 @@ def analyze_with_llm_node(state: StockAnalysisState) -> StockAnalysisState:
         indicators=indicators.model_dump(mode="json"),
     )
 
-    llm = get_chat_model()
-    response = llm.invoke(messages)
-
-    result = _parse_stock_analysis_result(response.content)
+    try:
+        llm = get_chat_model()
+        response = llm.invoke(messages)
+        result = _parse_stock_analysis_result(response.content)
+    except Exception as exc:
+        logger.exception("stock analysis sync llm node failed")
+        return _build_llm_error_result_state(
+            state=state,
+            reason=_safe_exception_message(exc),
+        )
 
     return {
         "result": result,
@@ -443,7 +455,10 @@ async def analyze_with_llm_node_async(state: StockAnalysisState) -> StockAnalysi
     indicators = state.get("indicators")
 
     if market_snapshot is None or indicators is None:
-        raise BadRequestException(message="market_snapshot and indicators are required")
+        return _build_llm_error_result_state(
+            state=state,
+            reason="market_snapshot and indicators are required before LLM analysis",
+        )
 
     risk_preference = state.get("risk_preference", "balanced")
 
@@ -455,14 +470,88 @@ async def analyze_with_llm_node_async(state: StockAnalysisState) -> StockAnalysi
         indicators=indicators.model_dump(mode="json"),
     )
 
-    llm = get_chat_model()
-    response = await llm.ainvoke(messages)
-
-    result = _parse_stock_analysis_result(response.content)
+    try:
+        llm = get_chat_model()
+        response = await llm.ainvoke(messages)
+        result = _parse_stock_analysis_result(response.content)
+    except Exception as exc:
+        logger.exception("stock analysis async llm node failed")
+        return _build_llm_error_result_state(
+            state=state,
+            reason=_safe_exception_message(exc),
+        )
 
     return {
         "result": result,
     }
+
+
+def _build_llm_error_result_state(
+    *,
+    state: StockAnalysisState,
+    reason: str,
+) -> StockAnalysisState:
+    metadata = {
+        **state.get("metadata", {}),
+        "llm_error_analysis": {
+            "enabled": True,
+            "reason": reason,
+        },
+    }
+
+    quality_context = state.get("quality_context")
+    if quality_context is not None:
+        quality_context = quality_context.model_copy(
+            update={
+                "graph_route": "error",
+                "route_reason": reason,
+                "warnings": _deduplicate_messages(
+                    [
+                        *quality_context.warnings,
+                        "AI 分析服务暂时不可用，本次返回系统降级结果。",
+                    ]
+                ),
+                "errors": _deduplicate_messages(
+                    [
+                        *quality_context.errors,
+                        reason,
+                    ]
+                ),
+            },
+            deep=True,
+        )
+
+    result = StockAnalysisResult(
+        summary="AI 分析服务暂时不可用，系统已返回降级分析结果。",
+        risk_level="medium",
+        trend="neutral",
+        key_points=[
+            "系统已获取到基础分析上下文，但 AI 生成过程出现异常。",
+            "为避免误导用户，本次不输出强趋势判断。",
+        ],
+        suggestion="建议稍后重新发起分析，或先查看行情、技术指标和数据质量报告。",
+        warnings=[
+            "本次结果由系统降级逻辑生成，不代表完整 AI 分析结论。",
+            "该结果不构成投资建议。",
+        ],
+    )
+
+    return {
+        "graph_route": "error",
+        "quality_context": quality_context,
+        "route_reason": reason,
+        "error_message": reason,
+        "result": result,
+        "metadata": metadata,
+    }
+
+
+def _safe_exception_message(exc: Exception) -> str:
+    message = str(exc).strip()
+    if not message:
+        message = exc.__class__.__name__
+
+    return f"{exc.__class__.__name__}: {message[:300]}"
 
 
 def _build_stock_analysis_messages(
@@ -596,15 +685,32 @@ def _normalize_trend(value: object) -> str:
     return mapping.get(normalized, "neutral")
 
 
-def _normalize_string_list(value: object) -> list[str]:
+def _normalize_string_list(
+    value: object,
+    *,
+    max_items: int = 8,
+    max_length: int = 300,
+) -> list[str]:
     if value is None:
         return []
 
     if isinstance(value, list):
-        return [str(item).strip() for item in value if str(item).strip()]
+        items = value
+    else:
+        items = [value]
 
-    text = str(value).strip()
-    return [text] if text else []
+    result: list[str] = []
+    for item in items:
+        text = str(item).strip()
+        if not text:
+            continue
+
+        result.append(text[:max_length])
+
+        if len(result) >= max_items:
+            break
+
+    return result
 
 
 def _strip_markdown_code_block(content: str) -> str:

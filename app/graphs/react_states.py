@@ -1,0 +1,53 @@
+from typing import Any, TypedDict
+
+from app.schemas.stock_analysis import MarketCode
+from app.schemas.stock_analysis_react import (
+    ReactActionType,
+    ReactObservation,
+    ReactToolCall,
+    ReactToolName,
+    ReactToolTrace,
+)
+
+
+class StockAnalysisReactState(TypedDict, total=False):
+    """Runtime state shared by stock analysis ReAct graph nodes.
+
+    This state is only for the ReAct follow-up graph.
+    It should not be mixed with StockAnalysisState from the main analysis graph.
+    """
+
+    # Business identity.
+    analysis_thread_id: str
+    react_graph_checkpoint_id: str
+
+    # Current user and question.
+    user_id: int
+    message: str
+
+    # Referenced analysis record.
+    referenced_analysis_record_id: int
+    referenced_symbol: str
+    referenced_market: MarketCode
+
+    # Context loaded from AnalysisRecord.
+    context_snapshot: dict[str, Any]
+    result_snapshot: dict[str, Any]
+
+    # Tool control.
+    allowed_tools: list[ReactToolName]
+    next_action: ReactActionType
+    tool_call: ReactToolCall
+
+    # ReAct loop state.
+    observations: list[ReactObservation]
+    iteration_count: int
+    max_iterations: int
+
+    # Final output.
+    final_answer: str
+
+    # Error and trace.
+    error_message: str
+    trace: list[ReactToolTrace]
+    metadata: dict[str, Any]

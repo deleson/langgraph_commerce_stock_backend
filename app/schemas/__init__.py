@@ -85,6 +85,17 @@ from app.schemas.market_data_sync import (
     MarketDataQualityReport,
 )
 
+from app.schemas.stock_analysis_react import (
+    ReactActionType,
+    ReactObservation,
+    ReactToolCall,
+    ReactToolName,
+    ReactToolTrace,
+    StockAnalysisReactFollowUpRequest,
+    StockAnalysisReactFollowUpResponse,
+    StockAnalysisReactGraphState,
+)
+
 
 __all__ = [
     "ApiResponse",
@@ -163,4 +174,12 @@ __all__ = [
     "MarketDataSyncStatusUpdate",
     "MarketDataSyncStatusValue",
     "MarketDataQualityReport",
+    "ReactActionType",
+    "ReactObservation",
+    "ReactToolCall",
+    "ReactToolName",
+    "ReactToolTrace",
+    "StockAnalysisReactFollowUpRequest",
+    "StockAnalysisReactFollowUpResponse",
+    "StockAnalysisReactGraphState",
 ]

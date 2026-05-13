@@ -9,7 +9,9 @@ from app.repositories.analysis_record_repo import AsyncAnalysisRecordRepository
 from app.schemas.market import CandleTimeframe, MarketCode, MarketOverviewResponse
 from app.schemas.market_data import AdjustType, MarketDataSource
 from app.schemas.stock_analysis_react import ReactObservation
+from app.schemas.technical_indicator import TechnicalIndicatorResponse
 from app.services.market_service import MarketService
+from app.services.technical_indicator_query_service import TechnicalIndicatorQueryService
 
 class StockAnalysisReactToolService:
     """Business tool executor used by the stock analysis ReAct graph.
@@ -22,6 +24,7 @@ class StockAnalysisReactToolService:
         self.db = db
         self.analysis_record_repo = AsyncAnalysisRecordRepository(db)
         self.market_service = MarketService(db)
+        self.technical_indicator_query_service = TechnicalIndicatorQueryService(db)
 
     async def get_analysis_record(
         self,
@@ -106,6 +109,42 @@ class StockAnalysisReactToolService:
             created_at=datetime.now(UTC),
         )
 
+    async def get_technical_indicators(
+        self,
+        *,
+        symbol: str,
+        market: MarketCode,
+        timeframe: CandleTimeframe = "1d",
+        limit: int = 120,
+        adjust_type: AdjustType = "none",
+        source: MarketDataSource | None = None,
+    ) -> ReactObservation:
+        normalized_symbol = symbol.strip().upper()
+
+        indicators = await self.technical_indicator_query_service.get_summary(
+            symbol=normalized_symbol,
+            market=market,
+            timeframe=timeframe,
+            limit=limit,
+            adjust_type=adjust_type,
+            source=source,
+        )
+
+        return ReactObservation(
+            tool_name="get_technical_indicators",
+            tool_input={
+                "symbol": normalized_symbol,
+                "market": market,
+                "timeframe": timeframe,
+                "limit": limit,
+                "adjust_type": adjust_type,
+                "source": source,
+            },
+            tool_output=self._serialize_technical_indicators(indicators),
+            success=True,
+            created_at=datetime.now(UTC),
+        )
+
     def _serialize_analysis_record(
         self,
         record: AnalysisRecord,
@@ -145,6 +184,25 @@ class StockAnalysisReactToolService:
         if len(candles) > 30:
             payload["candles"] = candles[-30:]
 
+        return payload
+
+    def _serialize_technical_indicators(
+        self,
+        indicators: TechnicalIndicatorResponse,
+    ) -> dict[str, Any]:
+        payload = indicators.model_dump(mode="json")
+
+        summary = payload.get("summary") or {}
+        warnings = summary.get("warnings") or []
+        interpretation = summary.get("interpretation") or []
+
+        if len(warnings) > 5:
+            summary["warnings"] = warnings[:5]
+
+        if len(interpretation) > 8:
+            summary["interpretation"] = interpretation[:8]
+
+        payload["summary"] = summary
         return payload
 
     def _get_nested_value(

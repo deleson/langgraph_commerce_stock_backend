@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from app.graphs.nodes import (
@@ -17,6 +18,11 @@ from app.graphs.states import StockAnalysisState
 
 
 @lru_cache
+def get_stock_analysis_checkpointer() -> MemorySaver:
+    return MemorySaver()
+
+
+@lru_cache
 def get_stock_analysis_graph():
     graph_builder = StateGraph(StockAnalysisState)
 
@@ -26,7 +32,9 @@ def get_stock_analysis_graph():
     )
     _add_common_edges(graph_builder)
 
-    return graph_builder.compile()
+    return graph_builder.compile(
+        checkpointer=get_stock_analysis_checkpointer(),
+    )
 
 
 @lru_cache
@@ -39,19 +47,80 @@ def get_stock_analysis_graph_async():
     )
     _add_common_edges(graph_builder)
 
-    return graph_builder.compile()
+    return graph_builder.compile(
+        checkpointer=get_stock_analysis_checkpointer(),
+    )
 
 
-def run_stock_analysis_graph(initial_state: StockAnalysisState) -> StockAnalysisState:
+def run_stock_analysis_graph(
+    initial_state: StockAnalysisState,
+    *,
+    thread_id: str | None = None,
+) -> StockAnalysisState:
     graph = get_stock_analysis_graph()
-    return graph.invoke(initial_state)
+    config = _build_graph_config(initial_state, thread_id=thread_id)
+
+    return graph.invoke(
+        _ensure_thread_id(initial_state, config),
+        config,
+    )
 
 
 async def arun_stock_analysis_graph(
     initial_state: StockAnalysisState,
+    *,
+    thread_id: str | None = None,
 ) -> StockAnalysisState:
     graph = get_stock_analysis_graph_async()
-    return await graph.ainvoke(initial_state)
+    config = _build_graph_config(initial_state, thread_id=thread_id)
+
+    return await graph.ainvoke(
+        _ensure_thread_id(initial_state, config),
+        config,
+    )
+
+
+def get_stock_analysis_graph_state(
+    *,
+    thread_id: str,
+):
+    graph = get_stock_analysis_graph_async()
+    return graph.get_state(
+        {
+            "configurable": {
+                "thread_id": thread_id,
+            },
+        }
+    )
+
+
+def _build_graph_config(
+    initial_state: StockAnalysisState,
+    *,
+    thread_id: str | None,
+) -> dict:
+    resolved_thread_id = thread_id or initial_state.get("thread_id")
+
+    if not resolved_thread_id:
+        raise ValueError("thread_id is required when graph checkpointing is enabled")
+
+    return {
+        "configurable": {
+            "thread_id": resolved_thread_id,
+        },
+    }
+
+
+def _ensure_thread_id(
+    initial_state: StockAnalysisState,
+    config: dict,
+) -> StockAnalysisState:
+    thread_id = config["configurable"]["thread_id"]
+
+    return {
+        **initial_state,
+        "thread_id": thread_id,
+    }
 
 
 def _add_common_nodes(

@@ -119,6 +119,7 @@ class StockAnalysisResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+
 class StockAnalysisFollowUpRequest(BaseModel):
     thread_id: str = Field(
         min_length=1,

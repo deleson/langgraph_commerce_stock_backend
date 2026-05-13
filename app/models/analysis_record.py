@@ -33,6 +33,12 @@ class AnalysisRecord(Base):
         nullable=False,
     )
 
+    analysis_thread_id: Mapped[str | None] = mapped_column(
+        String(120),
+        index=True,
+        nullable=True,
+    )
+
     symbol: Mapped[str] = mapped_column(String(20),index=True,nullable=False)
     market: Mapped[str] = mapped_column(String(10),index=True,nullable=False)
 

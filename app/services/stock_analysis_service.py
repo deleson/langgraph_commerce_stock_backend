@@ -91,6 +91,7 @@ class StockAnalysisService:
                 market=payload.market,
                 analysis_type=payload.analysis_type,
                 status="completed",
+                analysis_thread_id=thread_id,
                 summary=result.summary,
                 result_snapshot={
                     "thread_id": thread_id,
@@ -229,6 +230,7 @@ class AsyncStockAnalysisService:
                 market=payload.market,
                 analysis_type=payload.analysis_type,
                 status="completed",
+                analysis_thread_id=thread_id,
                 summary=result.summary,
                 result_snapshot={
                     "thread_id": thread_id,

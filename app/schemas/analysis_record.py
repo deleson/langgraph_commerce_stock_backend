@@ -14,6 +14,7 @@ class AnalysisRecordCreateRequest(BaseModel):
     market: MarketCode
     analysis_type: AnalysisType = "stock_basic"
     status: AnalysisStatus = "completed"
+    analysis_thread_id: str | None = Field(default=None, max_length=120)
     summary: str | None = Field(default=None, max_length=500)
     result_snapshot: dict[str, Any] | None = None
     error_message: str | None = None
@@ -30,6 +31,7 @@ class AnalysisRecordResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    analysis_thread_id: str | None
     symbol: str
     market: str
     analysis_type: str

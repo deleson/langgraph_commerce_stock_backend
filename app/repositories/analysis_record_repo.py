@@ -41,13 +41,12 @@ class AnalysisRecordRepository:
             select(AnalysisRecord)
             .where(
                 AnalysisRecord.user_id == user_id,
-                AnalysisRecord.result_snapshot["thread_id"].as_string() == thread_id,
+                AnalysisRecord.analysis_thread_id == thread_id,
             )
             .order_by(AnalysisRecord.created_at.desc())
             .limit(1)
         )
         return self.db.execute(stmt).scalar_one_or_none()
-
     def create(
         self,
         *,
@@ -56,12 +55,14 @@ class AnalysisRecordRepository:
         market: str,
         analysis_type: str = "stock_basic",
         status: str = "completed",
+        analysis_thread_id: str | None = None,
         summary: str | None = None,
         result_snapshot: dict[str, Any] | None = None,
         error_message: str | None = None,
     ) -> AnalysisRecord:
         record = AnalysisRecord(
             user_id=user_id,
+            analysis_thread_id=analysis_thread_id,
             symbol=symbol,
             market=market,
             analysis_type=analysis_type,
@@ -118,7 +119,7 @@ class AsyncAnalysisRecordRepository:
             select(AnalysisRecord)
             .where(
                 AnalysisRecord.user_id == user_id,
-                AnalysisRecord.result_snapshot["thread_id"].as_string() == thread_id,
+                AnalysisRecord.analysis_thread_id == thread_id,
             )
             .order_by(AnalysisRecord.created_at.desc())
             .limit(1)
@@ -134,12 +135,14 @@ class AsyncAnalysisRecordRepository:
         market: str,
         analysis_type: str = "stock_basic",
         status: str = "completed",
+        analysis_thread_id: str | None = None,
         summary: str | None = None,
         result_snapshot: dict[str, Any] | None = None,
         error_message: str | None = None,
     ) -> AnalysisRecord:
         record = AnalysisRecord(
             user_id=user_id,
+            analysis_thread_id=analysis_thread_id,
             symbol=symbol,
             market=market,
             analysis_type=analysis_type,

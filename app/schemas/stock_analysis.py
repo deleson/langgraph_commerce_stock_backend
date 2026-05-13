@@ -112,13 +112,12 @@ class StockAnalysisResponse(BaseModel):
     status: Literal["completed", "failed"]
     graph_route: GraphRoute | None = None
     quality_context: StockAnalysisQualityContext | None = None
-    market_snapshot: MarketSnapshot
-    indicators: IndicatorSnapshot
+    market_snapshot: MarketSnapshot | None = None
+    indicators: IndicatorSnapshot | None = None
     result: StockAnalysisResult
     created_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
-
 
 class StockAnalysisFollowUpRequest(BaseModel):
     thread_id: str = Field(

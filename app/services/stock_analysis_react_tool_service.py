@@ -8,8 +8,10 @@ from app.models.analysis_record import AnalysisRecord
 from app.repositories.analysis_record_repo import AsyncAnalysisRecordRepository
 from app.schemas.market import CandleTimeframe, MarketCode, MarketOverviewResponse
 from app.schemas.market_data import AdjustType, MarketDataSource
+from app.schemas.market_data_sync import MarketDataQualityReport
 from app.schemas.stock_analysis_react import ReactObservation
 from app.schemas.technical_indicator import TechnicalIndicatorResponse
+from app.services.market_data_quality_report_service import MarketDataQualityReportService
 from app.services.market_service import MarketService
 from app.services.technical_indicator_query_service import TechnicalIndicatorQueryService
 
@@ -25,6 +27,7 @@ class StockAnalysisReactToolService:
         self.analysis_record_repo = AsyncAnalysisRecordRepository(db)
         self.market_service = MarketService(db)
         self.technical_indicator_query_service = TechnicalIndicatorQueryService(db)
+        self.market_data_quality_report_service = MarketDataQualityReportService(db)
 
     async def get_analysis_record(
         self,
@@ -145,6 +148,48 @@ class StockAnalysisReactToolService:
             created_at=datetime.now(UTC),
         )
 
+    async def get_data_quality(
+        self,
+        *,
+        symbol: str,
+        market: MarketCode,
+        timeframe: CandleTimeframe = "1d",
+        limit: int = 120,
+        adjust_type: AdjustType = "none",
+        source: MarketDataSource | None = None,
+        min_required: int = 35,
+        stale_after_days: int | None = None,
+    ) -> ReactObservation:
+        normalized_symbol = symbol.strip().upper()
+
+        report = await self.market_data_quality_report_service.get_quality_report(
+            symbol=normalized_symbol,
+            market=market,
+            timeframe=timeframe,
+            limit=limit,
+            adjust_type=adjust_type,
+            source=source,
+            min_required=min_required,
+            stale_after_days=stale_after_days,
+        )
+
+        return ReactObservation(
+            tool_name="get_data_quality",
+            tool_input={
+                "symbol": normalized_symbol,
+                "market": market,
+                "timeframe": timeframe,
+                "limit": limit,
+                "adjust_type": adjust_type,
+                "source": source,
+                "min_required": min_required,
+                "stale_after_days": stale_after_days,
+            },
+            tool_output=self._serialize_data_quality_report(report),
+            success=True,
+            created_at=datetime.now(UTC),
+        )
+
     def _serialize_analysis_record(
         self,
         record: AnalysisRecord,
@@ -203,6 +248,23 @@ class StockAnalysisReactToolService:
             summary["interpretation"] = interpretation[:8]
 
         payload["summary"] = summary
+        return payload
+
+    def _serialize_data_quality_report(
+        self,
+        report: MarketDataQualityReport,
+    ) -> dict[str, Any]:
+        payload = report.model_dump(mode="json")
+
+        errors = payload.get("errors") or []
+        warnings = payload.get("warnings") or []
+
+        if len(errors) > 10:
+            payload["errors"] = errors[:10]
+
+        if len(warnings) > 10:
+            payload["warnings"] = warnings[:10]
+
         return payload
 
     def _get_nested_value(

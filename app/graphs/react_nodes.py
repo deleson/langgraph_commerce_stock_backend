@@ -510,18 +510,12 @@ def _build_tool_execution_update(
     observation: ReactObservation,
     trace: ReactToolTrace,
 ) -> StockAnalysisReactState:
-    observations = [
-        *state.get("observations", []),
-        observation,
-    ]
-    traces = [
-        *state.get("trace", []),
-        trace,
-    ]
+    observation_count = len(state.get("observations", [])) + 1
+    trace_count = len(state.get("trace", [])) + 1
 
     return {
-        "observations": observations,
-        "trace": traces,
+        "observations": [observation],
+        "trace": [trace],
         "iteration_count": state.get("iteration_count", 0) + 1,
         "tool_call": None,
         "metadata": {
@@ -529,8 +523,8 @@ def _build_tool_execution_update(
             "react_tool_execution": {
                 "last_tool_name": observation.tool_name,
                 "last_tool_success": observation.success,
-                "observation_count": len(observations),
-                "trace_count": len(traces),
+                "observation_count": observation_count,
+                "trace_count": trace_count,
             },
         },
     }

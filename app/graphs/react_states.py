@@ -1,4 +1,6 @@
-from typing import Any, TypedDict
+import operator
+from typing import Annotated, Any, TypedDict
+
 
 from app.schemas.stock_analysis import MarketCode
 from app.schemas.stock_analysis_react import (
@@ -40,7 +42,7 @@ class StockAnalysisReactState(TypedDict, total=False):
     tool_call: ReactToolCall | None
 
     # ReAct loop state.
-    observations: list[ReactObservation]
+    observations: Annotated[list[ReactObservation], operator.add]
     iteration_count: int
     max_iterations: int
 
@@ -49,5 +51,5 @@ class StockAnalysisReactState(TypedDict, total=False):
 
     # Error and trace.
     error_message: str
-    trace: list[ReactToolTrace]
+    trace: Annotated[list[ReactToolTrace], operator.add]
     metadata: dict[str, Any]

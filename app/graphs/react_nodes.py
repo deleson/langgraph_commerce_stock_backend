@@ -21,6 +21,18 @@ from app.schemas.stock_analysis_react import (
     ReactToolCall,
     ReactToolTrace,
 )
+from app.graphs.react_safety import (
+    MAX_DATA_QUALITY_LIMIT,
+    MAX_MARKET_OVERVIEW_LIMIT,
+    MAX_REACT_FINAL_ANSWER_LENGTH,
+    MAX_TECHNICAL_INDICATOR_LIMIT,
+    MAX_WATCHLIST_LIMIT,
+    clamp_int,
+    safe_error_message,
+    sanitize_tool_input,
+    sanitize_tool_output,
+    truncate_text,
+)
 
 if TYPE_CHECKING:
     from app.services.stock_analysis_react_tool_service import (
@@ -374,8 +386,10 @@ async def _execute_react_tool(
         }
 
     tool_name = tool_call.tool_name
-    tool_input = dict(tool_call.tool_input or {})
+    tool_input = sanitize_tool_input(dict(tool_call.tool_input or {}))
+    tool_reason = truncate_text(tool_call.reason or "", max_length=500)
     iteration_count = state.get("iteration_count", 0)
+
     start_time = perf_counter()
 
     try:
@@ -391,6 +405,7 @@ async def _execute_react_tool(
             step=iteration_count + 1,
             action="tool_call",
             tool_name=tool_name,
+            reason=tool_reason,
             duration_ms=duration_ms,
             success=True,
         )
@@ -405,7 +420,7 @@ async def _execute_react_tool(
         logger.exception("react tool execution failed")
 
         duration_ms = int((perf_counter() - start_time) * 1000)
-        error_message = _safe_exception_message(exc)
+        error_message = safe_error_message(exc)
 
         observation = ReactObservation(
             tool_name=tool_name,
@@ -419,6 +434,7 @@ async def _execute_react_tool(
             step=iteration_count + 1,
             action="tool_call",
             tool_name=tool_name,
+            reason=tool_reason,
             duration_ms=duration_ms,
             success=False,
             error_message=error_message,
@@ -455,14 +471,22 @@ async def _call_react_tool(
             symbol=_get_symbol(tool_input, state),
             market=_get_market(tool_input, state),
             timeframe=tool_input.get("timeframe", "1d"),
-            limit=int(tool_input.get("limit", 30)),
+            limit=clamp_int(
+                tool_input.get("limit"),
+                default=30,
+                min_value=1,
+                max_value=MAX_MARKET_OVERVIEW_LIMIT,
+            ),
             include_technical_indicators=bool(
                 tool_input.get("include_technical_indicators", False)
             ),
             include_data_quality=bool(tool_input.get("include_data_quality", True)),
             include_sync_status=bool(tool_input.get("include_sync_status", True)),
-            technical_indicator_limit=int(
-                tool_input.get("technical_indicator_limit", 120)
+            technical_indicator_limit=clamp_int(
+                tool_input.get("technical_indicator_limit"),
+                default=120,
+                min_value=20,
+                max_value=MAX_TECHNICAL_INDICATOR_LIMIT,
             ),
             adjust_type=tool_input.get("adjust_type", "none"),
             source=tool_input.get("source"),
@@ -473,7 +497,12 @@ async def _call_react_tool(
             symbol=_get_symbol(tool_input, state),
             market=_get_market(tool_input, state),
             timeframe=tool_input.get("timeframe", "1d"),
-            limit=int(tool_input.get("limit", 120)),
+            limit=clamp_int(
+                tool_input.get("limit"),
+                default=120,
+                min_value=20,
+                max_value=MAX_TECHNICAL_INDICATOR_LIMIT,
+            ),
             adjust_type=tool_input.get("adjust_type", "none"),
             source=tool_input.get("source"),
         )
@@ -483,10 +512,20 @@ async def _call_react_tool(
             symbol=_get_symbol(tool_input, state),
             market=_get_market(tool_input, state),
             timeframe=tool_input.get("timeframe", "1d"),
-            limit=int(tool_input.get("limit", 120)),
+            limit=clamp_int(
+                tool_input.get("limit"),
+                default=120,
+                min_value=1,
+                max_value=MAX_DATA_QUALITY_LIMIT,
+            ),
             adjust_type=tool_input.get("adjust_type", "none"),
             source=tool_input.get("source"),
-            min_required=int(tool_input.get("min_required", 35)),
+            min_required=clamp_int(
+                tool_input.get("min_required"),
+                default=35,
+                min_value=1,
+                max_value=MAX_DATA_QUALITY_LIMIT,
+            ),
             stale_after_days=tool_input.get("stale_after_days"),
         )
 
@@ -498,7 +537,12 @@ async def _call_react_tool(
     if tool_name == "get_watchlist":
         return await tool_service.get_watchlist(
             user_id=_get_required_int(state, "user_id"),
-            limit=int(tool_input.get("limit", 50)),
+            limit=clamp_int(
+                tool_input.get("limit"),
+                default=50,
+                min_value=1,
+                max_value=MAX_WATCHLIST_LIMIT,
+            ),
         )
 
     raise ValueError(f"unsupported react tool: {tool_name}")
@@ -510,25 +554,40 @@ def _build_tool_execution_update(
     observation: ReactObservation,
     trace: ReactToolTrace,
 ) -> StockAnalysisReactState:
+    safe_observation = _sanitize_observation_for_state(observation)
     observation_count = len(state.get("observations", [])) + 1
     trace_count = len(state.get("trace", [])) + 1
 
     return {
-        "observations": [observation],
+        "observations": [safe_observation],
         "trace": [trace],
         "iteration_count": state.get("iteration_count", 0) + 1,
         "tool_call": None,
         "metadata": {
             **state.get("metadata", {}),
             "react_tool_execution": {
-                "last_tool_name": observation.tool_name,
-                "last_tool_success": observation.success,
+                "last_tool_name": safe_observation.tool_name,
+                "last_tool_success": safe_observation.success,
                 "observation_count": observation_count,
                 "trace_count": trace_count,
             },
         },
     }
 
+
+def _sanitize_observation_for_state(
+    observation: ReactObservation,
+) -> ReactObservation:
+    payload = observation.model_dump(mode="python")
+    payload["tool_input"] = sanitize_tool_input(payload.get("tool_input") or {})
+    payload["tool_output"] = sanitize_tool_output(payload.get("tool_output"))
+    payload["error_message"] = (
+        truncate_text(payload["error_message"], max_length=500)
+        if payload.get("error_message")
+        else None
+    )
+
+    return ReactObservation.model_validate(payload)
 
 def _get_symbol(
     tool_input: dict[str, Any],
@@ -572,7 +631,10 @@ async def final_answer_node(
     Otherwise it asks the LLM to summarize the available context.
     """
 
-    existing_answer = str(state.get("final_answer") or "").strip()
+    existing_answer = truncate_text(
+        str(state.get("final_answer") or "").strip(),
+        max_length=MAX_REACT_FINAL_ANSWER_LENGTH,
+    )
     if existing_answer:
         return {
             "next_action": "final_answer",
@@ -724,7 +786,10 @@ def _normalize_final_answer(
     if not answer:
         return "当前可用信息不足，我暂时无法生成可靠的追问回答。"
 
-    return answer
+    return truncate_text(
+        answer,
+        max_length=MAX_REACT_FINAL_ANSWER_LENGTH,
+    )
 
 
 def _build_final_answer_fallback(

@@ -16,6 +16,8 @@ from app.schemas.stock_analysis_react import (
     StockAnalysisReactFollowUpResponse,
 )
 from app.services.stock_analysis_react_tool_service import StockAnalysisReactToolService
+from app.graphs.react_safety import sanitize_tool_output, truncate_text
+
 
 
 class StockAnalysisReactService:
@@ -131,7 +133,7 @@ class StockAnalysisReactService:
     ) -> str:
         answer = str(final_state.get("final_answer") or "").strip()
         if answer:
-            return answer
+            return truncate_text(answer, max_length=3000)
 
         error_message = str(final_state.get("error_message") or "").strip()
         if error_message:
@@ -154,10 +156,13 @@ class StockAnalysisReactService:
 
         for observation in observations:
             if isinstance(observation, ReactObservation):
-                result.append(observation)
+                payload = observation.model_dump(mode="python")
+                payload["tool_output"] = sanitize_tool_output(payload.get("tool_output"))
+                result.append(ReactObservation.model_validate(payload))
                 continue
 
             if isinstance(observation, dict):
+                observation["tool_output"] = sanitize_tool_output(observation.get("tool_output"))
                 result.append(ReactObservation.model_validate(observation))
 
         return result

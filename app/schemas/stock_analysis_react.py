@@ -45,10 +45,10 @@ class ReactToolTrace(BaseModel):
     step: int = Field(ge=1)
     action: ReactActionType
     tool_name: ReactToolName | None = None
+    reason: str | None = Field(default=None, max_length=500)
     duration_ms: int | None = Field(default=None, ge=0)
     success: bool = True
     error_message: str | None = Field(default=None, max_length=1000)
-
 
 class StockAnalysisReactFollowUpRequest(BaseModel):
     analysis_thread_id: str = Field(

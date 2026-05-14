@@ -29,6 +29,7 @@ from app.graphs.react_tools import (
 from app.graphs.react_nodes import (
     agent_reason_node,
     create_react_tool_execution_node,
+    final_answer_node,
 )
 from app.graphs.react_routers import route_react_action
 
@@ -59,5 +60,6 @@ __all__ = [
     "agent_reason_node",
     "route_react_action",
     "create_react_tool_execution_node",
+    "final_answer_node",
 
 ]

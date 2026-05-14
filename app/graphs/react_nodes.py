@@ -567,3 +567,214 @@ def _get_required_int(
         raise ValueError(f"{key} is required")
 
     return int(value)
+
+
+async def final_answer_node(
+    state: StockAnalysisReactState,
+) -> StockAnalysisReactState:
+    """Build the final user-facing answer from ReAct context and observations.
+
+    If a previous node already produced final_answer, this node keeps it.
+    Otherwise it asks the LLM to summarize the available context.
+    """
+
+    existing_answer = str(state.get("final_answer") or "").strip()
+    if existing_answer:
+        return {
+            "next_action": "final_answer",
+            "final_answer": existing_answer,
+            "metadata": {
+                **state.get("metadata", {}),
+                "react_final_answer": {
+                    "source": "existing_final_answer",
+                    "observation_count": len(state.get("observations", [])),
+                    "trace_count": len(state.get("trace", [])),
+                },
+            },
+        }
+
+    messages = _build_final_answer_messages(state)
+    answer_source = "llm"
+
+    try:
+        llm = get_chat_model()
+        response = await llm.ainvoke(messages)
+        answer = _normalize_final_answer(str(response.content))
+    except Exception as exc:
+        logger.exception("react final answer node failed")
+        answer_source = "fallback"
+        answer = _build_final_answer_fallback(
+            state=state,
+            reason=_safe_exception_message(exc),
+        )
+
+    return {
+        "next_action": "final_answer",
+        "final_answer": answer,
+        "metadata": {
+            **state.get("metadata", {}),
+            "react_final_answer": {
+                "source": answer_source,
+                "observation_count": len(state.get("observations", [])),
+                "trace_count": len(state.get("trace", [])),
+                "successful_observation_count": _count_observations(
+                    state,
+                    success=True,
+                ),
+                "failed_observation_count": _count_observations(
+                    state,
+                    success=False,
+                ),
+            },
+        },
+    }
+
+
+def _build_final_answer_messages(
+    state: StockAnalysisReactState,
+) -> list[SystemMessage | HumanMessage]:
+    context = _build_final_answer_context(state)
+
+    system_prompt = """
+你是一个谨慎、客观的中文股票分析助手。
+
+你正在基于一次已有股票分析，以及 ReAct 工具调用结果，回答用户的追问。
+
+重要规则：
+1. 只能基于提供的上下文和工具观察结果回答。
+2. 不要编造实时行情、新闻、财报或未提供的数据。
+3. 不要承诺收益，不要说“必涨”“稳赚”“一定买入”。
+4. 如果数据不足，要明确说明不确定性。
+5. 使用简体中文回答。
+6. 回答要适合普通用户理解，必要时可以分点说明。
+7. 结尾要提醒：内容仅供研究参考，不构成投资建议。
+""".strip()
+
+    human_prompt = f"""
+用户追问：
+{state.get("message", "")}
+
+当前 ReAct 上下文：
+{json.dumps(context, ensure_ascii=False)}
+
+请基于以上信息，生成最终中文回答。
+""".strip()
+
+    return [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=human_prompt),
+    ]
+
+
+def _build_final_answer_context(
+    state: StockAnalysisReactState,
+) -> dict[str, Any]:
+    context_snapshot = state.get("context_snapshot") or {}
+    result_snapshot = state.get("result_snapshot") or {}
+
+    if isinstance(context_snapshot, dict):
+        compact_context_snapshot = _truncate_dict(context_snapshot, max_items=30)
+    else:
+        compact_context_snapshot = {"value": str(context_snapshot)}
+
+    if isinstance(result_snapshot, dict):
+        compact_result_snapshot = _truncate_dict(result_snapshot, max_items=30)
+    else:
+        compact_result_snapshot = {"value": str(result_snapshot)}
+
+    observations = [
+        _dump_observation(observation)
+        for observation in state.get("observations", [])
+    ]
+
+    trace = [
+        _dump_trace_item(trace_item)
+        for trace_item in state.get("trace", [])
+    ]
+
+    return {
+        "analysis_thread_id": state.get("analysis_thread_id"),
+        "user_id": state.get("user_id"),
+        "referenced_analysis_record_id": state.get("referenced_analysis_record_id"),
+        "referenced_symbol": state.get("referenced_symbol"),
+        "referenced_market": state.get("referenced_market"),
+        "context_snapshot": compact_context_snapshot,
+        "result_snapshot": compact_result_snapshot,
+        "observations": observations[-8:],
+        "trace": trace[-8:],
+        "iteration_count": state.get("iteration_count", 0),
+        "max_iterations": state.get("max_iterations", 3),
+    }
+
+
+def _dump_trace_item(
+    trace_item: Any,
+) -> dict[str, Any]:
+    if hasattr(trace_item, "model_dump"):
+        return trace_item.model_dump(mode="json")
+
+    if isinstance(trace_item, dict):
+        return trace_item
+
+    return {"value": str(trace_item)}
+
+
+def _normalize_final_answer(
+    content: str,
+) -> str:
+    answer = content.strip()
+
+    if answer.startswith("```"):
+        answer = _strip_markdown_code_block(answer)
+
+    if not answer:
+        return "当前可用信息不足，我暂时无法生成可靠的追问回答。"
+
+    return answer
+
+
+def _build_final_answer_fallback(
+    *,
+    state: StockAnalysisReactState,
+    reason: str,
+) -> str:
+    symbol = state.get("referenced_symbol") or "该股票"
+    market = state.get("referenced_market") or "当前市场"
+    success_count = _count_observations(state, success=True)
+    failed_count = _count_observations(state, success=False)
+
+    if success_count > 0:
+        return (
+            f"我已经读取到 {symbol}（{market}）的部分工具结果，"
+            "但在整理最终回答时出现了模型调用异常。"
+            f"当前成功获取了 {success_count} 条观察结果，"
+            f"失败 {failed_count} 条。"
+            "建议你稍后重新追问，或换一个更具体的问题继续分析。"
+            "以上内容仅供研究参考，不构成投资建议。"
+        )
+
+    return (
+        f"我暂时无法基于 {symbol}（{market}）生成可靠的追问回答。"
+        f"原因是最终回答生成失败：{reason}。"
+        "建议先确认该股票是否已有分析记录、行情数据和技术指标数据。"
+        "以上内容仅供研究参考，不构成投资建议。"
+    )
+
+
+def _count_observations(
+    state: StockAnalysisReactState,
+    *,
+    success: bool,
+) -> int:
+    count = 0
+
+    for observation in state.get("observations", []):
+        if hasattr(observation, "success"):
+            if observation.success is success:
+                count += 1
+            continue
+
+        if isinstance(observation, dict) and observation.get("success") is success:
+            count += 1
+
+    return count

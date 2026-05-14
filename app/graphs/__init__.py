@@ -26,6 +26,7 @@ from app.graphs.react_tools import (
     get_react_tool_definition,
     is_react_tool_allowed,
 )
+from app.graphs.react_nodes import agent_reason_node
 
 
 __all__ = [
@@ -51,5 +52,6 @@ __all__ = [
     "get_default_react_tools",
     "get_react_tool_definition",
     "is_react_tool_allowed",
+    "agent_reason_node",
 
 ]

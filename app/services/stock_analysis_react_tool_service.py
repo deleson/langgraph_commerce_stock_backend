@@ -4,8 +4,12 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundException
+from app.models.user_preference import UserPreference
+from app.models.watchlist_item import WatchlistItem
 from app.models.analysis_record import AnalysisRecord
 from app.repositories.analysis_record_repo import AsyncAnalysisRecordRepository
+from app.repositories.user_preference_repo import AsyncUserPreferenceRepository
+from app.repositories.watchlist_repo import AsyncWatchlistRepository
 from app.schemas.market import CandleTimeframe, MarketCode, MarketOverviewResponse
 from app.schemas.market_data import AdjustType, MarketDataSource
 from app.schemas.market_data_sync import MarketDataQualityReport
@@ -25,10 +29,11 @@ class StockAnalysisReactToolService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self.analysis_record_repo = AsyncAnalysisRecordRepository(db)
+        self.user_preference_repo = AsyncUserPreferenceRepository(db)
+        self.watchlist_repo = AsyncWatchlistRepository(db)
         self.market_service = MarketService(db)
         self.technical_indicator_query_service = TechnicalIndicatorQueryService(db)
         self.market_data_quality_report_service = MarketDataQualityReportService(db)
-
     async def get_analysis_record(
         self,
         *,
@@ -190,6 +195,52 @@ class StockAnalysisReactToolService:
             created_at=datetime.now(UTC),
         )
 
+    async def get_user_preference(
+        self,
+        *,
+        user_id: int,
+    ) -> ReactObservation:
+        preference = await self.user_preference_repo.get_by_user_id(user_id)
+
+        return ReactObservation(
+            tool_name="get_user_preference",
+            tool_input={
+                "user_id": user_id,
+            },
+            tool_output=self._serialize_user_preference(preference),
+            success=True,
+            created_at=datetime.now(UTC),
+        )
+
+    async def get_watchlist(
+        self,
+        *,
+        user_id: int,
+        limit: int = 50,
+    ) -> ReactObservation:
+        items = await self.watchlist_repo.list_by_user_id(user_id)
+        safe_limit = max(0, min(limit, 50))
+        limited_items = items[:safe_limit]
+
+        return ReactObservation(
+            tool_name="get_watchlist",
+            tool_input={
+                "user_id": user_id,
+                "limit": safe_limit,
+            },
+            tool_output={
+                "count": len(items),
+                "returned_count": len(limited_items),
+                "items": [
+                    self._serialize_watchlist_item(item)
+                    for item in limited_items
+                ],
+            },
+            success=True,
+            created_at=datetime.now(UTC),
+        )
+
+
     def _serialize_analysis_record(
         self,
         record: AnalysisRecord,
@@ -266,6 +317,48 @@ class StockAnalysisReactToolService:
             payload["warnings"] = warnings[:10]
 
         return payload
+
+    def _serialize_user_preference(
+        self,
+        preference: UserPreference | None,
+    ) -> dict[str, Any]:
+        if preference is None:
+            return {
+                "available": False,
+                "risk_preference": "balanced",
+                "timezone": "Asia/Shanghai",
+                "daily_report_enabled": False,
+                "abnormal_alert_enabled": False,
+                "default_watchlist_alert_enabled": False,
+                "note": "user preference not found, fallback defaults are used",
+            }
+
+        return {
+            "available": True,
+            "id": preference.id,
+            "risk_preference": preference.risk_preference,
+            "timezone": preference.timezone,
+            "daily_report_enabled": preference.daily_report_enabled,
+            "abnormal_alert_enabled": preference.abnormal_alert_enabled,
+            "default_watchlist_alert_enabled": preference.default_watchlist_alert_enabled,
+            "created_at": preference.created_at.isoformat() if preference.created_at else None,
+            "updated_at": preference.updated_at.isoformat() if preference.updated_at else None,
+        }
+
+    def _serialize_watchlist_item(
+        self,
+        item: WatchlistItem,
+    ) -> dict[str, Any]:
+        return {
+            "id": item.id,
+            "symbol": item.symbol,
+            "market": item.market,
+            "name": item.name,
+            "notes": item.notes,
+            "alert_enabled": item.alert_enabled,
+            "created_at": item.created_at.isoformat() if item.created_at else None,
+            "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+        }
 
     def _get_nested_value(
         self,

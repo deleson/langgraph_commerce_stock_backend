@@ -8,7 +8,12 @@ from app.schemas.stock_analysis import (
     StockAnalysisRequest,
     StockAnalysisResponse,
 )
+from app.schemas.stock_analysis_react import (
+    StockAnalysisReactFollowUpRequest,
+    StockAnalysisReactFollowUpResponse,
+)
 from app.services.stock_analysis_service import AsyncStockAnalysisService
+from app.services.stock_analysis_react_service import StockAnalysisReactService
 from app.utils.responses import success_response
 
 router = APIRouter(prefix="/analysis", tags=["stock-analysis"])
@@ -70,6 +75,37 @@ async def follow_up_stock_analysis(
     """
 
     result = await AsyncStockAnalysisService(db).follow_up_stock_analysis(
+        user=current_user,
+        payload=payload,
+    )
+    return success_response(data=result)
+
+@router.post(
+    "/stock/react-follow-up",
+    summary="ReAct Follow Up Stock Analysis",
+    description=(
+        "Ask a tool-augmented ReAct follow-up question based on a previous "
+        "stock analysis thread. The endpoint requires analysis_thread_id, "
+        "loads the current user's AnalysisRecord, runs a ReAct graph, and "
+        "returns answer, used_tools, observations, and trace."
+    ),
+    response_model=ApiResponse[StockAnalysisReactFollowUpResponse],
+)
+async def react_follow_up_stock_analysis(
+    payload: StockAnalysisReactFollowUpRequest,
+    current_user: AsyncCurrentUser,
+    db: AsyncDBSession,
+) -> ApiResponse[StockAnalysisReactFollowUpResponse]:
+    """Answer a follow-up question with ReAct tool calling.
+
+    This endpoint is stricter and more capable than the minimal follow-up API:
+    - it requires an existing analysis_thread_id
+    - it verifies the thread belongs to the current user
+    - it lets the ReAct graph decide whether to call safe business tools
+    - it returns tool observations and trace for debugging and audit
+    """
+
+    result = await StockAnalysisReactService(db).follow_up_stock_analysis(
         user=current_user,
         payload=payload,
     )

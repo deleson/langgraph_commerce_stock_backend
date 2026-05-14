@@ -12,7 +12,20 @@ from app.graphs.react_tools import (
     get_default_react_tools,
     is_react_tool_allowed,
 )
-from app.schemas.stock_analysis_react import ReactToolCall
+from datetime import UTC, datetime
+from time import perf_counter
+from typing import TYPE_CHECKING
+
+from app.schemas.stock_analysis_react import (
+    ReactObservation,
+    ReactToolCall,
+    ReactToolTrace,
+)
+
+if TYPE_CHECKING:
+    from app.services.stock_analysis_react_tool_service import (
+        StockAnalysisReactToolService,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -325,3 +338,232 @@ def _build_iteration_limit_answer(
         "由于达到本次追问的最大推理轮数，下面只能基于已获得的信息给出谨慎回答。"
         "如果你需要更深入分析，可以重新发起一个更具体的问题。"
     )
+
+
+def create_react_tool_execution_node(
+    tool_service: "StockAnalysisReactToolService",
+):
+    """Create a ReAct tool execution node with request-scoped dependencies.
+
+    The returned node can be registered into LangGraph.
+    The database session stays inside tool_service, not inside graph state.
+    """
+
+    async def react_tool_execution_node(
+        state: StockAnalysisReactState,
+    ) -> StockAnalysisReactState:
+        return await _execute_react_tool(
+            state=state,
+            tool_service=tool_service,
+        )
+
+    return react_tool_execution_node
+
+
+async def _execute_react_tool(
+    *,
+    state: StockAnalysisReactState,
+    tool_service: "StockAnalysisReactToolService",
+) -> StockAnalysisReactState:
+    tool_call = state.get("tool_call")
+
+    if tool_call is None:
+        return {
+            "next_action": "error",
+            "error_message": "tool_call is required before executing react tool",
+        }
+
+    tool_name = tool_call.tool_name
+    tool_input = dict(tool_call.tool_input or {})
+    iteration_count = state.get("iteration_count", 0)
+    start_time = perf_counter()
+
+    try:
+        observation = await _call_react_tool(
+            tool_service=tool_service,
+            state=state,
+            tool_call=tool_call,
+            tool_input=tool_input,
+        )
+
+        duration_ms = int((perf_counter() - start_time) * 1000)
+        trace = ReactToolTrace(
+            step=iteration_count + 1,
+            action="tool_call",
+            tool_name=tool_name,
+            duration_ms=duration_ms,
+            success=True,
+        )
+
+        return _build_tool_execution_update(
+            state=state,
+            observation=observation,
+            trace=trace,
+        )
+
+    except Exception as exc:
+        logger.exception("react tool execution failed")
+
+        duration_ms = int((perf_counter() - start_time) * 1000)
+        error_message = _safe_exception_message(exc)
+
+        observation = ReactObservation(
+            tool_name=tool_name,
+            tool_input=tool_input,
+            tool_output=None,
+            success=False,
+            error_message=error_message,
+            created_at=datetime.now(UTC),
+        )
+        trace = ReactToolTrace(
+            step=iteration_count + 1,
+            action="tool_call",
+            tool_name=tool_name,
+            duration_ms=duration_ms,
+            success=False,
+            error_message=error_message,
+        )
+
+        return _build_tool_execution_update(
+            state=state,
+            observation=observation,
+            trace=trace,
+        )
+
+
+async def _call_react_tool(
+    *,
+    tool_service: "StockAnalysisReactToolService",
+    state: StockAnalysisReactState,
+    tool_call: ReactToolCall,
+    tool_input: dict[str, Any],
+) -> ReactObservation:
+    tool_name = tool_call.tool_name
+
+    if tool_name == "get_analysis_record":
+        return await tool_service.get_analysis_record(
+            analysis_thread_id=str(
+                tool_input.get("analysis_thread_id")
+                or state.get("analysis_thread_id")
+                or ""
+            ),
+            user_id=_get_required_int(state, "user_id"),
+        )
+
+    if tool_name == "get_market_overview":
+        return await tool_service.get_market_overview(
+            symbol=_get_symbol(tool_input, state),
+            market=_get_market(tool_input, state),
+            timeframe=tool_input.get("timeframe", "1d"),
+            limit=int(tool_input.get("limit", 30)),
+            include_technical_indicators=bool(
+                tool_input.get("include_technical_indicators", False)
+            ),
+            include_data_quality=bool(tool_input.get("include_data_quality", True)),
+            include_sync_status=bool(tool_input.get("include_sync_status", True)),
+            technical_indicator_limit=int(
+                tool_input.get("technical_indicator_limit", 120)
+            ),
+            adjust_type=tool_input.get("adjust_type", "none"),
+            source=tool_input.get("source"),
+        )
+
+    if tool_name == "get_technical_indicators":
+        return await tool_service.get_technical_indicators(
+            symbol=_get_symbol(tool_input, state),
+            market=_get_market(tool_input, state),
+            timeframe=tool_input.get("timeframe", "1d"),
+            limit=int(tool_input.get("limit", 120)),
+            adjust_type=tool_input.get("adjust_type", "none"),
+            source=tool_input.get("source"),
+        )
+
+    if tool_name == "get_data_quality":
+        return await tool_service.get_data_quality(
+            symbol=_get_symbol(tool_input, state),
+            market=_get_market(tool_input, state),
+            timeframe=tool_input.get("timeframe", "1d"),
+            limit=int(tool_input.get("limit", 120)),
+            adjust_type=tool_input.get("adjust_type", "none"),
+            source=tool_input.get("source"),
+            min_required=int(tool_input.get("min_required", 35)),
+            stale_after_days=tool_input.get("stale_after_days"),
+        )
+
+    if tool_name == "get_user_preference":
+        return await tool_service.get_user_preference(
+            user_id=_get_required_int(state, "user_id"),
+        )
+
+    if tool_name == "get_watchlist":
+        return await tool_service.get_watchlist(
+            user_id=_get_required_int(state, "user_id"),
+            limit=int(tool_input.get("limit", 50)),
+        )
+
+    raise ValueError(f"unsupported react tool: {tool_name}")
+
+
+def _build_tool_execution_update(
+    *,
+    state: StockAnalysisReactState,
+    observation: ReactObservation,
+    trace: ReactToolTrace,
+) -> StockAnalysisReactState:
+    observations = [
+        *state.get("observations", []),
+        observation,
+    ]
+    traces = [
+        *state.get("trace", []),
+        trace,
+    ]
+
+    return {
+        "observations": observations,
+        "trace": traces,
+        "iteration_count": state.get("iteration_count", 0) + 1,
+        "tool_call": None,
+        "metadata": {
+            **state.get("metadata", {}),
+            "react_tool_execution": {
+                "last_tool_name": observation.tool_name,
+                "last_tool_success": observation.success,
+                "observation_count": len(observations),
+                "trace_count": len(traces),
+            },
+        },
+    }
+
+
+def _get_symbol(
+    tool_input: dict[str, Any],
+    state: StockAnalysisReactState,
+) -> str:
+    symbol = tool_input.get("symbol") or state.get("referenced_symbol")
+    if not symbol:
+        raise ValueError("symbol is required for this react tool")
+
+    return str(symbol).strip().upper()
+
+
+def _get_market(
+    tool_input: dict[str, Any],
+    state: StockAnalysisReactState,
+) -> str:
+    market = tool_input.get("market") or state.get("referenced_market")
+    if not market:
+        raise ValueError("market is required for this react tool")
+
+    return str(market).strip().upper()
+
+
+def _get_required_int(
+    state: StockAnalysisReactState,
+    key: str,
+) -> int:
+    value = state.get(key)
+    if value is None:
+        raise ValueError(f"{key} is required")
+
+    return int(value)

@@ -36,8 +36,8 @@ class StockAnalysisReactState(TypedDict, total=False):
 
     # Tool control.
     allowed_tools: list[ReactToolName]
-    next_action: ReactActionType
-    tool_call: ReactToolCall
+    next_action: ReactActionType | None
+    tool_call: ReactToolCall | None
 
     # ReAct loop state.
     observations: list[ReactObservation]

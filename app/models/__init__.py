@@ -12,6 +12,7 @@ from app.models.market_candle import MarketCandle
 from app.models.market_data_sync_status import MarketDataSyncStatus
 from app.models.market_data_sync_log import MarketDataSyncLog
 from app.models.analysis_conversation_message import AnalysisConversationMessage
+from app.models.analysis_react_trace import AnalysisReactTrace
 
 __all__ = [
     "AnalysisRecord",
@@ -28,4 +29,5 @@ __all__ = [
     "MarketDataSyncStatus",
     "MarketDataSyncLog",
     "AnalysisConversationMessage",
+    "AnalysisReactTrace",
 ]

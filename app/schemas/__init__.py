@@ -96,6 +96,20 @@ from app.schemas.stock_analysis_react import (
     StockAnalysisReactGraphState,
 )
 
+from app.schemas.analysis_conversation import (
+    AnalysisConversationContext,
+    AnalysisConversationContextMessage,
+    AnalysisConversationMessageCreate,
+    AnalysisConversationMessageQuery,
+    AnalysisConversationMessageResponse,
+    AnalysisReactTraceCreate,
+    AnalysisReactTraceQuery,
+    AnalysisReactTraceResponse,
+    ConversationMessageType,
+    ConversationRole,
+    ConversationSource,
+)
+
 
 __all__ = [
     "ApiResponse",
@@ -182,4 +196,15 @@ __all__ = [
     "StockAnalysisReactFollowUpRequest",
     "StockAnalysisReactFollowUpResponse",
     "StockAnalysisReactGraphState",
+    "AnalysisConversationContext",
+    "AnalysisConversationContextMessage",
+    "AnalysisConversationMessageCreate",
+    "AnalysisConversationMessageQuery",
+    "AnalysisConversationMessageResponse",
+    "AnalysisReactTraceCreate",
+    "AnalysisReactTraceQuery",
+    "AnalysisReactTraceResponse",
+    "ConversationMessageType",
+    "ConversationRole",
+    "ConversationSource",
 ]

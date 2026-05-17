@@ -26,6 +26,7 @@ from app.services.market_data_quality_report_service import MarketDataQualityRep
 from app.services.market_data_cache_service import MarketDataCacheService
 from app.services.stock_analysis_react_tool_service import StockAnalysisReactToolService
 from app.services.stock_analysis_react_service import StockAnalysisReactService
+from app.services.analysis_conversation_service import AnalysisConversationService
 # from app.services.stock_analysis_service import StockAnalysisService
 
 
@@ -56,5 +57,6 @@ __all__ = [
     "MarketDataCacheService",
     "StockAnalysisReactToolService",
     "StockAnalysisReactService",
+    "AnalysisConversationService",
     # "StockAnalysisService",
 ]

@@ -7,6 +7,7 @@ from app.repositories.user_session_repo import UserSessionRepository
 from app.repositories.watchlist_repo import WatchlistRepository
 from app.repositories.market_repo import AsyncMarketRepository
 from app.repositories.market_data_sync_repo import AsyncMarketDataSyncRepository
+from app.repositories.analysis_conversation_repo import AsyncAnalysisConversationRepository
 
 __all__ = [
     "AnalysisRecordRepository",
@@ -18,4 +19,5 @@ __all__ = [
     "UserPreferenceRepository",
     "AsyncMarketRepository",
     "AsyncMarketDataSyncRepository",
+    "AsyncAnalysisConversationRepository",
 ]

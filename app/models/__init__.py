@@ -11,6 +11,7 @@ from app.models.market_symbol import MarketSymbol
 from app.models.market_candle import MarketCandle
 from app.models.market_data_sync_status import MarketDataSyncStatus
 from app.models.market_data_sync_log import MarketDataSyncLog
+from app.models.analysis_conversation_message import AnalysisConversationMessage
 
 __all__ = [
     "AnalysisRecord",
@@ -26,4 +27,5 @@ __all__ = [
     "MarketCandle",
     "MarketDataSyncStatus",
     "MarketDataSyncLog",
+    "AnalysisConversationMessage",
 ]

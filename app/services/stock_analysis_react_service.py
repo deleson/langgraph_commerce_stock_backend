@@ -111,6 +111,14 @@ class StockAnalysisReactService:
             },
         )
 
+        await self.conversation_service.save_react_traces(
+            user_id=user.id,
+            analysis_record_id=record.id,
+            analysis_thread_id=payload.analysis_thread_id,
+            react_graph_checkpoint_id=response.react_graph_checkpoint_id,
+            traces=response.trace,
+        )
+
         return response
 
     def _build_initial_state(

@@ -40,6 +40,8 @@ from app.services.user_preference_service import (
     AsyncUserPreferenceService,
     UserPreferenceService,
 )
+from app.services.analysis_conversation_service import AnalysisConversationService
+
 
 logger = logging.getLogger(__name__)
 
@@ -165,6 +167,7 @@ class AsyncStockAnalysisService:
         self.user_preference_service = AsyncUserPreferenceService(db)
         self.quality_report_service = MarketDataQualityReportService(db)
         self.technical_indicator_query_service = TechnicalIndicatorQueryService(db)
+        self.conversation_service = AnalysisConversationService(db)
 
     async def analyze_stock(
         self,
@@ -297,6 +300,19 @@ class AsyncStockAnalysisService:
                 ],
             )
 
+        await self.conversation_service.save_user_message(
+            user_id=user.id,
+            analysis_record_id=record.id,
+            analysis_thread_id=payload.thread_id,
+            content=payload.message,
+            source="normal_follow_up",
+            message_type="normal_follow_up",
+            payload={
+                "referenced_symbol": record.symbol,
+                "referenced_market": record.market,
+            },
+        )
+
         result_snapshot = record.result_snapshot or {}
         context_snapshot = result_snapshot.get("context_snapshot") or {}
         result = result_snapshot.get("result") or {}
@@ -310,17 +326,34 @@ class AsyncStockAnalysisService:
             result_snapshot=result_snapshot,
         )
 
+        fallback_used = False
+
         try:
             llm = get_chat_model()
             response = await llm.ainvoke(messages)
             answer = str(response.content).strip()
         except Exception as exc:
+            fallback_used = True
             logger.exception("stock analysis follow-up llm call failed")
             answer = self._build_follow_up_fallback_answer(
                 symbol=record.symbol,
                 market=record.market,
                 reason=self._safe_exception_message(exc),
             )
+
+        await self.conversation_service.save_assistant_message(
+            user_id=user.id,
+            analysis_record_id=record.id,
+            analysis_thread_id=payload.thread_id,
+            content=answer,
+            source="normal_follow_up",
+            message_type="normal_follow_up",
+            payload={
+                "referenced_symbol": record.symbol,
+                "referenced_market": record.market,
+                "fallback": fallback_used,
+            },
+        )
 
         return StockAnalysisFollowUpResponse(
             thread_id=payload.thread_id,

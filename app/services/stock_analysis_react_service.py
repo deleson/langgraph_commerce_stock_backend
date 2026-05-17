@@ -17,7 +17,7 @@ from app.schemas.stock_analysis_react import (
 )
 from app.services.stock_analysis_react_tool_service import StockAnalysisReactToolService
 from app.graphs.react_safety import sanitize_tool_output, truncate_text
-
+from app.services.analysis_conversation_service import AnalysisConversationService
 
 
 class StockAnalysisReactService:
@@ -31,6 +31,7 @@ class StockAnalysisReactService:
         self.db = db
         self.analysis_record_repo = AsyncAnalysisRecordRepository(db)
         self.tool_service = StockAnalysisReactToolService(db)
+        self.conversation_service = AnalysisConversationService(db)
 
     async def follow_up_stock_analysis(
         self,
@@ -54,6 +55,20 @@ class StockAnalysisReactService:
                 ],
             )
 
+        await self.conversation_service.save_user_message(
+            user_id=user.id,
+            analysis_record_id=record.id,
+            analysis_thread_id=payload.analysis_thread_id,
+            content=payload.message,
+            source="react_follow_up",
+            message_type="react_follow_up",
+            payload={
+                "referenced_symbol": record.symbol,
+                "referenced_market": record.market,
+                "max_iterations": payload.max_iterations,
+            },
+        )
+
         initial_state = self._build_initial_state(
             user=user,
             payload=payload,
@@ -66,11 +81,37 @@ class StockAnalysisReactService:
             react_graph_checkpoint_id=initial_state.get("react_graph_checkpoint_id"),
         )
 
-        return self._build_response(
+        response = self._build_response(
             payload=payload,
             record=record,
             final_state=final_state,
         )
+
+        await self.conversation_service.save_tool_observation_messages(
+            user_id=user.id,
+            analysis_record_id=record.id,
+            analysis_thread_id=payload.analysis_thread_id,
+            observations=response.observations,
+        )
+
+        await self.conversation_service.save_assistant_message(
+            user_id=user.id,
+            analysis_record_id=record.id,
+            analysis_thread_id=payload.analysis_thread_id,
+            content=response.answer,
+            source="react_follow_up",
+            message_type="react_follow_up",
+            payload={
+                "react_graph_checkpoint_id": response.react_graph_checkpoint_id,
+                "used_tools": response.used_tools,
+                "observation_count": len(response.observations),
+                "trace_count": len(response.trace),
+                "referenced_symbol": record.symbol,
+                "referenced_market": record.market,
+            },
+        )
+
+        return response
 
     def _build_initial_state(
         self,

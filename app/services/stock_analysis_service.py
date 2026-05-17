@@ -300,6 +300,12 @@ class AsyncStockAnalysisService:
                 ],
             )
 
+        conversation_context = await self.conversation_service.get_context(
+            user_id=user.id,
+            analysis_thread_id=payload.thread_id,
+            limit=10,
+        )
+
         await self.conversation_service.save_user_message(
             user_id=user.id,
             analysis_record_id=record.id,
@@ -324,6 +330,9 @@ class AsyncStockAnalysisService:
             result=result,
             context_snapshot=context_snapshot,
             result_snapshot=result_snapshot,
+
+            conversation_context=conversation_context.model_dump(mode="json"),
+
         )
 
         fallback_used = False
@@ -469,6 +478,7 @@ class AsyncStockAnalysisService:
             result: dict,
             context_snapshot: dict,
             result_snapshot: dict,
+            conversation_context: dict,
     ) -> list[SystemMessage | HumanMessage]:
         system_prompt = """
 你是一个谨慎、客观的中文股票分析助手，正在回答用户对“上一次股票分析结果”的追问。
@@ -492,6 +502,9 @@ market={record_market}
 
 用户追问：
 {user_message}
+
+最近几轮会话上下文：
+{conversation_context}
 
 上一次 AI 分析 result：
 {result}

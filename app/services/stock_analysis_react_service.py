@@ -55,6 +55,12 @@ class StockAnalysisReactService:
                 ],
             )
 
+        conversation_context = await self.conversation_service.get_context(
+            user_id=user.id,
+            analysis_thread_id=payload.analysis_thread_id,
+            limit=10,
+        )
+
         await self.conversation_service.save_user_message(
             user_id=user.id,
             analysis_record_id=record.id,
@@ -73,6 +79,7 @@ class StockAnalysisReactService:
             user=user,
             payload=payload,
             record=record,
+            conversation_context=conversation_context.model_dump(mode="json"),
         )
 
         final_state = await arun_stock_analysis_react_graph(
@@ -127,6 +134,7 @@ class StockAnalysisReactService:
         user: User,
         payload: StockAnalysisReactFollowUpRequest,
         record: AnalysisRecord,
+        conversation_context: dict[str, Any],
     ) -> dict[str, Any]:
         result_snapshot = record.result_snapshot or {}
         context_snapshot = result_snapshot.get("context_snapshot") or {}
@@ -144,6 +152,7 @@ class StockAnalysisReactService:
             "trace": [],
             "iteration_count": 0,
             "max_iterations": payload.max_iterations,
+            "conversation_context": conversation_context,
             "metadata": {
                 "source": "stock_analysis_react_service",
                 "analysis_record_id": record.id,

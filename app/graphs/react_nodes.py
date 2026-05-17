@@ -257,6 +257,7 @@ def _build_compact_reason_context(
         "iteration_count": state.get("iteration_count", 0),
         "max_iterations": state.get("max_iterations", 3),
         "observations": observations[-5:],
+        "conversation_context": state.get("conversation_context") or {},
     }
 
 
@@ -760,6 +761,7 @@ def _build_final_answer_context(
         "trace": trace[-8:],
         "iteration_count": state.get("iteration_count", 0),
         "max_iterations": state.get("max_iterations", 3),
+        "conversation_context": state.get("conversation_context") or {},
     }
 
 

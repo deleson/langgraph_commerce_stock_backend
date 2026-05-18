@@ -14,6 +14,7 @@ from app.api.routers.market_sync import router as market_sync_router
 from app.api.routers.technical_indicators import router as technical_indicators_router
 from app.api.routers.market_data_quality import router as market_data_quality_router
 from app.api.routers.analysis_conversations import router as analysis_conversations_router
+from app.api.routers.strategy_signals import router as strategy_signals_router
 from app.core.config import get_settings
 
 settings = get_settings()
@@ -31,5 +32,6 @@ api_router.include_router(stock_analysis_router)
 api_router.include_router(market_router)
 api_router.include_router(market_sync_router)
 api_router.include_router(technical_indicators_router)
+api_router.include_router(strategy_signals_router)
 api_router.include_router(market_data_quality_router)
 api_router.include_router(analysis_conversations_router)

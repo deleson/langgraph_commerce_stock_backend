@@ -11,6 +11,7 @@ from app.schemas.technical_indicator import (
     RsiSnapshot,
     TechnicalIndicatorResponse,
     VolatilitySnapshot,
+    VolumeFactorSnapshot,
 )
 
 class StrategySignalService:
@@ -42,6 +43,12 @@ class StrategySignalService:
     VOLATILITY_HIGH_RISK_SCORE = -12
     VOLATILITY_EXTREME_RISK_SCORE = -5
     EXTREME_ANNUALIZED_VOLATILITY = 0.6
+    VOLUME_EXPANDING_SCORE = 6
+    VOLUME_SHRINKING_RISK_SCORE = -6
+    VOLUME_EXTREME_EXPANDING_SCORE = 3
+    VOLUME_EXTREME_SHRINKING_RISK_SCORE = -3
+    HIGH_VOLUME_RATIO = 2.0
+    LOW_VOLUME_RATIO = 0.5
 
     def generate_signal(
         self,
@@ -134,6 +141,9 @@ class StrategySignalService:
         volatility_rule = self._build_volatility_rule(
             technical_indicators.summary.volatility
         )
+        volume_rule = self._build_volume_rule(
+            technical_indicators.summary.volume_factor
+        )
 
         score = self._clamp_score(
             self.BASE_SCORE
@@ -142,6 +152,7 @@ class StrategySignalService:
             + macd_rule.score_delta
             + momentum_rule.score_delta
             + volatility_rule.score_delta
+            + volume_rule.score_delta
         )
         signal = self._signal_from_score(score)
         strength = self._strength_from_score(score)
@@ -151,11 +162,13 @@ class StrategySignalService:
         reasons.append(macd_rule.reason)
         reasons.append(momentum_rule.reason)
         reasons.append(volatility_rule.reason)
+        reasons.append(volume_rule.reason)
         risks.extend(trend_rule.warnings)
         risks.extend(rsi_rule.warnings)
         risks.extend(macd_rule.warnings)
         risks.extend(momentum_rule.warnings)
         risks.extend(volatility_rule.warnings)
+        risks.extend(volume_rule.warnings)
 
         return StrategySignalResponse(
             symbol=technical_indicators.symbol,
@@ -177,6 +190,7 @@ class StrategySignalService:
                 macd_rule=macd_rule,
                 momentum_rule=momentum_rule,
                 volatility_rule=volatility_rule,
+                volume_rule=volume_rule,
                 include_detail=include_detail,
             ),
             input_snapshot=self._build_input_snapshot(
@@ -316,6 +330,7 @@ class StrategySignalService:
         macd_rule: StrategyRuleResult | None = None,
         momentum_rule: StrategyRuleResult | None = None,
         volatility_rule: StrategyRuleResult | None = None,
+        volume_rule: StrategyRuleResult | None = None,
         include_detail: bool,
     ) -> list[StrategyRuleResult]:
         if not include_detail:
@@ -340,6 +355,9 @@ class StrategySignalService:
 
         if volatility_rule is not None:
             results.append(volatility_rule)
+
+        if volume_rule is not None:
+            results.append(volume_rule)
 
         return results
 
@@ -545,6 +563,60 @@ class StrategySignalService:
             warnings=self._limit_text_list(warnings, limit=5),
         )
 
+    def _build_volume_rule(
+        self,
+        volume_factor: VolumeFactorSnapshot,
+    ) -> StrategyRuleResult:
+        score_delta = 0
+        warnings: list[str] = []
+
+        if volume_factor.status == "expanding":
+            score_delta += self.VOLUME_EXPANDING_SCORE
+            direction = "bullish"
+            reason = "成交量处于放量状态，市场参与度上升，对当前策略信号形成一定确认。"
+        elif volume_factor.status == "shrinking":
+            score_delta += self.VOLUME_SHRINKING_RISK_SCORE
+            direction = "risk"
+            reason = "成交量处于缩量状态，市场参与度下降，当前策略信号确认度不足。"
+        else:
+            direction = "neutral"
+            reason = "成交量处于正常状态，暂不对策略信号做明显调整。"
+
+        if volume_factor.volume_ratio is None:
+            warnings.append("成交量比例 volume_ratio 缺失，无法判断是否明显放量或缩量。")
+        elif volume_factor.volume_ratio >= self.HIGH_VOLUME_RATIO:
+            score_delta += self.VOLUME_EXTREME_EXPANDING_SCORE
+            direction = "bullish"
+            reason += f" volume_ratio={volume_factor.volume_ratio:.2f}，明显高于中期均量。"
+        elif volume_factor.volume_ratio <= self.LOW_VOLUME_RATIO:
+            score_delta += self.VOLUME_EXTREME_SHRINKING_RISK_SCORE
+            direction = "risk"
+            reason += f" volume_ratio={volume_factor.volume_ratio:.2f}，明显低于中期均量。"
+
+        if self._has_missing_volume_values(volume_factor):
+            warnings.append("部分成交量因子数据缺失，成交量规则可信度需要谨慎看待。")
+
+        return StrategyRuleResult(
+            rule_name="volume",
+            direction=direction,
+            score_delta=score_delta,
+            reason=reason,
+            warnings=self._limit_text_list(warnings, limit=5),
+        )
+
+    def _has_missing_volume_values(
+        self,
+        volume_factor: VolumeFactorSnapshot,
+    ) -> bool:
+        return any(
+            value is None
+            for value in (
+                volume_factor.volume_ma5,
+                volume_factor.volume_ma20,
+                volume_factor.volume_ratio,
+            )
+        )
+
     def _has_missing_volatility_values(
         self,
         volatility: VolatilitySnapshot,
@@ -659,12 +731,13 @@ class StrategySignalService:
         macd_signal = technical_indicators.summary.macd.signal
         momentum_direction = technical_indicators.summary.momentum.direction
         volatility_level = technical_indicators.summary.volatility.level
+        volume_status = technical_indicators.summary.volume_factor.status
         return (
             f"{technical_indicators.market}:{technical_indicators.symbol} "
-            f"当前已根据数据质量、均线趋势、RSI、MACD、动量和波动率生成策略信号，"
+            f"当前已根据数据质量、均线趋势、RSI、MACD、动量、波动率和成交量生成策略信号，"
             f"均线趋势为 {trend}，RSI 状态为 {rsi_status}，"
             f"MACD 信号为 {macd_signal}，动量方向为 {momentum_direction}，"
-            f"波动率等级为 {volatility_level}。"
+            f"波动率等级为 {volatility_level}，成交量状态为 {volume_status}。"
         )
 
     def _build_initial_reasons(
@@ -686,7 +759,7 @@ class StrategySignalService:
     ) -> list[str]:
         risks = [
             *technical_indicators.summary.warnings,
-            "当前策略信号仍在逐步接入成交量规则和最终综合评分规则。",
+            "当前策略信号已接入趋势、RSI、MACD、动量、波动率和成交量规则，后续仍会继续优化综合评分权重。",
         ]
 
         if data_quality is None:

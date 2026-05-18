@@ -28,6 +28,7 @@ from app.services.stock_analysis_react_tool_service import StockAnalysisReactToo
 from app.services.stock_analysis_react_service import StockAnalysisReactService
 from app.services.analysis_conversation_service import AnalysisConversationService
 from app.services.strategy_signal_service import StrategySignalService
+from app.services.strategy_signal_query_service import StrategySignalQueryService
 # from app.services.stock_analysis_service import StockAnalysisService
 
 
@@ -60,5 +61,6 @@ __all__ = [
     "StockAnalysisReactService",
     "AnalysisConversationService",
     "StrategySignalService",
+    "StrategySignalQueryService",
     # "StockAnalysisService",
 ]

@@ -41,7 +41,8 @@ from app.services.user_preference_service import (
     UserPreferenceService,
 )
 from app.services.analysis_conversation_service import AnalysisConversationService
-
+from app.schemas.strategy_signal import StrategySignalResponse
+from app.services.strategy_signal_query_service import StrategySignalQueryService
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +168,7 @@ class AsyncStockAnalysisService:
         self.user_preference_service = AsyncUserPreferenceService(db)
         self.quality_report_service = MarketDataQualityReportService(db)
         self.technical_indicator_query_service = TechnicalIndicatorQueryService(db)
+        self.strategy_signal_query_service = StrategySignalQueryService(db)
         self.conversation_service = AnalysisConversationService(db)
 
     async def analyze_stock(
@@ -189,6 +191,10 @@ class AsyncStockAnalysisService:
             symbol=payload.symbol,
             market=payload.market,
         )
+        strategy_signal = await self._load_strategy_signal_context(
+            symbol=payload.symbol,
+            market=payload.market,
+        )
 
         initial_state = {
             "thread_id": thread_id,
@@ -199,6 +205,7 @@ class AsyncStockAnalysisService:
             "risk_preference": preference.risk_preference,
             "quality_context": quality_context,
             "technical_indicators": technical_indicators,
+            "strategy_signal": strategy_signal,
             "metadata": {
                 "llm_provider": "deepseek",
                 "source": "async_stock_analysis_service",
@@ -216,6 +223,7 @@ class AsyncStockAnalysisService:
         technical_indicators = final_state.get("technical_indicators")
         quality_context = final_state.get("quality_context")
         metadata = self._build_metadata(final_state)
+        strategy_signal = final_state.get("strategy_signal")
 
         context_snapshot = self._build_context_snapshot(
             user=user,
@@ -243,6 +251,7 @@ class AsyncStockAnalysisService:
                     "market_snapshot": self._dump_optional_model(market_snapshot),
                     "indicators": self._dump_optional_model(indicators),
                     "technical_indicators": self._dump_optional_model(technical_indicators),
+                    "strategy_signal": self._dump_optional_model(strategy_signal),
                     "result": result.model_dump(mode="json"),
                     "metadata": metadata,
                 },
@@ -414,6 +423,28 @@ class AsyncStockAnalysisService:
         except Exception:
             return None
 
+    async def _load_strategy_signal_context(
+        self,
+        *,
+        symbol: str,
+        market: str,
+    ) -> StrategySignalResponse | None:
+        try:
+            return await self.strategy_signal_query_service.get_signal(
+                symbol=symbol,
+                market=market,
+                timeframe="1d",
+                limit=120,
+                adjust_type="none",
+                source=None,
+                include_detail=True,
+                min_required=35,
+                stale_after_days=None,
+            )
+        except Exception:
+            logger.exception("load strategy signal context failed")
+            return None
+
     def _resolve_thread_id(
         self,
         *,
@@ -423,10 +454,11 @@ class AsyncStockAnalysisService:
         return payload.thread_id or f"stock-analysis-{user_id}-{uuid4().hex}"
 
     def _build_metadata(
-        self,
-        final_state: dict,
+            self,
+            final_state: dict,
     ) -> dict:
         technical_indicators = final_state.get("technical_indicators")
+        strategy_signal = final_state.get("strategy_signal")
 
         return {
             **final_state.get("metadata", {}),
@@ -439,6 +471,16 @@ class AsyncStockAnalysisService:
                 "technical_indicators_candle_count": technical_indicators.candle_count
                 if technical_indicators is not None
                 else 0,
+                "strategy_signal_available": strategy_signal is not None,
+                "strategy_signal_status": strategy_signal.status
+                if strategy_signal is not None
+                else None,
+                "strategy_signal": strategy_signal.signal
+                if strategy_signal is not None
+                else None,
+                "strategy_signal_score": strategy_signal.score
+                if strategy_signal is not None
+                else None,
                 "quality_context_available": final_state.get("quality_context") is not None,
             },
         }
@@ -464,6 +506,7 @@ class AsyncStockAnalysisService:
             market_snapshot=final_state.get("market_snapshot"),
             indicators=final_state.get("indicators"),
             technical_indicators=final_state.get("technical_indicators"),
+            strategy_signal=final_state.get("strategy_signal"),
             result=final_state.get("result"),
             metadata=metadata,
             created_at=datetime.now(UTC),

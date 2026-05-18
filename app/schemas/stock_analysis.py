@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.schemas.market_data_sync import MarketDataQualityReport
 from app.schemas.technical_indicator import TechnicalIndicatorResponse
-
+from app.schemas.strategy_signal import StrategySignalResponse
 
 MarketCode = Literal["US", "CN", "HK"]
 AnalysisType = Literal["stock_basic"]
@@ -91,6 +91,7 @@ class StockAnalysisContextSnapshot(BaseModel):
     market_snapshot: MarketSnapshot | None = None
     indicators: IndicatorSnapshot | None = None
     technical_indicators: TechnicalIndicatorResponse | None = None
+    strategy_signal: StrategySignalResponse | None = None
     result: StockAnalysisResult | None = None
     record_id: int | None = None
     notification_id: int | None = None
@@ -162,6 +163,7 @@ class StockAnalysisGraphState(BaseModel):
     market_snapshot: MarketSnapshot | None = None
     indicators: IndicatorSnapshot | None = None
     technical_indicators: TechnicalIndicatorResponse | None = None
+    strategy_signal: StrategySignalResponse | None = None
     result: StockAnalysisResult | None = None
     record_id: int | None = None
     notification_id: int | None = None

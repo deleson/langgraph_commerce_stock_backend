@@ -10,7 +10,7 @@ from app.schemas.stock_analysis import (
     StockAnalysisResult,
 )
 from app.schemas.technical_indicator import TechnicalIndicatorResponse
-
+from app.schemas.strategy_signal import StrategySignalResponse
 
 class StockAnalysisState(TypedDict, total=False):
     """Runtime state shared by stock analysis graph nodes.
@@ -37,6 +37,7 @@ class StockAnalysisState(TypedDict, total=False):
     market_snapshot: MarketSnapshot
     indicators: IndicatorSnapshot
     technical_indicators: TechnicalIndicatorResponse
+    strategy_signal: StrategySignalResponse
 
     # Analysis output.
     result: StockAnalysisResult

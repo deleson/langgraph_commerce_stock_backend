@@ -5,6 +5,7 @@ from app.schemas.strategy_signal import (
     StrategyRuleResult,
 )
 from app.schemas.technical_indicator import (
+    MacdSnapshot,
     MovingAverageSnapshot,
     RsiSnapshot,
     TechnicalIndicatorResponse,
@@ -29,6 +30,9 @@ class StrategySignalService:
     RSI_OVERBOUGHT_SCORE = -12
     RSI_LOW_CONFIRM_SCORE = 5
     RSI_HIGH_RISK_SCORE = -5
+    MACD_BULLISH_SCORE = 18
+    MACD_BEARISH_SCORE = -18
+    MACD_HISTOGRAM_CONFIRM_SCORE = 4
 
     def generate_signal(
         self,
@@ -114,19 +118,23 @@ class StrategySignalService:
             technical_indicators.summary.moving_average
         )
         rsi_rule = self._build_rsi_rule(technical_indicators.summary.rsi)
+        macd_rule = self._build_macd_rule(technical_indicators.summary.macd)
 
         score = self._clamp_score(
             self.BASE_SCORE
             + trend_rule.score_delta
             + rsi_rule.score_delta
+            + macd_rule.score_delta
         )
         signal = self._signal_from_score(score)
         strength = self._strength_from_score(score)
 
         reasons.append(trend_rule.reason)
         reasons.append(rsi_rule.reason)
+        reasons.append(macd_rule.reason)
         risks.extend(trend_rule.warnings)
         risks.extend(rsi_rule.warnings)
+        risks.extend(macd_rule.warnings)
 
         return StrategySignalResponse(
             symbol=technical_indicators.symbol,
@@ -145,6 +153,7 @@ class StrategySignalService:
                 quality_rule=quality_rule,
                 trend_rule=trend_rule,
                 rsi_rule=rsi_rule,
+                macd_rule=macd_rule,
                 include_detail=include_detail,
             ),
             input_snapshot=self._build_input_snapshot(
@@ -281,6 +290,7 @@ class StrategySignalService:
         quality_rule: StrategyRuleResult | None,
         trend_rule: StrategyRuleResult | None = None,
         rsi_rule: StrategyRuleResult | None = None,
+        macd_rule: StrategyRuleResult | None = None,
         include_detail: bool,
     ) -> list[StrategyRuleResult]:
         if not include_detail:
@@ -296,6 +306,9 @@ class StrategySignalService:
 
         if rsi_rule is not None:
             results.append(rsi_rule)
+
+        if macd_rule is not None:
+            results.append(macd_rule)
 
         return results
 
@@ -377,6 +390,62 @@ class StrategySignalService:
             warnings=self._limit_text_list(warnings, limit=5),
         )
 
+    def _build_macd_rule(
+        self,
+        macd: MacdSnapshot,
+    ) -> StrategyRuleResult:
+        score_delta = 0
+        warnings: list[str] = []
+
+        if macd.signal == "bullish":
+            score_delta += self.MACD_BULLISH_SCORE
+            direction = "bullish"
+            reason = "MACD 当前为多头信号，趋势动能偏强。"
+        elif macd.signal == "bearish":
+            score_delta += self.MACD_BEARISH_SCORE
+            direction = "bearish"
+            reason = "MACD 当前为空头信号，趋势动能偏弱。"
+        else:
+            direction = "neutral"
+            reason = "MACD 当前为中性信号，趋势动能暂不明显。"
+
+        if macd.histogram is None:
+            warnings.append("MACD histogram 数据缺失，无法进行柱状图动能确认。")
+        elif macd.histogram > 0:
+            score_delta += self.MACD_HISTOGRAM_CONFIRM_SCORE
+            if direction == "neutral":
+                direction = "bullish"
+            reason += f" histogram={macd.histogram:.4f}，柱状图为正，动能有一定支持。"
+        elif macd.histogram < 0:
+            score_delta -= self.MACD_HISTOGRAM_CONFIRM_SCORE
+            if direction == "neutral":
+                direction = "bearish"
+            reason += f" histogram={macd.histogram:.4f}，柱状图为负，动能偏弱。"
+
+        if self._has_missing_macd_values(macd):
+            warnings.append("部分 MACD 数据缺失，MACD 规则可信度需要谨慎看待。")
+
+        return StrategyRuleResult(
+            rule_name="macd",
+            direction=direction,
+            score_delta=score_delta,
+            reason=reason,
+            warnings=self._limit_text_list(warnings, limit=5),
+        )
+
+    def _has_missing_macd_values(
+        self,
+        macd: MacdSnapshot,
+    ) -> bool:
+        return any(
+            value is None
+            for value in (
+                macd.dif,
+                macd.dea,
+                macd.histogram,
+            )
+        )
+
     def _has_missing_rsi_values(
         self,
         rsi: RsiSnapshot,
@@ -444,10 +513,11 @@ class StrategySignalService:
     ) -> str:
         trend = technical_indicators.summary.moving_average.trend
         rsi_status = technical_indicators.summary.rsi.status
+        macd_signal = technical_indicators.summary.macd.signal
         return (
             f"{technical_indicators.market}:{technical_indicators.symbol} "
-            f"当前已根据数据质量、均线趋势和 RSI 生成基础策略信号，"
-            f"均线趋势为 {trend}，RSI 状态为 {rsi_status}。"
+            f"当前已根据数据质量、均线趋势、RSI 和 MACD 生成基础策略信号，"
+            f"均线趋势为 {trend}，RSI 状态为 {rsi_status}，MACD 信号为 {macd_signal}。"
         )
 
     def _build_initial_reasons(
@@ -469,7 +539,7 @@ class StrategySignalService:
     ) -> list[str]:
         risks = [
             *technical_indicators.summary.warnings,
-            "当前策略信号仍在逐步接入 MACD、动量、波动率和成交量等规则。",
+            "当前策略信号仍在逐步接入动量、波动率和成交量等规则。",
         ]
 
         if data_quality is None:

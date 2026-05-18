@@ -4,8 +4,10 @@ from app.schemas.strategy_signal import (
     StrategySignalResponse,
     StrategyRuleResult,
 )
-from app.schemas.technical_indicator import TechnicalIndicatorResponse
-
+from app.schemas.technical_indicator import (
+    MovingAverageSnapshot,
+    TechnicalIndicatorResponse,
+)
 
 class StrategySignalService:
     """Generate strategy signals from technical indicators.
@@ -19,6 +21,9 @@ class StrategySignalService:
     MAX_RISK_COUNT = 10
     QUALITY_LIMITED_SCORE = 40
     UNAVAILABLE_SCORE = 0
+    TREND_BULLISH_SCORE = 18
+    TREND_BEARISH_SCORE = -18
+    TREND_CONFIRM_SCORE = 5
 
     def generate_signal(
         self,
@@ -100,6 +105,16 @@ class StrategySignalService:
                 ),
             )
 
+        trend_rule = self._build_trend_rule(
+            technical_indicators.summary.moving_average
+        )
+        score = self._clamp_score(self.BASE_SCORE + trend_rule.score_delta)
+        signal = self._signal_from_score(score)
+        strength = self._strength_from_score(score)
+
+        reasons.append(trend_rule.reason)
+        risks.extend(trend_rule.warnings)
+
         return StrategySignalResponse(
             symbol=technical_indicators.symbol,
             market=technical_indicators.market,
@@ -107,14 +122,15 @@ class StrategySignalService:
             adjust_type=technical_indicators.adjust_type,
             source=technical_indicators.source,
             status="available",
-            signal="hold",
-            strength="weak",
-            score=self.BASE_SCORE,
+            signal=signal,
+            strength=strength,
+            score=score,
             summary=self._build_baseline_summary(technical_indicators),
             reasons=self._limit_text_list(reasons, limit=self.MAX_REASON_COUNT),
             risks=self._limit_text_list(risks, limit=self.MAX_RISK_COUNT),
             rule_results=self._build_rule_results(
                 quality_rule=quality_rule,
+                trend_rule=trend_rule,
                 include_detail=include_detail,
             ),
             input_snapshot=self._build_input_snapshot(
@@ -246,18 +262,97 @@ class StrategySignalService:
         return self._build_baseline_summary(technical_indicators)
 
     def _build_rule_results(
-            self,
-            *,
-            quality_rule: StrategyRuleResult | None,
-            include_detail: bool,
+        self,
+        *,
+        quality_rule: StrategyRuleResult | None,
+        trend_rule: StrategyRuleResult | None = None,
+        include_detail: bool,
     ) -> list[StrategyRuleResult]:
         if not include_detail:
             return []
 
-        if quality_rule is None:
-            return []
+        results: list[StrategyRuleResult] = []
 
-        return [quality_rule]
+        if quality_rule is not None:
+            results.append(quality_rule)
+
+        if trend_rule is not None:
+            results.append(trend_rule)
+
+        return results
+
+    def _build_trend_rule(
+        self,
+        moving_average: MovingAverageSnapshot,
+    ) -> StrategyRuleResult:
+        score_delta = 0
+        warnings: list[str] = []
+
+        if moving_average.trend == "bullish":
+            score_delta += self.TREND_BULLISH_SCORE
+            direction = "bullish"
+            reason = "均线趋势偏多，当前价格结构表现出一定上行动能。"
+        elif moving_average.trend == "bearish":
+            score_delta += self.TREND_BEARISH_SCORE
+            direction = "bearish"
+            reason = "均线趋势偏空，当前价格结构表现出一定下行压力。"
+        else:
+            direction = "neutral"
+            reason = "均线趋势暂时中性，尚未形成明确方向。"
+
+        confirm_delta = self._calculate_trend_confirmation_score(moving_average)
+        score_delta += confirm_delta
+
+        if confirm_delta > 0:
+            reason += " MA5 高于 MA20 且 EMA12 高于 EMA26，短期趋势得到一定确认。"
+        elif confirm_delta < 0:
+            reason += " MA5 低于 MA20 且 EMA12 低于 EMA26，短期弱势得到一定确认。"
+        elif self._has_missing_trend_confirmation_values(moving_average):
+            warnings.append("部分均线数据缺失，趋势确认分未完全计算。")
+
+        return StrategyRuleResult(
+            rule_name="trend",
+            direction=direction,
+            score_delta=score_delta,
+            reason=reason,
+            warnings=warnings,
+        )
+
+    def _calculate_trend_confirmation_score(
+        self,
+        moving_average: MovingAverageSnapshot,
+    ) -> int:
+        if self._has_missing_trend_confirmation_values(moving_average):
+            return 0
+
+        if (
+                moving_average.ma5 > moving_average.ma20
+                and moving_average.ema12 > moving_average.ema26
+        ):
+            return self.TREND_CONFIRM_SCORE
+
+        if (
+                moving_average.ma5 < moving_average.ma20
+                and moving_average.ema12 < moving_average.ema26
+        ):
+            return -self.TREND_CONFIRM_SCORE
+
+        return 0
+
+    def _has_missing_trend_confirmation_values(
+        self,
+        moving_average: MovingAverageSnapshot,
+    ) -> bool:
+        return any(
+            value is None
+            for value in (
+                moving_average.ma5,
+                moving_average.ma20,
+                moving_average.ema12,
+                moving_average.ema26,
+            )
+        )
+
 
     def _build_input_snapshot(
         self,
@@ -271,14 +366,14 @@ class StrategySignalService:
             data_quality=data_quality if include_detail else None,
         )
 
-
     def _build_baseline_summary(
         self,
         technical_indicators: TechnicalIndicatorResponse,
     ) -> str:
+        trend = technical_indicators.summary.moving_average.trend
         return (
             f"{technical_indicators.market}:{technical_indicators.symbol} "
-            "当前已生成基础策略信号。具体趋势、RSI、MACD、动量、波动率和成交量规则将在后续步骤逐步接入。"
+            f"当前已根据数据质量和均线趋势生成基础策略信号，均线趋势为 {trend}。"
         )
 
     def _build_initial_reasons(
@@ -332,3 +427,41 @@ class StrategySignalService:
                 break
 
         return result
+
+    def _clamp_score(
+        self,
+        score: int,
+    ) -> int:
+        return max(0, min(100, score))
+
+    def _signal_from_score(
+        self,
+        score: int,
+    ) -> str:
+        if score >= 65:
+            return "buy"
+
+        if score >= 55:
+            return "observe"
+
+        if score >= 45:
+            return "hold"
+
+        if score >= 35:
+            return "observe"
+
+        return "sell"
+
+    def _strength_from_score(
+        self,
+        score: int,
+    ) -> str:
+        if score >= 75 or score < 25:
+            return "strong"
+
+        if score >= 55 or score < 45:
+            return "medium"
+
+        return "weak"
+
+

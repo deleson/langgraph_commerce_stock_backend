@@ -6,6 +6,7 @@ from app.schemas.strategy_signal import (
 )
 from app.schemas.technical_indicator import (
     MovingAverageSnapshot,
+    RsiSnapshot,
     TechnicalIndicatorResponse,
 )
 
@@ -24,6 +25,10 @@ class StrategySignalService:
     TREND_BULLISH_SCORE = 18
     TREND_BEARISH_SCORE = -18
     TREND_CONFIRM_SCORE = 5
+    RSI_OVERSOLD_SCORE = 10
+    RSI_OVERBOUGHT_SCORE = -12
+    RSI_LOW_CONFIRM_SCORE = 5
+    RSI_HIGH_RISK_SCORE = -5
 
     def generate_signal(
         self,
@@ -108,12 +113,20 @@ class StrategySignalService:
         trend_rule = self._build_trend_rule(
             technical_indicators.summary.moving_average
         )
-        score = self._clamp_score(self.BASE_SCORE + trend_rule.score_delta)
+        rsi_rule = self._build_rsi_rule(technical_indicators.summary.rsi)
+
+        score = self._clamp_score(
+            self.BASE_SCORE
+            + trend_rule.score_delta
+            + rsi_rule.score_delta
+        )
         signal = self._signal_from_score(score)
         strength = self._strength_from_score(score)
 
         reasons.append(trend_rule.reason)
+        reasons.append(rsi_rule.reason)
         risks.extend(trend_rule.warnings)
+        risks.extend(rsi_rule.warnings)
 
         return StrategySignalResponse(
             symbol=technical_indicators.symbol,
@@ -131,6 +144,7 @@ class StrategySignalService:
             rule_results=self._build_rule_results(
                 quality_rule=quality_rule,
                 trend_rule=trend_rule,
+                rsi_rule=rsi_rule,
                 include_detail=include_detail,
             ),
             input_snapshot=self._build_input_snapshot(
@@ -266,6 +280,7 @@ class StrategySignalService:
         *,
         quality_rule: StrategyRuleResult | None,
         trend_rule: StrategyRuleResult | None = None,
+        rsi_rule: StrategyRuleResult | None = None,
         include_detail: bool,
     ) -> list[StrategyRuleResult]:
         if not include_detail:
@@ -278,6 +293,9 @@ class StrategySignalService:
 
         if trend_rule is not None:
             results.append(trend_rule)
+
+        if rsi_rule is not None:
+            results.append(rsi_rule)
 
         return results
 
@@ -316,6 +334,60 @@ class StrategySignalService:
             score_delta=score_delta,
             reason=reason,
             warnings=warnings,
+        )
+
+    def _build_rsi_rule(
+        self,
+        rsi: RsiSnapshot,
+    ) -> StrategyRuleResult:
+        score_delta = 0
+        warnings: list[str] = []
+
+        if rsi.status == "oversold":
+            score_delta += self.RSI_OVERSOLD_SCORE
+            direction = "bullish"
+            reason = "RSI 处于超卖区域，价格短期可能存在修复机会，但不代表一定反弹。"
+        elif rsi.status == "overbought":
+            score_delta += self.RSI_OVERBOUGHT_SCORE
+            direction = "risk"
+            reason = "RSI 处于超买区域，短期追高风险上升。"
+        else:
+            direction = "neutral"
+            reason = "RSI 当前处于中性区域，暂未给出明显超买或超卖信号。"
+
+        if rsi.rsi12 is None:
+            warnings.append("RSI12 数据缺失，无法进行中周期 RSI 强弱确认。")
+        elif rsi.rsi12 <= 30:
+            score_delta += self.RSI_LOW_CONFIRM_SCORE
+            direction = "bullish"
+            reason += f" RSI12={rsi.rsi12:.2f}，处于明显低位。"
+        elif rsi.rsi12 >= 70:
+            score_delta += self.RSI_HIGH_RISK_SCORE
+            direction = "risk"
+            reason += f" RSI12={rsi.rsi12:.2f}，处于明显过热区域。"
+
+        if self._has_missing_rsi_values(rsi):
+            warnings.append("部分 RSI 数据缺失，RSI 规则可信度需要谨慎看待。")
+
+        return StrategyRuleResult(
+            rule_name="rsi",
+            direction=direction,
+            score_delta=score_delta,
+            reason=reason,
+            warnings=self._limit_text_list(warnings, limit=5),
+        )
+
+    def _has_missing_rsi_values(
+        self,
+        rsi: RsiSnapshot,
+    ) -> bool:
+        return any(
+            value is None
+            for value in (
+                rsi.rsi6,
+                rsi.rsi12,
+                rsi.rsi24,
+            )
         )
 
     def _calculate_trend_confirmation_score(
@@ -371,9 +443,11 @@ class StrategySignalService:
         technical_indicators: TechnicalIndicatorResponse,
     ) -> str:
         trend = technical_indicators.summary.moving_average.trend
+        rsi_status = technical_indicators.summary.rsi.status
         return (
             f"{technical_indicators.market}:{technical_indicators.symbol} "
-            f"当前已根据数据质量和均线趋势生成基础策略信号，均线趋势为 {trend}。"
+            f"当前已根据数据质量、均线趋势和 RSI 生成基础策略信号，"
+            f"均线趋势为 {trend}，RSI 状态为 {rsi_status}。"
         )
 
     def _build_initial_reasons(
@@ -395,7 +469,7 @@ class StrategySignalService:
     ) -> list[str]:
         risks = [
             *technical_indicators.summary.warnings,
-            "当前策略信号为基础中性版本，尚未接入完整规则评分。",
+            "当前策略信号仍在逐步接入 MACD、动量、波动率和成交量等规则。",
         ]
 
         if data_quality is None:

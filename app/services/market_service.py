@@ -15,6 +15,8 @@ from app.schemas.market import (
     MarketQuoteResponse,
     MarketStockSearchItem,
 )
+from app.schemas.strategy_signal import StrategySignalResponse
+from app.services.strategy_signal_query_service import StrategySignalQueryService
 from app.schemas.market_data import AdjustType, MarketCandleQuery, MarketDataSource
 from app.schemas.stock_analysis import MarketSnapshot
 from app.schemas.technical_indicator import TechnicalIndicatorResponse
@@ -168,21 +170,27 @@ class MarketService:
         )
 
     async def get_overview(
-            self,
-            symbol: str,
-            market: MarketCode,
-            timeframe: CandleTimeframe = "1d",
-            limit: int = 30,
-            *,
-            include_technical_indicators: bool = False,
-            technical_indicator_limit: int = 120,
-            adjust_type: AdjustType = "none",
-            technical_indicator_source: MarketDataSource | None = None,
-            include_data_quality: bool = False,
-            include_sync_status: bool = False,
-            data_quality_source: MarketDataSource | None = None,
-            data_quality_min_required: int = 1,
-            data_quality_stale_after_days: int | None = None,
+        self,
+        symbol: str,
+        market: MarketCode,
+        timeframe: CandleTimeframe = "1d",
+        limit: int = 30,
+        *,
+        include_technical_indicators: bool = False,
+        technical_indicator_limit: int = 120,
+        adjust_type: AdjustType = "none",
+        technical_indicator_source: MarketDataSource | None = None,
+        include_data_quality: bool = False,
+        include_sync_status: bool = False,
+        data_quality_source: MarketDataSource | None = None,
+        data_quality_min_required: int = 1,
+        data_quality_stale_after_days: int | None = None,
+        include_strategy_signal: bool = False,
+        strategy_signal_limit: int = 120,
+        strategy_signal_source: MarketDataSource | None = None,
+        strategy_signal_include_detail: bool = True,
+        strategy_signal_min_required: int = 35,
+        strategy_signal_stale_after_days: int | None = None,
     ) -> MarketOverviewResponse:
         quote = await self.get_quote(symbol=symbol, market=market)
         indicators = await self.get_indicators(symbol=symbol, market=market)
@@ -226,6 +234,19 @@ class MarketService:
             candles_source=candles_response.source,
         )
 
+        strategy_signal = await self._get_strategy_signal_for_overview(
+            symbol=symbol,
+            market=market,
+            timeframe=timeframe,
+            include_strategy_signal=include_strategy_signal,
+            strategy_signal_limit=strategy_signal_limit,
+            adjust_type=adjust_type,
+            strategy_signal_source=strategy_signal_source,
+            strategy_signal_include_detail=strategy_signal_include_detail,
+            strategy_signal_min_required=strategy_signal_min_required,
+            strategy_signal_stale_after_days=strategy_signal_stale_after_days,
+        )
+
         return MarketOverviewResponse(
             quote=quote,
             indicators=indicators,
@@ -233,6 +254,7 @@ class MarketService:
             technical_indicators=technical_indicators,
             data_quality=data_quality,
             sync_status=sync_status,
+            strategy_signal=strategy_signal,
         )
 
     async def _get_quote_from_db(
@@ -543,3 +565,35 @@ class MarketService:
             return source
 
         return None
+
+    async def _get_strategy_signal_for_overview(
+            self,
+            *,
+            symbol: str,
+            market: MarketCode,
+            timeframe: CandleTimeframe,
+            include_strategy_signal: bool,
+            strategy_signal_limit: int,
+            adjust_type: AdjustType,
+            strategy_signal_source: MarketDataSource | None,
+            strategy_signal_include_detail: bool,
+            strategy_signal_min_required: int,
+            strategy_signal_stale_after_days: int | None,
+    ) -> StrategySignalResponse | None:
+        if not include_strategy_signal:
+            return None
+
+        if self.db is None:
+            return None
+
+        return await StrategySignalQueryService(self.db).get_signal(
+            symbol=symbol,
+            market=market,
+            timeframe=timeframe,
+            limit=strategy_signal_limit,
+            adjust_type=adjust_type,
+            source=strategy_signal_source,
+            include_detail=strategy_signal_include_detail,
+            min_required=strategy_signal_min_required,
+            stale_after_days=strategy_signal_stale_after_days,
+        )

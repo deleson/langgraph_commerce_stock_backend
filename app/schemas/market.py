@@ -7,6 +7,7 @@ from app.schemas.market_data_sync import (
     MarketDataQualityReport,
     MarketDataSyncStatusResponse,
 )
+from app.schemas.strategy_signal import StrategySignalResponse
 
 MarketCode = Literal["US", "CN", "HK"]
 CandleTimeframe = Literal["1d", "1h", "5m"]
@@ -88,3 +89,4 @@ class MarketOverviewResponse(BaseModel):
     technical_indicators: TechnicalIndicatorResponse | None = None
     data_quality: MarketDataQualityReport | None = None
     sync_status: MarketDataSyncStatusResponse | None = None
+    strategy_signal: StrategySignalResponse | None = None

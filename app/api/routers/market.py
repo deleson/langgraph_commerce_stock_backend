@@ -207,6 +207,36 @@ async def get_stock_overview(
         le=3650,
         description="Mark data as stale if latest candle is older than this many days",
     ),
+    include_strategy_signal: bool = Query(
+        default=False,
+        description="Whether to include strategy signal summary",
+    ),
+    strategy_signal_limit: int = Query(
+        default=120,
+        ge=35,
+        le=1000,
+        description="Number of candles used for strategy signal calculation",
+    ),
+    strategy_signal_source: MarketDataSource | None = Query(
+        default=None,
+        description="Optional data source for strategy signal",
+    ),
+    strategy_signal_include_detail: bool = Query(
+        default=True,
+        description="Whether to include strategy rule details",
+    ),
+    strategy_signal_min_required: int = Query(
+        default=35,
+        ge=1,
+        le=1000,
+        description="Minimum candle count required for strategy signal data quality check",
+    ),
+    strategy_signal_stale_after_days: int | None = Query(
+        default=None,
+        ge=1,
+        le=3650,
+        description="Mark strategy signal data as stale if latest candle is older than this many days",
+    ),
 ):
     _ = current_user
 
@@ -224,5 +254,11 @@ async def get_stock_overview(
         data_quality_source=data_quality_source,
         data_quality_min_required=data_quality_min_required,
         data_quality_stale_after_days=data_quality_stale_after_days,
+        include_strategy_signal=include_strategy_signal,
+        strategy_signal_limit=strategy_signal_limit,
+        strategy_signal_source=strategy_signal_source,
+        strategy_signal_include_detail=strategy_signal_include_detail,
+        strategy_signal_min_required=strategy_signal_min_required,
+        strategy_signal_stale_after_days=strategy_signal_stale_after_days,
     )
     return success_response(data=overview)

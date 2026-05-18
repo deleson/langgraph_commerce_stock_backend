@@ -3,6 +3,12 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.graphs.react_safety import (
+    MAX_CONVERSATION_CONTENT_LENGTH,
+    MAX_CONVERSATION_CONTEXT_MESSAGES,
+    MAX_CONVERSATION_CONTEXT_MESSAGES_MAX,
+    MAX_CONVERSATION_TOOL_CONTENT_LENGTH,
+    MAX_CONVERSATION_TRACE_REASON_LENGTH,
+    clamp_int,
     sanitize_for_react,
     sanitize_tool_input,
     sanitize_tool_output,
@@ -133,11 +139,25 @@ class AnalysisConversationService:
                 step=trace.step,
                 action=trace.action,
                 tool_name=trace.tool_name,
-                reason=trace.reason,
+                reason=(
+                    truncate_text(
+                        trace.reason,
+                        max_length=MAX_CONVERSATION_TRACE_REASON_LENGTH,
+                    )
+                    if trace.reason is not None
+                    else None
+                ),
                 tool_input=None,
                 tool_output=None,
                 success=trace.success,
-                error_message=trace.error_message,
+                error_message=(
+                    truncate_text(
+                        trace.error_message,
+                        max_length=MAX_CONVERSATION_TRACE_REASON_LENGTH,
+                    )
+                    if trace.error_message is not None
+                    else None
+                ),
                 duration_ms=trace.duration_ms,
             )
             for trace in traces
@@ -180,17 +200,23 @@ class AnalysisConversationService:
         analysis_thread_id: str,
         limit: int = 10,
     ) -> AnalysisConversationContext:
+        safe_limit = clamp_int(
+            limit,
+            default=MAX_CONVERSATION_CONTEXT_MESSAGES,
+            min_value=1,
+            max_value=MAX_CONVERSATION_CONTEXT_MESSAGES_MAX,
+        )
         messages = await self.repo.list_recent_context_messages(
             user_id=user_id,
             analysis_thread_id=analysis_thread_id,
-            limit=limit,
+            limit=safe_limit,
         )
 
         context_messages = [
             AnalysisConversationContextMessage(
                 role=message.role,
-                content=message.content,
-                payload=message.payload,
+                content=self._normalize_content(message.content),
+                payload=self._normalize_payload(message.payload),
                 message_type=message.message_type,
                 sequence_no=message.sequence_no,
             )
@@ -239,7 +265,10 @@ class AnalysisConversationService:
     def _normalize_content(self, content: str | None) -> str | None:
         if content is None:
             return None
-        return truncate_text(content, max_length=3000)
+        return truncate_text(
+            content,
+            max_length=MAX_CONVERSATION_CONTENT_LENGTH,
+        )
 
     def _normalize_payload(
         self,
@@ -264,7 +293,7 @@ class AnalysisConversationService:
         error_message = observation.error_message or "unknown tool error"
         return truncate_text(
             f"Tool observation failed: {observation.tool_name}; {error_message}",
-            max_length=1000,
+            max_length=MAX_CONVERSATION_TOOL_CONTENT_LENGTH,
         )
 
     def _observation_to_payload(

@@ -6,9 +6,11 @@ from app.schemas.strategy_signal import (
 )
 from app.schemas.technical_indicator import (
     MacdSnapshot,
+    MomentumSnapshot,
     MovingAverageSnapshot,
     RsiSnapshot,
     TechnicalIndicatorResponse,
+    VolatilitySnapshot,
 )
 
 class StrategySignalService:
@@ -33,6 +35,13 @@ class StrategySignalService:
     MACD_BULLISH_SCORE = 18
     MACD_BEARISH_SCORE = -18
     MACD_HISTOGRAM_CONFIRM_SCORE = 4
+    MOMENTUM_BULLISH_SCORE = 12
+    MOMENTUM_BEARISH_SCORE = -12
+    MOMENTUM_CONFIRM_SCORE = 4
+    VOLATILITY_LOW_SCORE = 3
+    VOLATILITY_HIGH_RISK_SCORE = -12
+    VOLATILITY_EXTREME_RISK_SCORE = -5
+    EXTREME_ANNUALIZED_VOLATILITY = 0.6
 
     def generate_signal(
         self,
@@ -119,12 +128,20 @@ class StrategySignalService:
         )
         rsi_rule = self._build_rsi_rule(technical_indicators.summary.rsi)
         macd_rule = self._build_macd_rule(technical_indicators.summary.macd)
+        momentum_rule = self._build_momentum_rule(
+            technical_indicators.summary.momentum
+        )
+        volatility_rule = self._build_volatility_rule(
+            technical_indicators.summary.volatility
+        )
 
         score = self._clamp_score(
             self.BASE_SCORE
             + trend_rule.score_delta
             + rsi_rule.score_delta
             + macd_rule.score_delta
+            + momentum_rule.score_delta
+            + volatility_rule.score_delta
         )
         signal = self._signal_from_score(score)
         strength = self._strength_from_score(score)
@@ -132,9 +149,13 @@ class StrategySignalService:
         reasons.append(trend_rule.reason)
         reasons.append(rsi_rule.reason)
         reasons.append(macd_rule.reason)
+        reasons.append(momentum_rule.reason)
+        reasons.append(volatility_rule.reason)
         risks.extend(trend_rule.warnings)
         risks.extend(rsi_rule.warnings)
         risks.extend(macd_rule.warnings)
+        risks.extend(momentum_rule.warnings)
+        risks.extend(volatility_rule.warnings)
 
         return StrategySignalResponse(
             symbol=technical_indicators.symbol,
@@ -154,6 +175,8 @@ class StrategySignalService:
                 trend_rule=trend_rule,
                 rsi_rule=rsi_rule,
                 macd_rule=macd_rule,
+                momentum_rule=momentum_rule,
+                volatility_rule=volatility_rule,
                 include_detail=include_detail,
             ),
             input_snapshot=self._build_input_snapshot(
@@ -291,6 +314,8 @@ class StrategySignalService:
         trend_rule: StrategyRuleResult | None = None,
         rsi_rule: StrategyRuleResult | None = None,
         macd_rule: StrategyRuleResult | None = None,
+        momentum_rule: StrategyRuleResult | None = None,
+        volatility_rule: StrategyRuleResult | None = None,
         include_detail: bool,
     ) -> list[StrategyRuleResult]:
         if not include_detail:
@@ -309,6 +334,12 @@ class StrategySignalService:
 
         if macd_rule is not None:
             results.append(macd_rule)
+
+        if momentum_rule is not None:
+            results.append(momentum_rule)
+
+        if volatility_rule is not None:
+            results.append(volatility_rule)
 
         return results
 
@@ -433,6 +464,118 @@ class StrategySignalService:
             warnings=self._limit_text_list(warnings, limit=5),
         )
 
+    def _build_momentum_rule(
+        self,
+        momentum: MomentumSnapshot,
+    ) -> StrategyRuleResult:
+        score_delta = 0
+        warnings: list[str] = []
+
+        if momentum.direction == "bullish":
+            score_delta += self.MOMENTUM_BULLISH_SCORE
+            direction = "bullish"
+            reason = "动量方向偏多，近期价格变化速度支持上行动能。"
+        elif momentum.direction == "bearish":
+            score_delta += self.MOMENTUM_BEARISH_SCORE
+            direction = "bearish"
+            reason = "动量方向偏空，近期价格变化速度显示下行压力。"
+        else:
+            direction = "neutral"
+            reason = "动量方向暂时中性，近期价格变化速度不明显。"
+
+        if self._has_missing_momentum_confirmation_values(momentum):
+            warnings.append("部分动量数据缺失，无法完整确认中短期动量一致性。")
+        elif momentum.momentum_20 > 0 and momentum.momentum_10 > 0:
+            score_delta += self.MOMENTUM_CONFIRM_SCORE
+            direction = "bullish"
+            reason += " momentum_10 和 momentum_20 均为正，中短期动量一致偏多。"
+        elif momentum.momentum_20 < 0 and momentum.momentum_10 < 0:
+            score_delta -= self.MOMENTUM_CONFIRM_SCORE
+            direction = "bearish"
+            reason += " momentum_10 和 momentum_20 均为负，中短期动量一致偏弱。"
+
+        if self._has_missing_momentum_values(momentum):
+            warnings.append("部分动量数据缺失，动量规则可信度需要谨慎看待。")
+
+        return StrategyRuleResult(
+            rule_name="momentum",
+            direction=direction,
+            score_delta=score_delta,
+            reason=reason,
+            warnings=self._limit_text_list(warnings, limit=5),
+        )
+
+    def _build_volatility_rule(
+        self,
+        volatility: VolatilitySnapshot,
+    ) -> StrategyRuleResult:
+        score_delta = 0
+        warnings: list[str] = []
+
+        if volatility.level == "low":
+            score_delta += self.VOLATILITY_LOW_SCORE
+            direction = "neutral"
+            reason = "当前波动率较低，价格波动相对可控。"
+        elif volatility.level == "high":
+            score_delta += self.VOLATILITY_HIGH_RISK_SCORE
+            direction = "risk"
+            reason = "当前波动率较高，价格波动风险上升。"
+        else:
+            direction = "neutral"
+            reason = "当前波动率处于中等水平，暂不对策略信号做明显调整。"
+
+        if volatility.annualized_volatility is None:
+            warnings.append("年化波动率数据缺失，无法确认是否存在极端波动风险。")
+        elif volatility.annualized_volatility >= self.EXTREME_ANNUALIZED_VOLATILITY:
+            score_delta += self.VOLATILITY_EXTREME_RISK_SCORE
+            direction = "risk"
+            reason += (
+                f" 年化波动率为 {volatility.annualized_volatility:.2f}，"
+                "已经达到较高风险区间。"
+            )
+
+        if self._has_missing_volatility_values(volatility):
+            warnings.append("部分波动率数据缺失，波动率规则可信度需要谨慎看待。")
+
+        return StrategyRuleResult(
+            rule_name="volatility",
+            direction=direction,
+            score_delta=score_delta,
+            reason=reason,
+            warnings=self._limit_text_list(warnings, limit=5),
+        )
+
+    def _has_missing_volatility_values(
+        self,
+        volatility: VolatilitySnapshot,
+    ) -> bool:
+        return any(
+            value is None
+            for value in (
+                volatility.daily_return_std,
+                volatility.annualized_volatility,
+            )
+        )
+
+    def _has_missing_momentum_confirmation_values(
+        self,
+        momentum: MomentumSnapshot,
+    ) -> bool:
+        return momentum.momentum_10 is None or momentum.momentum_20 is None
+
+    def _has_missing_momentum_values(
+        self,
+        momentum: MomentumSnapshot,
+    ) -> bool:
+        return any(
+            value is None
+            for value in (
+                momentum.momentum_5,
+                momentum.momentum_10,
+                momentum.momentum_20,
+            )
+        )
+
     def _has_missing_macd_values(
         self,
         macd: MacdSnapshot,
@@ -514,10 +657,14 @@ class StrategySignalService:
         trend = technical_indicators.summary.moving_average.trend
         rsi_status = technical_indicators.summary.rsi.status
         macd_signal = technical_indicators.summary.macd.signal
+        momentum_direction = technical_indicators.summary.momentum.direction
+        volatility_level = technical_indicators.summary.volatility.level
         return (
             f"{technical_indicators.market}:{technical_indicators.symbol} "
-            f"当前已根据数据质量、均线趋势、RSI 和 MACD 生成基础策略信号，"
-            f"均线趋势为 {trend}，RSI 状态为 {rsi_status}，MACD 信号为 {macd_signal}。"
+            f"当前已根据数据质量、均线趋势、RSI、MACD、动量和波动率生成策略信号，"
+            f"均线趋势为 {trend}，RSI 状态为 {rsi_status}，"
+            f"MACD 信号为 {macd_signal}，动量方向为 {momentum_direction}，"
+            f"波动率等级为 {volatility_level}。"
         )
 
     def _build_initial_reasons(
@@ -539,7 +686,7 @@ class StrategySignalService:
     ) -> list[str]:
         risks = [
             *technical_indicators.summary.warnings,
-            "当前策略信号仍在逐步接入动量、波动率和成交量等规则。",
+            "当前策略信号仍在逐步接入成交量规则和最终综合评分规则。",
         ]
 
         if data_quality is None:

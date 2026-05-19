@@ -147,6 +147,34 @@ class AsyncMarketRepository:
 
         return list(reversed(candles))
 
+    async def list_candles_by_date_range(
+        self,
+        *,
+        symbol: str,
+        market: str,
+        timeframe: str,
+        start_at,
+        end_at,
+        adjust_type: str = "none",
+        source: str | None = None,
+    ) -> list[MarketCandle]:
+        stmt = select(MarketCandle).where(
+            MarketCandle.symbol == symbol,
+            MarketCandle.market == market,
+            MarketCandle.timeframe == timeframe,
+            MarketCandle.adjust_type == adjust_type,
+            MarketCandle.candle_time >= start_at,
+            MarketCandle.candle_time <= end_at,
+        )
+
+        if source is not None:
+            stmt = stmt.where(MarketCandle.source == source)
+
+        stmt = stmt.order_by(MarketCandle.candle_time.asc())
+
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
     async def create_candle(
         self,
         payload: MarketCandleCreate,

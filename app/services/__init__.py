@@ -29,6 +29,7 @@ from app.services.stock_analysis_react_service import StockAnalysisReactService
 from app.services.analysis_conversation_service import AnalysisConversationService
 from app.services.strategy_signal_service import StrategySignalService
 from app.services.strategy_signal_query_service import StrategySignalQueryService
+from app.services.backtest_data_service import BacktestCandleData, BacktestDataService
 # from app.services.stock_analysis_service import StockAnalysisService
 
 
@@ -62,5 +63,7 @@ __all__ = [
     "AnalysisConversationService",
     "StrategySignalService",
     "StrategySignalQueryService",
+    "BacktestCandleData",
+    "BacktestDataService",
     # "StockAnalysisService",
 ]

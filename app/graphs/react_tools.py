@@ -67,6 +67,27 @@ REACT_TOOL_DEFINITIONS: dict[ReactToolName, ReactToolDefinition] = {
             "their selected stocks or wants comparison inside their watchlist."
         ),
     ),
+    "get_backtest_result": ReactToolDefinition(
+        name="get_backtest_result",
+        description=(
+            "Run a single-stock historical backtest for a specified symbol, market, "
+            "and date range, then return a trimmed performance summary. Use this "
+            "only to explain historical strategy performance, risk, drawdown, "
+            "win rate, and benchmark comparison. It does not place real trades, "
+            "predict future returns, or provide investment advice."
+        ),
+        required_inputs=("symbol", "market", "start_date", "end_date"),
+        optional_inputs=(
+            "initial_cash",
+            "position_size_ratio",
+            "timeframe",
+            "adjust_type",
+            "source",
+            "min_required_candles",
+            "enforce_data_quality",
+            "data_quality_stale_after_days",
+        ),
+    ),
 }
 
 DEFAULT_REACT_TOOLS: tuple[ReactToolName, ...] = (
@@ -76,6 +97,7 @@ DEFAULT_REACT_TOOLS: tuple[ReactToolName, ...] = (
     "get_data_quality",
     "get_user_preference",
     "get_watchlist",
+    "get_backtest_result",
 )
 
 

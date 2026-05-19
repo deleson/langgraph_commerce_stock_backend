@@ -460,6 +460,23 @@ class BacktestService:
         winning_trade_count = sum(1 for result in completed_results if result > 0)
         losing_trade_count = sum(1 for result in completed_results if result < 0)
 
+        average_win = self._calculate_average_win(completed_results)
+        average_loss = self._calculate_average_loss(completed_results)
+        profit_loss_ratio = self._calculate_profit_loss_ratio(
+            average_win=average_win,
+            average_loss=average_loss,
+        )
+        realized_returns = self._build_realized_returns(trades)
+        average_realized_return = self._calculate_average_realized_return(
+            realized_returns
+        )
+        completed_holding_days = self._build_completed_holding_days(trades)
+        average_completed_holding_days = self._calculate_average_holding_days(
+            completed_holding_days
+        )
+        best_trade_pnl = self._calculate_best_trade_pnl(completed_results)
+        worst_trade_pnl = self._calculate_worst_trade_pnl(completed_results)
+
         if completed_trade_count == 0:
             win_rate = None
         else:
@@ -486,8 +503,15 @@ class BacktestService:
             winning_trade_count=winning_trade_count,
             losing_trade_count=losing_trade_count,
             win_rate=win_rate,
+            average_win=average_win,
+            average_loss=average_loss,
+            profit_loss_ratio=profit_loss_ratio,
+            average_realized_return=average_realized_return,
+            best_trade_pnl=best_trade_pnl,
+            worst_trade_pnl=worst_trade_pnl,
             holding_days=holding_days,
             cash_days=cash_days,
+            average_holding_days=average_completed_holding_days,
             annualized_return=annualized_return,
             average_daily_return=average_daily_return,
         )
@@ -588,6 +612,96 @@ class BacktestService:
                 results.append(trade.realized_pnl)
 
         return results
+
+    def _calculate_average_win(
+        self,
+        completed_results: list[Decimal],
+    ) -> Decimal | None:
+        wins = [result for result in completed_results if result > 0]
+        if not wins:
+            return None
+
+        return sum(wins, Decimal("0")) / Decimal(len(wins))
+
+    def _calculate_average_loss(
+        self,
+        completed_results: list[Decimal],
+    ) -> Decimal | None:
+        losses = [result for result in completed_results if result < 0]
+        if not losses:
+            return None
+
+        return sum(losses, Decimal("0")) / Decimal(len(losses))
+
+    def _calculate_profit_loss_ratio(
+        self,
+        *,
+        average_win: Decimal | None,
+        average_loss: Decimal | None,
+    ) -> float | None:
+        if average_win is None or average_loss is None:
+            return None
+
+        if average_loss == 0:
+            return None
+
+        return float(average_win / abs(average_loss))
+
+    def _build_realized_returns(
+        self,
+        trades: list[BacktestTrade],
+    ) -> list[float]:
+        return [
+            trade.realized_return
+            for trade in trades
+            if trade.action == "sell" and trade.realized_return is not None
+        ]
+
+    def _calculate_average_realized_return(
+        self,
+        realized_returns: list[float],
+    ) -> float | None:
+        if not realized_returns:
+            return None
+
+        return sum(realized_returns) / len(realized_returns)
+
+    def _build_completed_holding_days(
+        self,
+        trades: list[BacktestTrade],
+    ) -> list[int]:
+        return [
+            trade.holding_days
+            for trade in trades
+            if trade.action == "sell" and trade.holding_days is not None
+        ]
+
+    def _calculate_average_holding_days(
+        self,
+        completed_holding_days: list[int],
+    ) -> float | None:
+        if not completed_holding_days:
+            return None
+
+        return sum(completed_holding_days) / len(completed_holding_days)
+
+    def _calculate_best_trade_pnl(
+        self,
+        completed_results: list[Decimal],
+    ) -> Decimal | None:
+        if not completed_results:
+            return None
+
+        return max(completed_results)
+
+    def _calculate_worst_trade_pnl(
+        self,
+        completed_results: list[Decimal],
+    ) -> Decimal | None:
+        if not completed_results:
+            return None
+
+        return min(completed_results)
 
     def _decision_from_signal(
         self,

@@ -10,6 +10,7 @@ from app.schemas.backtest import (
     BacktestRequest,
     BacktestResponse,
     BacktestSignalSnapshot,
+    BacktestTrade,
 )
 from app.schemas.technical_indicator import (
     TechnicalIndicatorResponse,
@@ -67,6 +68,11 @@ class BacktestService:
             request=request,
             daily_equity=daily_equity,
         )
+        trades = self._match_trades(
+            request=request,
+            candles=candles,
+            signal_snapshots=signal_snapshots,
+        )
 
         return BacktestResponse(
             symbol=request.symbol,
@@ -82,7 +88,7 @@ class BacktestService:
                 metrics=metrics,
             ),
             metrics=metrics,
-            trades=[],
+            trades=trades if request.include_trades else [],
             daily_equity=daily_equity if request.include_daily_equity else [],
             signal_snapshots=(
                 signal_snapshots if request.include_signal_snapshots else []
@@ -90,7 +96,7 @@ class BacktestService:
             input_snapshot=candle_data.input_snapshot,
             warnings=[
                 *candle_data.warnings,
-                "当前为阶段六 Backtest Engine 初版：已完成历史信号循环，交易撮合与持仓收益将在后续步骤补齐。",
+                "当前为阶段六步骤六：已完成 T 日信号、T+1 日开盘价模拟撮合；完整资金曲线、绩效指标和交易明细增强将在后续步骤补齐。",
             ],
         )
 
@@ -195,6 +201,108 @@ class BacktestService:
             calculated_at=datetime.now(UTC),
             summary=summary,
         )
+
+    def _match_trades(
+        self,
+        *,
+        request: BacktestRequest,
+        candles: list[MarketCandle],
+        signal_snapshots: list[BacktestSignalSnapshot],
+    ) -> list[BacktestTrade]:
+        trades: list[BacktestTrade] = []
+        cash = request.initial_cash
+        position_quantity = 0
+
+        for index, snapshot in enumerate(signal_snapshots):
+            next_index = index + 1
+            if next_index >= len(candles):
+                continue
+
+            next_candle = candles[next_index]
+            execution_price = next_candle.open_price
+
+            if execution_price <= 0:
+                continue
+
+            if snapshot.decision == "buy":
+                if position_quantity > 0:
+                    continue
+
+                quantity = self._calculate_buy_quantity(
+                    cash=cash,
+                    price=execution_price,
+                    position_size_ratio=request.position_size_ratio,
+                )
+                if quantity <= 0:
+                    continue
+
+                cash_before = cash
+                position_before = position_quantity
+                cost = execution_price * Decimal(quantity)
+
+                cash = cash - cost
+                position_quantity = position_quantity + quantity
+                equity_after = cash + Decimal(position_quantity) * execution_price
+
+                trades.append(
+                    BacktestTrade(
+                        sequence_no=len(trades) + 1,
+                        action="buy",
+                        trade_date=next_candle.candle_time.date(),
+                        price=execution_price,
+                        quantity=quantity,
+                        cash_before=cash_before,
+                        cash_after=cash,
+                        position_before=position_before,
+                        position_after=position_quantity,
+                        equity_after=equity_after,
+                        signal=snapshot.signal,
+                        signal_strength=snapshot.signal_strength,
+                        signal_score=snapshot.signal_score,
+                        reason=self._build_trade_reason(
+                            snapshot=snapshot,
+                            execution_date=next_candle.candle_time.date(),
+                        ),
+                    )
+                )
+                continue
+
+            if snapshot.decision == "sell":
+                if position_quantity <= 0:
+                    continue
+
+                cash_before = cash
+                position_before = position_quantity
+                quantity = position_quantity
+                proceeds = execution_price * Decimal(quantity)
+
+                cash = cash + proceeds
+                position_quantity = 0
+                equity_after = cash
+
+                trades.append(
+                    BacktestTrade(
+                        sequence_no=len(trades) + 1,
+                        action="sell",
+                        trade_date=next_candle.candle_time.date(),
+                        price=execution_price,
+                        quantity=quantity,
+                        cash_before=cash_before,
+                        cash_after=cash,
+                        position_before=position_before,
+                        position_after=position_quantity,
+                        equity_after=equity_after,
+                        signal=snapshot.signal,
+                        signal_strength=snapshot.signal_strength,
+                        signal_score=snapshot.signal_score,
+                        reason=self._build_trade_reason(
+                            snapshot=snapshot,
+                            execution_date=next_candle.candle_time.date(),
+                        ),
+                    )
+                )
+
+        return trades
 
     def _build_initial_daily_equity(
         self,
@@ -309,3 +417,25 @@ class BacktestService:
             f"当前版本尚未执行真实模拟买卖，最终权益暂为 {metrics.final_equity}，"
             "后续步骤将继续补齐买卖撮合、持仓现金计算、绩效指标和交易明细。"
         )
+
+    def _calculate_buy_quantity(
+        self,
+        *,
+        cash: Decimal,
+        price: Decimal,
+        position_size_ratio: float,
+    ) -> int:
+        available_cash = cash * Decimal(str(position_size_ratio))
+        return int(available_cash // price)
+
+    def _build_trade_reason(
+        self,
+        *,
+        snapshot: BacktestSignalSnapshot,
+        execution_date,
+    ) -> str:
+        return (
+            f"{snapshot.trade_date} 生成 {snapshot.decision} 信号，"
+            f"于 {execution_date} 使用下一根 K 线开盘价模拟成交。"
+        )
+

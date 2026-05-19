@@ -59,6 +59,7 @@ def get_stock_analysis_react_graph(
             "get_data_quality": "tool_execution",
             "get_user_preference": "tool_execution",
             "get_watchlist": "tool_execution",
+            "get_backtest_result": "tool_execution",
             "final_answer": "final_answer",
             "error": "final_answer",
         },

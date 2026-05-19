@@ -185,9 +185,11 @@ def _build_agent_reason_messages(
 5. 如果用户问当前行情、价格、K线、数据来源，优先考虑 get_market_overview。
 6. 如果用户问 MA、RSI、MACD、波动率、动量、成交量，优先考虑 get_technical_indicators。
 7. 如果用户问数据是否可靠、数据是否足够、是否过旧，优先考虑 get_data_quality。
-8. 如果用户问是否适合自己、风险偏好、提醒设置，优先考虑 get_user_preference。
-9. 如果用户问自选股、关注列表、列表内比较，优先考虑 get_watchlist。
-10. 如果已有 observations 足够回答，就选择 final_answer。
+8. 如果用户问历史回测、策略历史表现、最大回撤、胜率、夏普比率、是否跑赢买入持有，优先考虑 get_backtest_result。
+9. 调用 get_backtest_result 必须提供 start_date 和 end_date；如果用户没有给明确回测区间，应先选择 final_answer 追问用户回测时间范围，不要自己猜。
+10. 如果用户问是否适合自己、风险偏好、提醒设置，优先考虑 get_user_preference。
+11. 如果用户问自选股、关注列表、列表内比较，优先考虑 get_watchlist。
+12. 如果已有 observations 足够回答，就选择 final_answer。
 """.strip()
 
     human_prompt = f"""
@@ -543,6 +545,41 @@ async def _call_react_tool(
                 default=50,
                 min_value=1,
                 max_value=MAX_WATCHLIST_LIMIT,
+            ),
+        )
+
+    if tool_name == "get_backtest_result":
+        start_date = tool_input.get("start_date")
+        end_date = tool_input.get("end_date")
+
+        if not start_date or not end_date:
+            raise ValueError(
+                "start_date and end_date are required for get_backtest_result"
+            )
+
+        return await tool_service.get_backtest_result(
+            symbol=_get_symbol(tool_input, state),
+            market=_get_market(tool_input, state),
+            start_date=start_date,
+            end_date=end_date,
+            initial_cash=tool_input.get("initial_cash", "100000"),
+            position_size_ratio=float(
+                tool_input.get("position_size_ratio") or 1.0
+            ),
+            timeframe=tool_input.get("timeframe", "1d"),
+            adjust_type=tool_input.get("adjust_type", "none"),
+            source=tool_input.get("source"),
+            min_required_candles=clamp_int(
+                tool_input.get("min_required_candles"),
+                default=60,
+                min_value=30,
+                max_value=1000,
+            ),
+            enforce_data_quality=bool(
+                tool_input.get("enforce_data_quality", True)
+            ),
+            data_quality_stale_after_days=tool_input.get(
+                "data_quality_stale_after_days"
             ),
         )
 

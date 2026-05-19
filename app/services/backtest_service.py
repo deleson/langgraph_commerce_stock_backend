@@ -70,8 +70,9 @@ class BacktestService:
             candles=candles,
             trades=trades,
         )
-        metrics = self._build_initial_metrics(
+        metrics = self._build_metrics(
             request=request,
+            trades=trades,
             daily_equity=daily_equity,
         )
 
@@ -97,7 +98,7 @@ class BacktestService:
             input_snapshot=candle_data.input_snapshot,
             warnings=[
                 *candle_data.warnings,
-                "当前为阶段六步骤七：已完成 T 日信号、T+1 日开盘价模拟撮合，并生成每日现金、持仓、市值和总权益；完整绩效指标和交易明细增强将在后续步骤补齐。",
+                "当前为阶段六步骤八：已完成 T 日信号、T+1 日开盘价模拟撮合、每日权益曲线和基础绩效指标；交易明细增强将在后续步骤补齐。",
             ],
         )
 
@@ -372,10 +373,11 @@ class BacktestService:
 
         return grouped
 
-    def _build_initial_metrics(
+    def _build_metrics(
         self,
         *,
         request: BacktestRequest,
+        trades: list[BacktestTrade],
         daily_equity: list[BacktestDailyEquity],
     ) -> BacktestMetrics:
         final_equity = (
@@ -393,21 +395,60 @@ class BacktestService:
             default=0.0,
         )
 
+        trade_count = len(trades)
+        buy_count = sum(1 for trade in trades if trade.action == "buy")
+        sell_count = sum(1 for trade in trades if trade.action == "sell")
+
+        completed_results = self._build_completed_trade_results(trades)
+        completed_trade_count = len(completed_results)
+        winning_trade_count = sum(1 for result in completed_results if result > 0)
+        losing_trade_count = sum(1 for result in completed_results if result < 0)
+
+        if completed_trade_count == 0:
+            win_rate = None
+        else:
+            win_rate = winning_trade_count / completed_trade_count
+
+        holding_days = sum(
+            1 for item in daily_equity if item.position_quantity > 0
+        )
+        cash_days = len(daily_equity) - holding_days
+
         return BacktestMetrics(
             initial_cash=request.initial_cash,
             final_equity=final_equity,
             total_return=total_return,
             max_drawdown=max_drawdown,
-            trade_count=0,
-            buy_count=0,
-            sell_count=0,
-            completed_trade_count=0,
-            winning_trade_count=0,
-            losing_trade_count=0,
-            win_rate=None,
-            holding_days=0,
-            cash_days=len(daily_equity),
+            trade_count=trade_count,
+            buy_count=buy_count,
+            sell_count=sell_count,
+            completed_trade_count=completed_trade_count,
+            winning_trade_count=winning_trade_count,
+            losing_trade_count=losing_trade_count,
+            win_rate=win_rate,
+            holding_days=holding_days,
+            cash_days=cash_days,
         )
+
+    def _build_completed_trade_results(
+        self,
+        trades: list[BacktestTrade],
+    ) -> list[Decimal]:
+        results: list[Decimal] = []
+        open_buy: BacktestTrade | None = None
+
+        for trade in trades:
+            if trade.action == "buy":
+                open_buy = trade
+                continue
+
+            if trade.action == "sell" and open_buy is not None:
+                buy_cost = open_buy.price * Decimal(open_buy.quantity)
+                sell_proceeds = trade.price * Decimal(trade.quantity)
+                results.append(sell_proceeds - buy_cost)
+                open_buy = None
+
+        return results
 
     def _decision_from_signal(
         self,
@@ -437,10 +478,12 @@ class BacktestService:
     ) -> str:
         return (
             f"{request.market}:{request.symbol} 已完成阶段六回测运行，"
-            f"本次读取 {candle_count} 根 K 线，生成 {signal_count} 条每日信号快照。"
-            f"当前已根据策略信号完成模拟撮合，并生成每日现金、持仓和总权益。"
-            f"当前最终权益为 {metrics.final_equity}，"
-            "后续步骤将继续补齐基础绩效指标和交易明细增强。"
+            f"本次读取 {candle_count} 根 K 线，生成 {signal_count} 条每日信号快照，"
+            f"共模拟成交 {metrics.trade_count} 次。"
+            f"期末权益为 {metrics.final_equity}，"
+            f"总收益率为 {metrics.total_return:.2%}，"
+            f"最大回撤为 {metrics.max_drawdown:.2%}。"
+            "本回测仅用于策略研究，不构成投资建议。"
         )
 
     def _calculate_buy_quantity(

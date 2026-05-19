@@ -13,6 +13,7 @@ ReactToolName = Literal[
     "get_data_quality",
     "get_user_preference",
     "get_watchlist",
+    "get_backtest_result",
 ]
 
 ReactActionType = Literal[

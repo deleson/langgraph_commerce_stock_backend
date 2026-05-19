@@ -30,6 +30,7 @@ from app.services.analysis_conversation_service import AnalysisConversationServi
 from app.services.strategy_signal_service import StrategySignalService
 from app.services.strategy_signal_query_service import StrategySignalQueryService
 from app.services.backtest_data_service import BacktestCandleData, BacktestDataService
+from app.services.backtest_service import BacktestService
 # from app.services.stock_analysis_service import StockAnalysisService
 
 
@@ -65,5 +66,6 @@ __all__ = [
     "StrategySignalQueryService",
     "BacktestCandleData",
     "BacktestDataService",
+    "BacktestService",
     # "StockAnalysisService",
 ]

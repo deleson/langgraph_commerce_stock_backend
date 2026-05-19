@@ -73,6 +73,7 @@ class BacktestService:
         )
         metrics = self._build_metrics(
             request=request,
+            candles=candles,
             trades=trades,
             daily_equity=daily_equity,
         )
@@ -409,6 +410,7 @@ class BacktestService:
         self,
         *,
         request: BacktestRequest,
+        candles: list[MarketCandle],
         trades: list[BacktestTrade],
         daily_equity: list[BacktestDailyEquity],
     ) -> BacktestMetrics:
@@ -420,6 +422,15 @@ class BacktestService:
 
         total_return = float(
             (final_equity - request.initial_cash) / request.initial_cash
+        )
+
+        buy_and_hold_return = self._calculate_buy_and_hold_return(candles)
+        excess_return = self._calculate_excess_return(
+            total_return=total_return,
+            buy_and_hold_return=buy_and_hold_return,
+        )
+        outperformed_buy_and_hold = self._calculate_outperformed_buy_and_hold(
+            excess_return
         )
 
         daily_returns = self._build_daily_returns(daily_equity)
@@ -514,6 +525,9 @@ class BacktestService:
             average_holding_days=average_completed_holding_days,
             annualized_return=annualized_return,
             average_daily_return=average_daily_return,
+            buy_and_hold_return=buy_and_hold_return,
+            excess_return=excess_return,
+            outperformed_buy_and_hold=outperformed_buy_and_hold,
         )
 
     def _build_daily_returns(
@@ -600,6 +614,41 @@ class BacktestService:
             return None
 
         return total_return / max_drawdown
+
+    def _calculate_buy_and_hold_return(
+        self,
+        candles: list[MarketCandle],
+    ) -> float | None:
+        if len(candles) < 2:
+            return None
+
+        first_close = candles[0].close_price
+        last_close = candles[-1].close_price
+
+        if first_close <= 0:
+            return None
+
+        return float((last_close - first_close) / first_close)
+
+    def _calculate_excess_return(
+        self,
+        *,
+        total_return: float,
+        buy_and_hold_return: float | None,
+    ) -> float | None:
+        if buy_and_hold_return is None:
+            return None
+
+        return total_return - buy_and_hold_return
+
+    def _calculate_outperformed_buy_and_hold(
+        self,
+        excess_return: float | None,
+    ) -> bool | None:
+        if excess_return is None:
+            return None
+
+        return excess_return > 0
 
     def _build_completed_trade_results(
         self,

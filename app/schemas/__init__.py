@@ -121,6 +121,20 @@ from app.schemas.strategy_signal import (
     StrategySignalStatus,
     StrategySignalStrength,
 )
+from app.schemas.backtest import (
+    BacktestDailyEquity,
+    BacktestDecisionAction,
+    BacktestInputSnapshot,
+    BacktestMetrics,
+    BacktestPositionStatus,
+    BacktestRequest,
+    BacktestResponse,
+    BacktestSignalSnapshot,
+    BacktestStatus,
+    BacktestTrade,
+    BacktestTradeAction,
+    BacktestUnavailableReason,
+)
 
 __all__ = [
     "ApiResponse",
@@ -227,4 +241,17 @@ __all__ = [
     "StrategySignalResponse",
     "StrategySignalStatus",
     "StrategySignalStrength",
+
+    "BacktestDailyEquity",
+    "BacktestDecisionAction",
+    "BacktestInputSnapshot",
+    "BacktestMetrics",
+    "BacktestPositionStatus",
+    "BacktestRequest",
+    "BacktestResponse",
+    "BacktestSignalSnapshot",
+    "BacktestStatus",
+    "BacktestTrade",
+    "BacktestTradeAction",
+    "BacktestUnavailableReason",
 ]

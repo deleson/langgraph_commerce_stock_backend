@@ -19,6 +19,7 @@ from app.schemas.strategy_signal import (
 BacktestStatus = Literal["available", "unavailable"]
 BacktestTradeAction = Literal["buy", "sell"]
 BacktestPositionStatus = Literal["cash", "long"]
+BacktestExecutionPriceType = Literal["next_open"]
 BacktestDecisionAction = Literal["buy", "sell", "hold", "observe", "skip"]
 BacktestUnavailableReason = Literal[
     "no_data",
@@ -67,6 +68,9 @@ class BacktestTrade(BaseModel):
 
     price: Decimal = Field(gt=0)
     quantity: int = Field(gt=0)
+    signal_date: date | None = None
+    execution_price_type: BacktestExecutionPriceType = "next_open"
+    trade_value: Decimal = Field(ge=0)
 
     cash_before: Decimal = Field(ge=0)
     cash_after: Decimal = Field(ge=0)
@@ -74,12 +78,15 @@ class BacktestTrade(BaseModel):
     position_after: int = Field(ge=0)
     equity_after: Decimal = Field(ge=0)
 
+    realized_pnl: Decimal | None = None
+    realized_return: float | None = None
+    holding_days: int | None = Field(default=None, ge=0)
+
     signal: StrategySignalAction | None = None
     signal_strength: StrategySignalStrength | None = None
     signal_score: int | None = Field(default=None, ge=0, le=100)
 
     reason: str = Field(min_length=1, max_length=500)
-
 
 class BacktestDailyEquity(BaseModel):
     trade_date: date

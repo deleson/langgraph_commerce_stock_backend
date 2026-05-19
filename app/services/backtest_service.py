@@ -98,7 +98,7 @@ class BacktestService:
             input_snapshot=candle_data.input_snapshot,
             warnings=[
                 *candle_data.warnings,
-                "当前为阶段六步骤八：已完成 T 日信号、T+1 日开盘价模拟撮合、每日权益曲线和基础绩效指标；交易明细增强将在后续步骤补齐。",
+                "当前为阶段六步骤九：已完成交易明细增强，包含信号日期、成交金额、已实现盈亏、已实现收益率和持仓天数；本阶段暂未计算手续费和滑点。",
             ],
         )
 
@@ -214,6 +214,7 @@ class BacktestService:
         trades: list[BacktestTrade] = []
         cash = request.initial_cash
         position_quantity = 0
+        open_buy_trade: BacktestTrade | None = None
 
         for index, snapshot in enumerate(signal_snapshots):
             next_index = index + 1
@@ -246,8 +247,8 @@ class BacktestService:
                 position_quantity = position_quantity + quantity
                 equity_after = cash + Decimal(position_quantity) * execution_price
 
-                trades.append(
-                    BacktestTrade(
+                trade_value = cost
+                trade = BacktestTrade(
                         sequence_no=len(trades) + 1,
                         action="buy",
                         trade_date=next_candle.candle_time.date(),
@@ -265,8 +266,15 @@ class BacktestService:
                             snapshot=snapshot,
                             execution_date=next_candle.candle_time.date(),
                         ),
+                        signal_date=snapshot.trade_date,
+                        execution_price_type="next_open",
+                        trade_value=trade_value,
+                        realized_pnl=None,
+                        realized_return=None,
+                        holding_days=None,
                     )
-                )
+                trades.append(trade)
+                open_buy_trade = trade
                 continue
 
             if snapshot.decision == "sell":
@@ -277,6 +285,22 @@ class BacktestService:
                 position_before = position_quantity
                 quantity = position_quantity
                 proceeds = execution_price * Decimal(quantity)
+
+                trade_value = proceeds
+                realized_pnl = None
+                realized_return = None
+                holding_days = None
+
+                if open_buy_trade is not None:
+                    buy_cost = open_buy_trade.price * Decimal(open_buy_trade.quantity)
+                    realized_pnl = proceeds - buy_cost
+
+                    if buy_cost > 0:
+                        realized_return = float(realized_pnl / buy_cost)
+
+                    holding_days = (
+                            next_candle.candle_time.date() - open_buy_trade.trade_date
+                    ).days
 
                 cash = cash + proceeds
                 position_quantity = 0
@@ -301,8 +325,15 @@ class BacktestService:
                             snapshot=snapshot,
                             execution_date=next_candle.candle_time.date(),
                         ),
+                        signal_date=snapshot.trade_date,
+                        execution_price_type="next_open",
+                        trade_value=trade_value,
+                        realized_pnl=realized_pnl,
+                        realized_return=realized_return,
+                        holding_days=holding_days,
                     )
                 )
+                open_buy_trade = None
 
         return trades
 
@@ -435,18 +466,10 @@ class BacktestService:
         trades: list[BacktestTrade],
     ) -> list[Decimal]:
         results: list[Decimal] = []
-        open_buy: BacktestTrade | None = None
 
         for trade in trades:
-            if trade.action == "buy":
-                open_buy = trade
-                continue
-
-            if trade.action == "sell" and open_buy is not None:
-                buy_cost = open_buy.price * Decimal(open_buy.quantity)
-                sell_proceeds = trade.price * Decimal(trade.quantity)
-                results.append(sell_proceeds - buy_cost)
-                open_buy = None
+            if trade.action == "sell" and trade.realized_pnl is not None:
+                results.append(trade.realized_pnl)
 
         return results
 
@@ -504,6 +527,7 @@ class BacktestService:
     ) -> str:
         return (
             f"{snapshot.trade_date} 生成 {snapshot.decision} 信号，"
-            f"于 {execution_date} 使用下一根 K 线开盘价模拟成交。"
+            f"于 {execution_date} 按下一根 K 线开盘价模拟成交；"
+            "本回测未计算手续费和滑点。"
         )
 

@@ -100,7 +100,7 @@ class BacktestService:
             input_snapshot=candle_data.input_snapshot,
             warnings=[
                 *candle_data.warnings,
-                "当前为阶段六步骤九：已完成交易明细增强，包含信号日期、成交金额、已实现盈亏、已实现收益率和持仓天数；本阶段暂未计算手续费和滑点。",
+                "当前为阶段六点一：已完成收益类、风险类、交易质量和同股买入持有基准对比等回测绩效指标；本阶段暂未计算手续费、滑点、止损和止盈。",
             ],
         )
 
@@ -770,6 +770,45 @@ class BacktestService:
 
         return "skip"
 
+    def _format_percent(
+        self,
+        value: float | None,
+    ) -> str:
+        if value is None:
+            return "不可计算"
+
+        return f"{value:.2%}"
+
+    def _format_decimal(
+        self,
+        value: Decimal | None,
+    ) -> str:
+        if value is None:
+            return "不可计算"
+
+        return str(value)
+
+    def _format_float(
+        self,
+        value: float | None,
+    ) -> str:
+        if value is None:
+            return "不可计算"
+
+        return f"{value:.2f}"
+
+    def _format_bool_result(
+        self,
+        value: bool | None,
+        *,
+        true_text: str,
+        false_text: str,
+    ) -> str:
+        if value is None:
+            return "不可判断"
+
+        return true_text if value else false_text
+
     def _build_summary(
         self,
         *,
@@ -778,14 +817,27 @@ class BacktestService:
         signal_count: int,
         metrics: BacktestMetrics,
     ) -> str:
+        benchmark_result = self._format_bool_result(
+            metrics.outperformed_buy_and_hold,
+            true_text="跑赢同股买入持有基准",
+            false_text="未跑赢同股买入持有基准",
+        )
+
         return (
-            f"{request.market}:{request.symbol} 已完成阶段六回测运行，"
+            f"{request.market}:{request.symbol} 已完成阶段六点一回测绩效分析，"
             f"本次读取 {candle_count} 根 K 线，生成 {signal_count} 条每日信号快照，"
             f"共模拟成交 {metrics.trade_count} 次。"
-            f"期末权益为 {metrics.final_equity}，"
-            f"总收益率为 {metrics.total_return:.2%}，"
-            f"最大回撤为 {metrics.max_drawdown:.2%}。"
-            "本回测仅用于策略研究，不构成投资建议。"
+            f"期末权益为 {self._format_decimal(metrics.final_equity)}，"
+            f"总收益率为 {self._format_percent(metrics.total_return)}，"
+            f"年化收益率为 {self._format_percent(metrics.annualized_return)}，"
+            f"最大回撤为 {self._format_percent(metrics.max_drawdown)}，"
+            f"夏普比率为 {self._format_float(metrics.sharpe_ratio)}，"
+            f"胜率为 {self._format_percent(metrics.win_rate)}，"
+            f"盈亏比为 {self._format_float(metrics.profit_loss_ratio)}，"
+            f"买入持有收益率为 {self._format_percent(metrics.buy_and_hold_return)}，"
+            f"超额收益为 {self._format_percent(metrics.excess_return)}，"
+            f"{benchmark_result}。"
+            "本回测仅基于历史行情和策略规则进行模拟，不构成投资建议，也不代表未来收益。"
         )
 
     def _calculate_buy_quantity(

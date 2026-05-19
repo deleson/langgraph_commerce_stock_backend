@@ -421,6 +421,14 @@ class BacktestService:
             (final_equity - request.initial_cash) / request.initial_cash
         )
 
+        daily_returns = self._build_daily_returns(daily_equity)
+        average_daily_return = self._calculate_average_daily_return(daily_returns)
+        annualized_return = self._calculate_annualized_return(
+            initial_cash=request.initial_cash,
+            final_equity=final_equity,
+            trading_days=len(daily_equity),
+        )
+
         max_drawdown = max(
             (item.drawdown for item in daily_equity),
             default=0.0,
@@ -459,7 +467,45 @@ class BacktestService:
             win_rate=win_rate,
             holding_days=holding_days,
             cash_days=cash_days,
+            annualized_return=annualized_return,
+            average_daily_return=average_daily_return,
         )
+
+    def _build_daily_returns(
+        self,
+        daily_equity: list[BacktestDailyEquity],
+    ) -> list[float]:
+        return [
+            item.daily_return
+            for item in daily_equity
+            if item.daily_return is not None
+        ]
+
+    def _calculate_average_daily_return(
+        self,
+        daily_returns: list[float],
+    ) -> float | None:
+        if not daily_returns:
+            return None
+
+        return sum(daily_returns) / len(daily_returns)
+
+    def _calculate_annualized_return(
+        self,
+        *,
+        initial_cash: Decimal,
+        final_equity: Decimal,
+        trading_days: int,
+    ) -> float | None:
+        if trading_days <= 0:
+            return None
+
+        if initial_cash <= 0:
+            return None
+
+        equity_ratio = float(final_equity / initial_cash)
+
+        return equity_ratio ** (252 / trading_days) - 1
 
     def _build_completed_trade_results(
         self,

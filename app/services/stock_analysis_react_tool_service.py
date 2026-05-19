@@ -389,22 +389,62 @@ class StockAnalysisReactToolService:
     ) -> dict[str, Any]:
         payload = response.model_dump(mode="json")
         metrics = payload.get("metrics") or None
+        warnings = payload.get("warnings") or []
 
-        if metrics is not None:
-            metrics = {
+        return {
+            "symbol": payload.get("symbol"),
+            "market": payload.get("market"),
+            "date_range": {
+                "start_date": payload.get("start_date"),
+                "end_date": payload.get("end_date"),
+            },
+            "status": payload.get("status"),
+            "unavailable_reason": payload.get("unavailable_reason"),
+            "summary": payload.get("summary"),
+            "metrics": self._build_backtest_metrics_observation(metrics),
+            "data_context": self._build_backtest_data_context(payload),
+            "output_limits": {
+                "warnings_returned": min(len(warnings), 5),
+                "warnings_total": len(warnings),
+                "trades_returned": 0,
+                "daily_equity_returned": 0,
+                "signal_snapshots_returned": 0,
+                "detail_policy": (
+                    "trades, daily_equity, and signal_snapshots are not returned "
+                    "to the ReAct observation to keep the LLM context concise."
+                ),
+            },
+            "warnings": warnings[:5],
+            "calculated_at": payload.get("calculated_at"),
+            "disclaimer": payload.get("disclaimer"),
+        }
+
+    def _build_backtest_metrics_observation(
+        self,
+        metrics: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if metrics is None:
+            return None
+
+        return {
+            "capital": {
                 "initial_cash": metrics.get("initial_cash"),
                 "final_equity": metrics.get("final_equity"),
+            },
+            "return_metrics": {
                 "total_return": metrics.get("total_return"),
                 "annualized_return": metrics.get("annualized_return"),
                 "average_daily_return": metrics.get("average_daily_return"),
+            },
+            "risk_metrics": {
                 "max_drawdown": metrics.get("max_drawdown"),
                 "daily_return_volatility": metrics.get("daily_return_volatility"),
                 "annualized_volatility": metrics.get("annualized_volatility"),
                 "sharpe_ratio": metrics.get("sharpe_ratio"),
                 "return_drawdown_ratio": metrics.get("return_drawdown_ratio"),
+            },
+            "trade_quality": {
                 "trade_count": metrics.get("trade_count"),
-                "buy_count": metrics.get("buy_count"),
-                "sell_count": metrics.get("sell_count"),
                 "completed_trade_count": metrics.get("completed_trade_count"),
                 "win_rate": metrics.get("win_rate"),
                 "average_win": metrics.get("average_win"),
@@ -414,26 +454,37 @@ class StockAnalysisReactToolService:
                 "average_holding_days": metrics.get("average_holding_days"),
                 "best_trade_pnl": metrics.get("best_trade_pnl"),
                 "worst_trade_pnl": metrics.get("worst_trade_pnl"),
+            },
+            "benchmark": {
                 "buy_and_hold_return": metrics.get("buy_and_hold_return"),
                 "excess_return": metrics.get("excess_return"),
                 "outperformed_buy_and_hold": metrics.get("outperformed_buy_and_hold"),
-            }
+            },
+        }
 
-        warnings = payload.get("warnings") or []
+    def _build_backtest_data_context(
+        self,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        input_snapshot = payload.get("input_snapshot") or {}
 
         return {
-            "symbol": payload.get("symbol"),
-            "market": payload.get("market"),
-            "start_date": payload.get("start_date"),
-            "end_date": payload.get("end_date"),
-            "status": payload.get("status"),
-            "unavailable_reason": payload.get("unavailable_reason"),
-            "summary": payload.get("summary"),
-            "metrics": metrics,
-            "input_snapshot": payload.get("input_snapshot"),
-            "warnings": warnings[:5],
-            "calculated_at": payload.get("calculated_at"),
-            "disclaimer": payload.get("disclaimer"),
+            "input_snapshot": {
+                "candle_count": input_snapshot.get("candle_count"),
+                "first_candle_date": input_snapshot.get("first_candle_date"),
+                "last_candle_date": input_snapshot.get("last_candle_date"),
+                "strategy_name": input_snapshot.get("strategy_name"),
+                "timeframe": input_snapshot.get("timeframe"),
+                "adjust_type": input_snapshot.get("adjust_type"),
+                "source": input_snapshot.get("source"),
+                "min_required_candles": input_snapshot.get("min_required_candles"),
+                "position_size_ratio": input_snapshot.get("position_size_ratio"),
+            },
+            "result_lists": {
+                "trades_count": len(payload.get("trades") or []),
+                "daily_equity_count": len(payload.get("daily_equity") or []),
+                "signal_snapshots_count": len(payload.get("signal_snapshots") or []),
+            },
         }
 
     def _serialize_user_preference(

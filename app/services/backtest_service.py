@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, date
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -60,18 +60,19 @@ class BacktestService:
             request=request,
             candles=candles,
         )
-        daily_equity = self._build_initial_daily_equity(
-            request=request,
-            candles=candles,
-        )
-        metrics = self._build_initial_metrics(
-            request=request,
-            daily_equity=daily_equity,
-        )
         trades = self._match_trades(
             request=request,
             candles=candles,
             signal_snapshots=signal_snapshots,
+        )
+        daily_equity = self._build_daily_equity(
+            request=request,
+            candles=candles,
+            trades=trades,
+        )
+        metrics = self._build_initial_metrics(
+            request=request,
+            daily_equity=daily_equity,
         )
 
         return BacktestResponse(
@@ -96,7 +97,7 @@ class BacktestService:
             input_snapshot=candle_data.input_snapshot,
             warnings=[
                 *candle_data.warnings,
-                "当前为阶段六步骤六：已完成 T 日信号、T+1 日开盘价模拟撮合；完整资金曲线、绩效指标和交易明细增强将在后续步骤补齐。",
+                "当前为阶段六步骤七：已完成 T 日信号、T+1 日开盘价模拟撮合，并生成每日现金、持仓、市值和总权益；完整绩效指标和交易明细增强将在后续步骤补齐。",
             ],
         )
 
@@ -304,18 +305,30 @@ class BacktestService:
 
         return trades
 
-    def _build_initial_daily_equity(
+    def _build_daily_equity(
         self,
         *,
         request: BacktestRequest,
         candles: list[MarketCandle],
+        trades: list[BacktestTrade],
     ) -> list[BacktestDailyEquity]:
         result: list[BacktestDailyEquity] = []
+        trades_by_date = self._group_trades_by_date(trades)
+
+        cash = request.initial_cash
+        position_quantity = 0
         previous_equity: Decimal | None = None
         peak_equity = request.initial_cash
 
         for candle in candles:
-            total_equity = request.initial_cash
+            trade_date = candle.candle_time.date()
+
+            for trade in trades_by_date.get(trade_date, []):
+                cash = trade.cash_after
+                position_quantity = trade.position_after
+
+            position_market_value = Decimal(position_quantity) * candle.close_price
+            total_equity = cash + position_market_value
 
             if previous_equity is None or previous_equity == 0:
                 daily_return = None
@@ -333,11 +346,11 @@ class BacktestService:
 
             result.append(
                 BacktestDailyEquity(
-                    trade_date=candle.candle_time.date(),
+                    trade_date=trade_date,
                     close_price=candle.close_price,
-                    cash=request.initial_cash,
-                    position_quantity=0,
-                    position_market_value=Decimal("0"),
+                    cash=cash,
+                    position_quantity=position_quantity,
+                    position_market_value=position_market_value,
                     total_equity=total_equity,
                     daily_return=daily_return,
                     drawdown=drawdown,
@@ -347,6 +360,17 @@ class BacktestService:
             previous_equity = total_equity
 
         return result
+
+    def _group_trades_by_date(
+        self,
+        trades: list[BacktestTrade],
+    ) -> dict[date, list[BacktestTrade]]:
+        grouped: dict[date, list[BacktestTrade]] = {}
+
+        for trade in trades:
+            grouped.setdefault(trade.trade_date, []).append(trade)
+
+        return grouped
 
     def _build_initial_metrics(
         self,
@@ -412,10 +436,11 @@ class BacktestService:
         metrics: BacktestMetrics,
     ) -> str:
         return (
-            f"{request.market}:{request.symbol} 已完成阶段六回测引擎初版运行，"
+            f"{request.market}:{request.symbol} 已完成阶段六回测运行，"
             f"本次读取 {candle_count} 根 K 线，生成 {signal_count} 条每日信号快照。"
-            f"当前版本尚未执行真实模拟买卖，最终权益暂为 {metrics.final_equity}，"
-            "后续步骤将继续补齐买卖撮合、持仓现金计算、绩效指标和交易明细。"
+            f"当前已根据策略信号完成模拟撮合，并生成每日现金、持仓和总权益。"
+            f"当前最终权益为 {metrics.final_equity}，"
+            "后续步骤将继续补齐基础绩效指标和交易明细增强。"
         )
 
     def _calculate_buy_quantity(

@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, date
 from decimal import Decimal
+import math
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -429,9 +430,25 @@ class BacktestService:
             trading_days=len(daily_equity),
         )
 
+        daily_return_volatility = self._calculate_daily_return_volatility(
+            daily_returns
+        )
+        annualized_volatility = self._calculate_annualized_volatility(
+            daily_return_volatility
+        )
+        sharpe_ratio = self._calculate_sharpe_ratio(
+            average_daily_return=average_daily_return,
+            daily_return_volatility=daily_return_volatility,
+        )
+
         max_drawdown = max(
             (item.drawdown for item in daily_equity),
             default=0.0,
+        )
+
+        return_drawdown_ratio = self._calculate_return_drawdown_ratio(
+            total_return=total_return,
+            max_drawdown=max_drawdown,
         )
 
         trade_count = len(trades)
@@ -458,6 +475,10 @@ class BacktestService:
             final_equity=final_equity,
             total_return=total_return,
             max_drawdown=max_drawdown,
+            daily_return_volatility=daily_return_volatility,
+            annualized_volatility=annualized_volatility,
+            sharpe_ratio=sharpe_ratio,
+            return_drawdown_ratio=return_drawdown_ratio,
             trade_count=trade_count,
             buy_count=buy_count,
             sell_count=sell_count,
@@ -506,6 +527,55 @@ class BacktestService:
         equity_ratio = float(final_equity / initial_cash)
 
         return equity_ratio ** (252 / trading_days) - 1
+
+    def _calculate_daily_return_volatility(
+        self,
+        daily_returns: list[float],
+    ) -> float | None:
+        if len(daily_returns) < 2:
+            return None
+
+        average_return = sum(daily_returns) / len(daily_returns)
+        variance = sum(
+            (daily_return - average_return) ** 2
+            for daily_return in daily_returns
+        ) / (len(daily_returns) - 1)
+
+        return math.sqrt(variance)
+
+    def _calculate_annualized_volatility(
+        self,
+        daily_return_volatility: float | None,
+    ) -> float | None:
+        if daily_return_volatility is None:
+            return None
+
+        return daily_return_volatility * math.sqrt(252)
+
+    def _calculate_sharpe_ratio(
+        self,
+        *,
+        average_daily_return: float | None,
+        daily_return_volatility: float | None,
+    ) -> float | None:
+        if average_daily_return is None:
+            return None
+
+        if daily_return_volatility is None or daily_return_volatility == 0:
+            return None
+
+        return average_daily_return / daily_return_volatility * math.sqrt(252)
+
+    def _calculate_return_drawdown_ratio(
+        self,
+        *,
+        total_return: float,
+        max_drawdown: float,
+    ) -> float | None:
+        if max_drawdown <= 0:
+            return None
+
+        return total_return / max_drawdown
 
     def _build_completed_trade_results(
         self,

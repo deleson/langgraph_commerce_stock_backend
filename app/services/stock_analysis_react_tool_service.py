@@ -18,6 +18,8 @@ from app.schemas.technical_indicator import TechnicalIndicatorResponse
 from app.services.market_data_quality_report_service import MarketDataQualityReportService
 from app.services.market_service import MarketService
 from app.services.technical_indicator_query_service import TechnicalIndicatorQueryService
+from app.schemas.backtest import BacktestRequest, BacktestResponse
+from app.services.backtest_query_service import BacktestQueryService
 
 class StockAnalysisReactToolService:
     """Business tool executor used by the stock analysis ReAct graph.
@@ -34,6 +36,7 @@ class StockAnalysisReactToolService:
         self.market_service = MarketService(db)
         self.technical_indicator_query_service = TechnicalIndicatorQueryService(db)
         self.market_data_quality_report_service = MarketDataQualityReportService(db)
+        self.backtest_query_service = BacktestQueryService(db)
     async def get_analysis_record(
         self,
         *,
@@ -240,6 +243,68 @@ class StockAnalysisReactToolService:
             created_at=datetime.now(UTC),
         )
 
+    async def get_backtest_result(
+        self,
+        *,
+        symbol: str,
+        market: MarketCode,
+        start_date: Any,
+        end_date: Any,
+        initial_cash: Any = "100000",
+        position_size_ratio: float = 1.0,
+        timeframe: CandleTimeframe = "1d",
+        adjust_type: AdjustType = "none",
+        source: MarketDataSource | None = None,
+        min_required_candles: int = 60,
+        enforce_data_quality: bool = True,
+        data_quality_stale_after_days: int | None = None,
+    ) -> ReactObservation:
+        normalized_symbol = symbol.strip().upper()
+
+        request = BacktestRequest(
+            symbol=normalized_symbol,
+            market=market,
+            start_date=start_date,
+            end_date=end_date,
+            initial_cash=initial_cash,
+            position_size_ratio=position_size_ratio,
+            timeframe=timeframe,
+            adjust_type=adjust_type,
+            source=source,
+            min_required_candles=min_required_candles,
+            enforce_data_quality=enforce_data_quality,
+            data_quality_stale_after_days=data_quality_stale_after_days,
+            include_trades=False,
+            include_daily_equity=False,
+            include_signal_snapshots=False,
+        )
+
+        response = await self.backtest_query_service.run_backtest(request)
+
+        return ReactObservation(
+            tool_name="get_backtest_result",
+            tool_input={
+                "symbol": normalized_symbol,
+                "market": market,
+                "start_date": str(request.start_date),
+                "end_date": str(request.end_date),
+                "initial_cash": str(request.initial_cash),
+                "position_size_ratio": request.position_size_ratio,
+                "timeframe": request.timeframe,
+                "adjust_type": request.adjust_type,
+                "source": request.source,
+                "min_required_candles": request.min_required_candles,
+                "enforce_data_quality": request.enforce_data_quality,
+                "data_quality_stale_after_days": request.data_quality_stale_after_days,
+                "include_trades": request.include_trades,
+                "include_daily_equity": request.include_daily_equity,
+                "include_signal_snapshots": request.include_signal_snapshots,
+            },
+            tool_output=self._serialize_backtest_response(response),
+            success=True,
+            created_at=datetime.now(UTC),
+        )
+
 
     def _serialize_analysis_record(
         self,
@@ -317,6 +382,59 @@ class StockAnalysisReactToolService:
             payload["warnings"] = warnings[:10]
 
         return payload
+
+    def _serialize_backtest_response(
+        self,
+        response: BacktestResponse,
+    ) -> dict[str, Any]:
+        payload = response.model_dump(mode="json")
+        metrics = payload.get("metrics") or None
+
+        if metrics is not None:
+            metrics = {
+                "initial_cash": metrics.get("initial_cash"),
+                "final_equity": metrics.get("final_equity"),
+                "total_return": metrics.get("total_return"),
+                "annualized_return": metrics.get("annualized_return"),
+                "average_daily_return": metrics.get("average_daily_return"),
+                "max_drawdown": metrics.get("max_drawdown"),
+                "daily_return_volatility": metrics.get("daily_return_volatility"),
+                "annualized_volatility": metrics.get("annualized_volatility"),
+                "sharpe_ratio": metrics.get("sharpe_ratio"),
+                "return_drawdown_ratio": metrics.get("return_drawdown_ratio"),
+                "trade_count": metrics.get("trade_count"),
+                "buy_count": metrics.get("buy_count"),
+                "sell_count": metrics.get("sell_count"),
+                "completed_trade_count": metrics.get("completed_trade_count"),
+                "win_rate": metrics.get("win_rate"),
+                "average_win": metrics.get("average_win"),
+                "average_loss": metrics.get("average_loss"),
+                "profit_loss_ratio": metrics.get("profit_loss_ratio"),
+                "average_realized_return": metrics.get("average_realized_return"),
+                "average_holding_days": metrics.get("average_holding_days"),
+                "best_trade_pnl": metrics.get("best_trade_pnl"),
+                "worst_trade_pnl": metrics.get("worst_trade_pnl"),
+                "buy_and_hold_return": metrics.get("buy_and_hold_return"),
+                "excess_return": metrics.get("excess_return"),
+                "outperformed_buy_and_hold": metrics.get("outperformed_buy_and_hold"),
+            }
+
+        warnings = payload.get("warnings") or []
+
+        return {
+            "symbol": payload.get("symbol"),
+            "market": payload.get("market"),
+            "start_date": payload.get("start_date"),
+            "end_date": payload.get("end_date"),
+            "status": payload.get("status"),
+            "unavailable_reason": payload.get("unavailable_reason"),
+            "summary": payload.get("summary"),
+            "metrics": metrics,
+            "input_snapshot": payload.get("input_snapshot"),
+            "warnings": warnings[:5],
+            "calculated_at": payload.get("calculated_at"),
+            "disclaimer": payload.get("disclaimer"),
+        }
 
     def _serialize_user_preference(
         self,

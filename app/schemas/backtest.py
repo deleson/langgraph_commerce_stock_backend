@@ -42,6 +42,8 @@ class BacktestRequest(BaseModel):
     adjust_type: AdjustType = "none"
     source: MarketDataSource | None = None
     min_required_candles: int = Field(default=60, ge=30, le=1000)
+    enforce_data_quality: bool = True
+    data_quality_stale_after_days: int | None = Field(default=None, ge=1, le=3650)
 
     include_trades: bool = True
     include_daily_equity: bool = True
@@ -119,7 +121,14 @@ class BacktestMetrics(BaseModel):
     final_equity: Decimal = Field(ge=0)
 
     total_return: float
+    annualized_return: float | None = None
+    average_daily_return: float | None = None
+
     max_drawdown: float = Field(ge=0)
+    daily_return_volatility: float | None = Field(default=None, ge=0)
+    annualized_volatility: float | None = Field(default=None, ge=0)
+    sharpe_ratio: float | None = None
+    return_drawdown_ratio: float | None = None
 
     trade_count: int = Field(ge=0)
     buy_count: int = Field(ge=0)
@@ -130,8 +139,20 @@ class BacktestMetrics(BaseModel):
     losing_trade_count: int = Field(ge=0)
     win_rate: float | None = Field(default=None, ge=0, le=1)
 
+    average_win: Decimal | None = None
+    average_loss: Decimal | None = None
+    profit_loss_ratio: float | None = None
+    average_realized_return: float | None = None
+    best_trade_pnl: Decimal | None = None
+    worst_trade_pnl: Decimal | None = None
+
     holding_days: int = Field(ge=0)
     cash_days: int = Field(ge=0)
+    average_holding_days: float | None = Field(default=None, ge=0)
+
+    buy_and_hold_return: float | None = None
+    excess_return: float | None = None
+    outperformed_buy_and_hold: bool | None = None
 
 
 class BacktestInputSnapshot(BaseModel):

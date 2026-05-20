@@ -137,6 +137,21 @@ from app.schemas.backtest import (
     BacktestExecutionPriceType,
     BacktestRiskControlConfig,
 )
+from app.schemas.portfolio_backtest import (
+    PortfolioBacktestAsset,
+    PortfolioBacktestDailyEquity,
+    PortfolioBacktestInputSnapshot,
+    PortfolioBacktestMetrics,
+    PortfolioBacktestPositionSnapshot,
+    PortfolioBacktestRebalanceFrequency,
+    PortfolioBacktestRequest,
+    PortfolioBacktestResponse,
+    PortfolioBacktestStatus,
+    PortfolioBacktestTrade,
+    PortfolioBacktestTradeAction,
+    PortfolioBacktestTradeReason,
+    PortfolioBacktestUnavailableReason,
+)
 
 __all__ = [
     "ApiResponse",
@@ -258,4 +273,18 @@ __all__ = [
     "BacktestExecutionPriceType",
     "BacktestUnavailableReason",
     "BacktestRiskControlConfig",
+
+    "PortfolioBacktestAsset",
+    "PortfolioBacktestDailyEquity",
+    "PortfolioBacktestInputSnapshot",
+    "PortfolioBacktestMetrics",
+    "PortfolioBacktestPositionSnapshot",
+    "PortfolioBacktestRebalanceFrequency",
+    "PortfolioBacktestRequest",
+    "PortfolioBacktestResponse",
+    "PortfolioBacktestStatus",
+    "PortfolioBacktestTrade",
+    "PortfolioBacktestTradeAction",
+    "PortfolioBacktestTradeReason",
+    "PortfolioBacktestUnavailableReason",
 ]

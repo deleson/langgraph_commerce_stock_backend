@@ -100,7 +100,7 @@ class BacktestService:
             input_snapshot=candle_data.input_snapshot,
             warnings=[
                 *candle_data.warnings,
-                "当前为阶段六点一：已完成收益类、风险类、交易质量和同股买入持有基准对比等回测绩效指标；本阶段暂未计算手续费、滑点、止损和止盈。",
+                "当前为阶段六点二：已支持手续费计算；滑点、止损、止盈、冷却期和最大回撤保护将在后续步骤继续接入。",
             ],
         )
 
@@ -243,13 +243,38 @@ class BacktestService:
 
                 cash_before = cash
                 position_before = position_quantity
-                cost = execution_price * Decimal(quantity)
+                trade_value = execution_price * Decimal(quantity)
+                commission = self._calculate_commission(
+                    trade_value=trade_value,
+                    commission_rate=request.risk_control.commission_rate,
+                    min_commission=request.risk_control.min_commission,
+                )
 
-                cash = cash - cost
+                total_cost = trade_value + commission
+
+                if cash < total_cost:
+                    quantity = self._calculate_buy_quantity(
+                        cash=cash - commission,
+                        price=execution_price,
+                        position_size_ratio=request.position_size_ratio,
+                    )
+                    if quantity <= 0:
+                        continue
+
+                    trade_value = execution_price * Decimal(quantity)
+                    commission = self._calculate_commission(
+                        trade_value=trade_value,
+                        commission_rate=request.risk_control.commission_rate,
+                        min_commission=request.risk_control.min_commission,
+                    )
+                    total_cost = trade_value + commission
+
+                    if cash < total_cost:
+                        continue
+
+                cash = cash - total_cost
                 position_quantity = position_quantity + quantity
                 equity_after = cash + Decimal(position_quantity) * execution_price
-
-                trade_value = cost
                 trade = BacktestTrade(
                         sequence_no=len(trades) + 1,
                         action="buy",
@@ -274,6 +299,13 @@ class BacktestService:
                         realized_pnl=None,
                         realized_return=None,
                         holding_days=None,
+
+                        raw_price=execution_price,
+                        slippage_amount=Decimal("0"),
+                        slippage_rate=Decimal("0"),
+                        commission=commission,
+                        commission_rate=request.risk_control.commission_rate,
+                        risk_rule=None,
                     )
                 trades.append(trade)
                 open_buy_trade = trade
@@ -286,16 +318,19 @@ class BacktestService:
                 cash_before = cash
                 position_before = position_quantity
                 quantity = position_quantity
-                proceeds = execution_price * Decimal(quantity)
+                trade_value = execution_price * Decimal(quantity)
+                commission = self._calculate_commission(
+                    trade_value=trade_value,
+                    commission_rate=request.risk_control.commission_rate,
+                    min_commission=request.risk_control.min_commission,
+                )
 
-                trade_value = proceeds
-                realized_pnl = None
-                realized_return = None
+                net_proceeds = trade_value - commission
                 holding_days = None
 
                 if open_buy_trade is not None:
-                    buy_cost = open_buy_trade.price * Decimal(open_buy_trade.quantity)
-                    realized_pnl = proceeds - buy_cost
+                    buy_cost = open_buy_trade.trade_value + open_buy_trade.commission
+                    realized_pnl = net_proceeds - buy_cost
 
                     if buy_cost > 0:
                         realized_return = float(realized_pnl / buy_cost)
@@ -304,7 +339,7 @@ class BacktestService:
                             next_candle.candle_time.date() - open_buy_trade.trade_date
                     ).days
 
-                cash = cash + proceeds
+                cash = cash + net_proceeds
                 position_quantity = 0
                 equity_after = cash
 
@@ -333,6 +368,13 @@ class BacktestService:
                         realized_pnl=realized_pnl,
                         realized_return=realized_return,
                         holding_days=holding_days,
+
+                        raw_price=execution_price,
+                        slippage_amount=Decimal("0"),
+                        slippage_rate=Decimal("0"),
+                        commission=commission,
+                        commission_rate=request.risk_control.commission_rate,
+                        risk_rule=None,
                     )
                 )
                 open_buy_trade = None
@@ -432,6 +474,10 @@ class BacktestService:
         outperformed_buy_and_hold = self._calculate_outperformed_buy_and_hold(
             excess_return
         )
+        total_commission = sum(
+            (trade.commission for trade in trades),
+            Decimal("0"),
+        )
 
         daily_returns = self._build_daily_returns(daily_equity)
         average_daily_return = self._calculate_average_daily_return(daily_returns)
@@ -528,6 +574,8 @@ class BacktestService:
             buy_and_hold_return=buy_and_hold_return,
             excess_return=excess_return,
             outperformed_buy_and_hold=outperformed_buy_and_hold,
+            total_commission=total_commission,
+            total_slippage_cost=Decimal("0"),
         )
 
     def _build_daily_returns(
@@ -849,6 +897,23 @@ class BacktestService:
     ) -> int:
         available_cash = cash * Decimal(str(position_size_ratio))
         return int(available_cash // price)
+
+    def _calculate_commission(
+        self,
+        *,
+        trade_value: Decimal,
+        commission_rate: float,
+        min_commission: Decimal,
+    ) -> Decimal:
+        if trade_value <= 0 or commission_rate <= 0:
+            return Decimal("0")
+
+        commission = trade_value * Decimal(str(commission_rate))
+
+        if min_commission > 0 and commission < min_commission:
+            return min_commission
+
+        return commission
 
     def _build_trade_reason(
         self,

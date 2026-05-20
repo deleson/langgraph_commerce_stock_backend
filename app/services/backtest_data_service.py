@@ -96,6 +96,7 @@ class BacktestDataService:
             source=request.source or last_candle.source,
             min_required_candles=request.min_required_candles,
             position_size_ratio=request.position_size_ratio,
+            risk_control=request.risk_control,
         )
 
     def _build_warnings(

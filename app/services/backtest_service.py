@@ -101,7 +101,7 @@ class BacktestService:
             input_snapshot=candle_data.input_snapshot,
             warnings=[
                 *candle_data.warnings,
-                "当前为阶段六点二：已支持手续费、滑点和止损计算；止盈、冷却期和最大回撤保护将在后续步骤继续接入。",
+                "当前为阶段六点二：已支持手续费、滑点、止损和止盈计算；冷却期和最大回撤保护将在后续步骤继续接入。",
             ],
         )
 
@@ -238,6 +238,14 @@ class BacktestService:
             )
             signal_snapshots[index] = snapshot
 
+            snapshot = self._apply_take_profit_decision(
+                request=request,
+                snapshot=snapshot,
+                position_quantity=position_quantity,
+                open_buy_trade=open_buy_trade,
+            )
+            signal_snapshots[index] = snapshot
+
             if snapshot.decision == "buy":
                 if position_quantity > 0:
                     continue
@@ -327,7 +335,7 @@ class BacktestService:
                 open_buy_trade = trade
                 continue
 
-            if snapshot.decision in {"sell", "stop_loss"}:
+            if snapshot.decision in {"sell", "stop_loss", "take_profit"}:
                 if position_quantity <= 0:
                     continue
 
@@ -510,6 +518,9 @@ class BacktestService:
         stop_loss_trigger_count = sum(
             1 for trade in trades if trade.risk_rule == "stop_loss"
         )
+        take_profit_trigger_count = sum(
+            1 for trade in trades if trade.risk_rule == "take_profit"
+        )
 
 
         daily_returns = self._build_daily_returns(daily_equity)
@@ -610,6 +621,7 @@ class BacktestService:
             total_commission=total_commission,
             total_slippage_cost=total_slippage_cost,
             stop_loss_trigger_count=stop_loss_trigger_count,
+            take_profit_trigger_count=take_profit_trigger_count,
         )
 
     def _build_daily_returns(
@@ -1024,6 +1036,62 @@ class BacktestService:
                     "当前持仓触发止损规则，"
                     f"收盘价 {snapshot.close_price} 已低于或等于止损触发价 "
                     f"{stop_loss_price}，将在下一交易日开盘价模拟卖出。"
+                ),
+                "warnings": warnings[:10],
+            }
+        )
+
+    def _apply_take_profit_decision(
+        self,
+        *,
+        request: BacktestRequest,
+        snapshot: BacktestSignalSnapshot,
+        position_quantity: int,
+        open_buy_trade: BacktestTrade | None,
+    ) -> BacktestSignalSnapshot:
+        if snapshot.decision == "stop_loss":
+            return snapshot
+
+        risk_control = request.risk_control
+
+        if not risk_control.enable_take_profit:
+            return snapshot
+
+        if risk_control.take_profit_rate is None:
+            return snapshot
+
+        if position_quantity <= 0:
+            return snapshot
+
+        if open_buy_trade is None:
+            return snapshot
+
+        take_profit_price = open_buy_trade.price * (
+            Decimal("1") + Decimal(str(risk_control.take_profit_rate))
+        )
+
+        if snapshot.close_price < take_profit_price:
+            return snapshot
+
+        warnings = [
+            *snapshot.warnings,
+            (
+                "当前持仓已触发止盈规则："
+                f"买入成交价 {open_buy_trade.price}，"
+                f"止盈触发价 {take_profit_price}，"
+                f"当前收盘价 {snapshot.close_price}。"
+            ),
+        ]
+
+        return snapshot.model_copy(
+            update={
+                "decision": "take_profit",
+                "risk_rule": "take_profit",
+                "risk_triggered": True,
+                "reason": (
+                    "当前持仓触发止盈规则，"
+                    f"收盘价 {snapshot.close_price} 已高于或等于止盈触发价 "
+                    f"{take_profit_price}，将在下一交易日开盘价模拟卖出。"
                 ),
                 "warnings": warnings[:10],
             }

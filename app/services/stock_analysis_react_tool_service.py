@@ -460,6 +460,16 @@ class StockAnalysisReactToolService:
                 "excess_return": metrics.get("excess_return"),
                 "outperformed_buy_and_hold": metrics.get("outperformed_buy_and_hold"),
             },
+            "risk_control_costs": {
+                "total_commission": metrics.get("total_commission"),
+                "total_slippage_cost": metrics.get("total_slippage_cost"),
+            },
+            "risk_control_triggers": {
+                "stop_loss_trigger_count": metrics.get("stop_loss_trigger_count"),
+                "take_profit_trigger_count": metrics.get("take_profit_trigger_count"),
+                "cooldown_skip_count": metrics.get("cooldown_skip_count"),
+                "drawdown_guard_trigger_count": metrics.get("drawdown_guard_trigger_count"),
+            },
         }
 
     def _build_backtest_data_context(
@@ -467,6 +477,7 @@ class StockAnalysisReactToolService:
         payload: dict[str, Any],
     ) -> dict[str, Any]:
         input_snapshot = payload.get("input_snapshot") or {}
+        risk_control = input_snapshot.get("risk_control") or {}
 
         return {
             "input_snapshot": {
@@ -479,6 +490,19 @@ class StockAnalysisReactToolService:
                 "source": input_snapshot.get("source"),
                 "min_required_candles": input_snapshot.get("min_required_candles"),
                 "position_size_ratio": input_snapshot.get("position_size_ratio"),
+                "risk_control": {
+                    "commission_rate": risk_control.get("commission_rate"),
+                    "min_commission": risk_control.get("min_commission"),
+                    "slippage_rate": risk_control.get("slippage_rate"),
+                    "enable_stop_loss": risk_control.get("enable_stop_loss"),
+                    "stop_loss_rate": risk_control.get("stop_loss_rate"),
+                    "enable_take_profit": risk_control.get("enable_take_profit"),
+                    "take_profit_rate": risk_control.get("take_profit_rate"),
+                    "enable_cooldown": risk_control.get("enable_cooldown"),
+                    "cooldown_days": risk_control.get("cooldown_days"),
+                    "enable_max_drawdown_guard": risk_control.get("enable_max_drawdown_guard"),
+                    "max_drawdown_guard_rate": risk_control.get("max_drawdown_guard_rate"),
+                },
             },
             "result_lists": {
                 "trades_count": len(payload.get("trades") or []),

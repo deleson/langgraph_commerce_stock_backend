@@ -101,7 +101,7 @@ class BacktestService:
             input_snapshot=candle_data.input_snapshot,
             warnings=[
                 *candle_data.warnings,
-                "当前为阶段六点二：已支持手续费和滑点计算；止损、止盈、冷却期和最大回撤保护将在后续步骤继续接入。",
+                "当前为阶段六点二：已支持手续费、滑点和止损计算；止盈、冷却期和最大回撤保护将在后续步骤继续接入。",
             ],
         )
 
@@ -507,6 +507,9 @@ class BacktestService:
             (trade.slippage_amount * Decimal(trade.quantity) for trade in trades),
             Decimal("0"),
         )
+        stop_loss_trigger_count = sum(
+            1 for trade in trades if trade.risk_rule == "stop_loss"
+        )
 
 
         daily_returns = self._build_daily_returns(daily_equity)
@@ -606,6 +609,7 @@ class BacktestService:
             outperformed_buy_and_hold=outperformed_buy_and_hold,
             total_commission=total_commission,
             total_slippage_cost=total_slippage_cost,
+            stop_loss_trigger_count=stop_loss_trigger_count,
         )
 
     def _build_daily_returns(
@@ -971,6 +975,59 @@ class BacktestService:
             return execution_price, slippage_amount, "next_open_with_slippage"
 
         return raw_price, Decimal("0"), "next_open"
+
+    def _apply_stop_loss_decision(
+        self,
+        *,
+        request: BacktestRequest,
+        snapshot: BacktestSignalSnapshot,
+        position_quantity: int,
+        open_buy_trade: BacktestTrade | None,
+    ) -> BacktestSignalSnapshot:
+        risk_control = request.risk_control
+
+        if not risk_control.enable_stop_loss:
+            return snapshot
+
+        if risk_control.stop_loss_rate is None:
+            return snapshot
+
+        if position_quantity <= 0:
+            return snapshot
+
+        if open_buy_trade is None:
+            return snapshot
+
+        stop_loss_price = open_buy_trade.price * (
+            Decimal("1") - Decimal(str(risk_control.stop_loss_rate))
+        )
+
+        if snapshot.close_price > stop_loss_price:
+            return snapshot
+
+        warnings = [
+            *snapshot.warnings,
+            (
+                "当前持仓已触发止损规则："
+                f"买入成交价 {open_buy_trade.price}，"
+                f"止损触发价 {stop_loss_price}，"
+                f"当前收盘价 {snapshot.close_price}。"
+            ),
+        ]
+
+        return snapshot.model_copy(
+            update={
+                "decision": "stop_loss",
+                "risk_rule": "stop_loss",
+                "risk_triggered": True,
+                "reason": (
+                    "当前持仓触发止损规则，"
+                    f"收盘价 {snapshot.close_price} 已低于或等于止损触发价 "
+                    f"{stop_loss_price}，将在下一交易日开盘价模拟卖出。"
+                ),
+                "warnings": warnings[:10],
+            }
+        )
 
     def _build_trade_reason(
         self,

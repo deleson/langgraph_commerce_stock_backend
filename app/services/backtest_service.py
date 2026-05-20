@@ -102,7 +102,10 @@ class BacktestService:
             input_snapshot=candle_data.input_snapshot,
             warnings=[
                 *candle_data.warnings,
-                "当前为阶段六点二：已支持手续费、滑点、止损、止盈、冷却期和最大回撤保护计算；summary、warnings 和 ReAct 输出将在后续步骤继续优化。",
+                *self._build_risk_control_warnings(
+                    request=request,
+                    metrics=metrics,
+                ),
             ],
         )
 
@@ -966,6 +969,86 @@ class BacktestService:
 
         return true_text if value else false_text
 
+    def _format_enabled(
+        self,
+        value: bool,
+    ) -> str:
+        return "启用" if value else "未启用"
+
+    def _build_risk_control_summary(
+        self,
+        *,
+        request: BacktestRequest,
+        metrics: BacktestMetrics,
+    ) -> str:
+        risk_control = request.risk_control
+
+        return (
+            "本次风控配置："
+            f"手续费率 {risk_control.commission_rate:.4%}，"
+            f"最低手续费 {self._format_decimal(risk_control.min_commission)}，"
+            f"滑点率 {risk_control.slippage_rate:.4%}，"
+            f"止损 {self._format_enabled(risk_control.enable_stop_loss)}，"
+            f"止盈 {self._format_enabled(risk_control.enable_take_profit)}，"
+            f"冷却期 {self._format_enabled(risk_control.enable_cooldown)}，"
+            f"最大回撤保护 {self._format_enabled(risk_control.enable_max_drawdown_guard)}。"
+            "本次风控结果："
+            f"总手续费 {self._format_decimal(metrics.total_commission)}，"
+            f"总滑点成本 {self._format_decimal(metrics.total_slippage_cost)}，"
+            f"止损触发 {metrics.stop_loss_trigger_count} 次，"
+            f"止盈触发 {metrics.take_profit_trigger_count} 次，"
+            f"冷却期跳过买入 {metrics.cooldown_skip_count} 次，"
+            f"最大回撤保护触发 {metrics.drawdown_guard_trigger_count} 次。"
+        )
+
+    def _build_risk_control_warnings(
+        self,
+        *,
+        request: BacktestRequest,
+        metrics: BacktestMetrics,
+    ) -> list[str]:
+        risk_control = request.risk_control
+        warnings: list[str] = [
+            "当前为阶段六点二：已支持手续费、滑点、止损、止盈、冷却期和最大回撤保护计算；ReAct 输出将在步骤十一继续兼容风控结果。",
+            "本回测仍然只基于历史 K 线和确定性规则进行模拟，不构成投资建议，也不代表未来收益。",
+        ]
+
+        if risk_control.commission_rate > 0 or risk_control.min_commission > 0:
+            warnings.append(
+                f"本次回测已计算手续费，总手续费为 {self._format_decimal(metrics.total_commission)}。"
+            )
+        else:
+            warnings.append("本次回测未启用手续费配置，交易成本可能偏乐观。")
+
+        if risk_control.slippage_rate > 0:
+            warnings.append(
+                f"本次回测已计算滑点，总滑点成本为 {self._format_decimal(metrics.total_slippage_cost)}。"
+            )
+        else:
+            warnings.append("本次回测未启用滑点配置，成交价格可能偏乐观。")
+
+        if risk_control.enable_stop_loss:
+            warnings.append(
+                f"本次回测启用了止损规则，止损触发 {metrics.stop_loss_trigger_count} 次。"
+            )
+
+        if risk_control.enable_take_profit:
+            warnings.append(
+                f"本次回测启用了止盈规则，止盈触发 {metrics.take_profit_trigger_count} 次。"
+            )
+
+        if risk_control.enable_cooldown:
+            warnings.append(
+                f"本次回测启用了冷却期规则，冷却期跳过买入 {metrics.cooldown_skip_count} 次。"
+            )
+
+        if risk_control.enable_max_drawdown_guard:
+            warnings.append(
+                f"本次回测启用了最大回撤保护，保护触发 {metrics.drawdown_guard_trigger_count} 次。"
+            )
+
+        return warnings[:20]
+
     def _build_summary(
         self,
         *,
@@ -979,9 +1062,13 @@ class BacktestService:
             true_text="跑赢同股买入持有基准",
             false_text="未跑赢同股买入持有基准",
         )
+        risk_control_summary = self._build_risk_control_summary(
+            request=request,
+            metrics=metrics,
+        )
 
         return (
-            f"{request.market}:{request.symbol} 已完成阶段六点一回测绩效分析，"
+            f"{request.market}:{request.symbol} 已完成阶段六点二回测绩效分析，"
             f"本次读取 {candle_count} 根 K 线，生成 {signal_count} 条每日信号快照，"
             f"共模拟成交 {metrics.trade_count} 次。"
             f"期末权益为 {self._format_decimal(metrics.final_equity)}，"
@@ -994,6 +1081,7 @@ class BacktestService:
             f"买入持有收益率为 {self._format_percent(metrics.buy_and_hold_return)}，"
             f"超额收益为 {self._format_percent(metrics.excess_return)}，"
             f"{benchmark_result}。"
+            f"{risk_control_summary}"
             "本回测仅基于历史行情和策略规则进行模拟，不构成投资建议，也不代表未来收益。"
         )
 

@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.market_candle import MarketCandle
 from app.schemas.backtest import (
     BacktestDailyEquity,
+    BacktestExecutionPriceType,
     BacktestMetrics,
     BacktestRequest,
     BacktestResponse,
@@ -100,7 +101,7 @@ class BacktestService:
             input_snapshot=candle_data.input_snapshot,
             warnings=[
                 *candle_data.warnings,
-                "当前为阶段六点二：已支持手续费计算；滑点、止损、止盈、冷却期和最大回撤保护将在后续步骤继续接入。",
+                "当前为阶段六点二：已支持手续费和滑点计算；止损、止盈、冷却期和最大回撤保护将在后续步骤继续接入。",
             ],
         )
 
@@ -224,14 +225,30 @@ class BacktestService:
                 continue
 
             next_candle = candles[next_index]
-            execution_price = next_candle.open_price
+            raw_price = next_candle.open_price
 
-            if execution_price <= 0:
+            if raw_price <= 0:
                 continue
+
+            snapshot = self._apply_stop_loss_decision(
+                request=request,
+                snapshot=snapshot,
+                position_quantity=position_quantity,
+                open_buy_trade=open_buy_trade,
+            )
+            signal_snapshots[index] = snapshot
 
             if snapshot.decision == "buy":
                 if position_quantity > 0:
                     continue
+
+                execution_price, slippage_amount, execution_price_type = (
+                    self._apply_slippage(
+                        raw_price=raw_price,
+                        action="buy",
+                        slippage_rate=request.risk_control.slippage_rate,
+                    )
+                )
 
                 quantity = self._calculate_buy_quantity(
                     cash=cash,
@@ -294,26 +311,33 @@ class BacktestService:
                             execution_date=next_candle.candle_time.date(),
                         ),
                         signal_date=snapshot.trade_date,
-                        execution_price_type="next_open",
                         trade_value=trade_value,
                         realized_pnl=None,
                         realized_return=None,
                         holding_days=None,
-
-                        raw_price=execution_price,
-                        slippage_amount=Decimal("0"),
-                        slippage_rate=Decimal("0"),
                         commission=commission,
                         commission_rate=request.risk_control.commission_rate,
                         risk_rule=None,
+                        execution_price_type=execution_price_type,
+                        raw_price=raw_price,
+                        slippage_amount=slippage_amount,
+                        slippage_rate=request.risk_control.slippage_rate,
                     )
                 trades.append(trade)
                 open_buy_trade = trade
                 continue
 
-            if snapshot.decision == "sell":
+            if snapshot.decision in {"sell", "stop_loss"}:
                 if position_quantity <= 0:
                     continue
+
+                execution_price, slippage_amount, execution_price_type = (
+                    self._apply_slippage(
+                        raw_price=raw_price,
+                        action="sell",
+                        slippage_rate=request.risk_control.slippage_rate,
+                    )
+                )
 
                 cash_before = cash
                 position_before = position_quantity
@@ -363,18 +387,19 @@ class BacktestService:
                             execution_date=next_candle.candle_time.date(),
                         ),
                         signal_date=snapshot.trade_date,
-                        execution_price_type="next_open",
+                        execution_price_type=execution_price_type,
                         trade_value=trade_value,
                         realized_pnl=realized_pnl,
                         realized_return=realized_return,
                         holding_days=holding_days,
 
-                        raw_price=execution_price,
-                        slippage_amount=Decimal("0"),
-                        slippage_rate=Decimal("0"),
+                        raw_price=raw_price,
+                        slippage_amount=slippage_amount,
+                        slippage_rate=request.risk_control.slippage_rate,
+
                         commission=commission,
                         commission_rate=request.risk_control.commission_rate,
-                        risk_rule=None,
+                        risk_rule=snapshot.risk_rule,
                     )
                 )
                 open_buy_trade = None
@@ -478,6 +503,11 @@ class BacktestService:
             (trade.commission for trade in trades),
             Decimal("0"),
         )
+        total_slippage_cost = sum(
+            (trade.slippage_amount * Decimal(trade.quantity) for trade in trades),
+            Decimal("0"),
+        )
+
 
         daily_returns = self._build_daily_returns(daily_equity)
         average_daily_return = self._calculate_average_daily_return(daily_returns)
@@ -575,7 +605,7 @@ class BacktestService:
             excess_return=excess_return,
             outperformed_buy_and_hold=outperformed_buy_and_hold,
             total_commission=total_commission,
-            total_slippage_cost=Decimal("0"),
+            total_slippage_cost=total_slippage_cost,
         )
 
     def _build_daily_returns(
@@ -915,6 +945,33 @@ class BacktestService:
 
         return commission
 
+    def _apply_slippage(
+        self,
+        *,
+        raw_price: Decimal,
+        action: str,
+        slippage_rate: float,
+    ) -> tuple[Decimal, Decimal, BacktestExecutionPriceType]:
+        if raw_price <= 0:
+            return raw_price, Decimal("0"), "next_open"
+
+        if slippage_rate <= 0:
+            return raw_price, Decimal("0"), "next_open"
+
+        rate = Decimal(str(slippage_rate))
+
+        if action == "buy":
+            execution_price = raw_price * (Decimal("1") + rate)
+            slippage_amount = execution_price - raw_price
+            return execution_price, slippage_amount, "next_open_with_slippage"
+
+        if action == "sell":
+            execution_price = raw_price * (Decimal("1") - rate)
+            slippage_amount = raw_price - execution_price
+            return execution_price, slippage_amount, "next_open_with_slippage"
+
+        return raw_price, Decimal("0"), "next_open"
+
     def _build_trade_reason(
         self,
         *,
@@ -924,6 +981,6 @@ class BacktestService:
         return (
             f"{snapshot.trade_date} 生成 {snapshot.decision} 信号，"
             f"于 {execution_date} 按下一根 K 线开盘价模拟成交；"
-            "本回测未计算手续费和滑点。"
+            "本回测已根据配置计算手续费和滑点。"
         )
 

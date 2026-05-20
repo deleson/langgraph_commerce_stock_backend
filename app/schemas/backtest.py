@@ -19,8 +19,22 @@ from app.schemas.strategy_signal import (
 BacktestStatus = Literal["available", "unavailable"]
 BacktestTradeAction = Literal["buy", "sell"]
 BacktestPositionStatus = Literal["cash", "long"]
-BacktestExecutionPriceType = Literal["next_open"]
-BacktestDecisionAction = Literal["buy", "sell", "hold", "observe", "skip"]
+BacktestExecutionPriceType = Literal[
+    "next_open",
+    "next_open_with_slippage",
+]
+
+BacktestDecisionAction = Literal[
+    "buy",
+    "sell",
+    "hold",
+    "observe",
+    "skip",
+    "stop_loss",
+    "take_profit",
+    "cooldown",
+    "drawdown_guard",
+]
 BacktestUnavailableReason = Literal[
     "no_data",
     "insufficient_data",
@@ -28,6 +42,22 @@ BacktestUnavailableReason = Literal[
     "invalid_date_range",
 ]
 
+class BacktestRiskControlConfig(BaseModel):
+    commission_rate: float = Field(default=0.0, ge=0, le=0.1)
+    min_commission: Decimal = Field(default=Decimal("0"), ge=0)
+
+    slippage_rate: float = Field(default=0.0, ge=0, le=0.1)
+
+    stop_loss_rate: float | None = Field(default=None, gt=0, le=1)
+    take_profit_rate: float | None = Field(default=None, gt=0, le=10)
+
+    cooldown_days: int = Field(default=0, ge=0, le=365)
+    max_drawdown_guard_rate: float | None = Field(default=None, gt=0, le=1)
+
+    enable_stop_loss: bool = False
+    enable_take_profit: bool = False
+    enable_cooldown: bool = False
+    enable_max_drawdown_guard: bool = False
 
 class BacktestRequest(BaseModel):
     symbol: str = Field(min_length=1, max_length=20, examples=["600519"])
@@ -38,6 +68,9 @@ class BacktestRequest(BaseModel):
     timeframe: CandleTimeframe = "1d"
     initial_cash: Decimal = Field(default=Decimal("100000"), gt=0)
     position_size_ratio: float = Field(default=1.0, gt=0, le=1)
+    risk_control: BacktestRiskControlConfig = Field(
+        default_factory=BacktestRiskControlConfig
+    )
 
     adjust_type: AdjustType = "none"
     source: MarketDataSource | None = None
@@ -70,6 +103,14 @@ class BacktestTrade(BaseModel):
 
     price: Decimal = Field(gt=0)
     quantity: int = Field(gt=0)
+    raw_price: Decimal | None = Field(default=None, gt=0)
+    slippage_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    slippage_rate: float = Field(default=0.0, ge=0)
+
+    commission: Decimal = Field(default=Decimal("0"), ge=0)
+    commission_rate: float = Field(default=0.0, ge=0)
+
+    risk_rule: BacktestDecisionAction | None = None
     signal_date: date | None = None
     execution_price_type: BacktestExecutionPriceType = "next_open"
     trade_value: Decimal = Field(ge=0)
@@ -110,6 +151,11 @@ class BacktestSignalSnapshot(BaseModel):
     signal: StrategySignalAction | None = None
     signal_strength: StrategySignalStrength | None = None
     signal_score: int | None = Field(default=None, ge=0, le=100)
+
+    risk_rule: BacktestDecisionAction | None = None
+    risk_triggered: bool = False
+    cooldown_days_left: int | None = Field(default=None, ge=0)
+    current_drawdown: float | None = Field(default=None, ge=0)
 
     close_price: Decimal = Field(ge=0)
     reason: str = Field(min_length=1, max_length=500)
@@ -154,6 +200,14 @@ class BacktestMetrics(BaseModel):
     excess_return: float | None = None
     outperformed_buy_and_hold: bool | None = None
 
+    total_commission: Decimal = Field(default=Decimal("0"), ge=0)
+    total_slippage_cost: Decimal = Field(default=Decimal("0"), ge=0)
+
+    stop_loss_trigger_count: int = Field(default=0, ge=0)
+    take_profit_trigger_count: int = Field(default=0, ge=0)
+    cooldown_skip_count: int = Field(default=0, ge=0)
+    drawdown_guard_trigger_count: int = Field(default=0, ge=0)
+
 
 class BacktestInputSnapshot(BaseModel):
     candle_count: int = Field(ge=0)
@@ -167,6 +221,9 @@ class BacktestInputSnapshot(BaseModel):
 
     min_required_candles: int = Field(ge=1)
     position_size_ratio: float = Field(gt=0, le=1)
+    risk_control: BacktestRiskControlConfig = Field(
+        default_factory=BacktestRiskControlConfig
+    )
 
 
 class BacktestResponse(BaseModel):

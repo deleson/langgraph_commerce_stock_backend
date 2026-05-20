@@ -135,6 +135,7 @@ from app.schemas.backtest import (
     BacktestTradeAction,
     BacktestUnavailableReason,
     BacktestExecutionPriceType,
+    BacktestRiskControlConfig,
 )
 
 __all__ = [
@@ -256,4 +257,5 @@ __all__ = [
     "BacktestTradeAction",
     "BacktestExecutionPriceType",
     "BacktestUnavailableReason",
+    "BacktestRiskControlConfig",
 ]

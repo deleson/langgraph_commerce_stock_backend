@@ -102,7 +102,7 @@ class BacktestService:
             input_snapshot=candle_data.input_snapshot,
             warnings=[
                 *candle_data.warnings,
-                "当前为阶段六点二：已支持手续费、滑点、止损、止盈和冷却期计算；最大回撤保护将在后续步骤继续接入。",
+                "当前为阶段六点二：已支持手续费、滑点、止损、止盈、冷却期和最大回撤保护计算；summary、warnings 和 ReAct 输出将在后续步骤继续优化。",
             ],
         )
 
@@ -220,17 +220,29 @@ class BacktestService:
         position_quantity = 0
         open_buy_trade: BacktestTrade | None = None
         cooldown_days_left = 0
+        peak_equity = request.initial_cash
 
         for index, snapshot in enumerate(signal_snapshots):
             next_index = index + 1
             if next_index >= len(candles):
                 continue
 
+            current_candle = candles[index]
             next_candle = candles[next_index]
             raw_price = next_candle.open_price
 
             if raw_price <= 0:
                 continue
+
+            current_equity = cash + Decimal(position_quantity) * current_candle.close_price
+
+            if current_equity > peak_equity:
+                peak_equity = current_equity
+
+            current_drawdown = self._calculate_current_drawdown(
+                current_equity=current_equity,
+                peak_equity=peak_equity,
+            )
 
             snapshot = self._apply_stop_loss_decision(
                 request=request,
@@ -245,6 +257,14 @@ class BacktestService:
                 snapshot=snapshot,
                 position_quantity=position_quantity,
                 open_buy_trade=open_buy_trade,
+            )
+            signal_snapshots[index] = snapshot
+
+            snapshot = self._apply_drawdown_guard_decision(
+                request=request,
+                snapshot=snapshot,
+                position_quantity=position_quantity,
+                current_drawdown=current_drawdown,
             )
             signal_snapshots[index] = snapshot
 
@@ -545,6 +565,9 @@ class BacktestService:
         cooldown_skip_count = sum(
             1 for snapshot in signal_snapshots if snapshot.decision == "cooldown"
         )
+        drawdown_guard_trigger_count = sum(
+            1 for snapshot in signal_snapshots if snapshot.decision == "drawdown_guard"
+        )
 
 
         daily_returns = self._build_daily_returns(daily_equity)
@@ -647,6 +670,7 @@ class BacktestService:
             stop_loss_trigger_count=stop_loss_trigger_count,
             take_profit_trigger_count=take_profit_trigger_count,
             cooldown_skip_count=cooldown_skip_count,
+            drawdown_guard_trigger_count=drawdown_guard_trigger_count,
         )
 
     def _build_daily_returns(
@@ -733,6 +757,20 @@ class BacktestService:
             return None
 
         return total_return / max_drawdown
+
+    def _calculate_current_drawdown(
+        self,
+        *,
+        current_equity: Decimal,
+        peak_equity: Decimal,
+    ) -> float:
+        if peak_equity <= 0:
+            return 0.0
+
+        if current_equity >= peak_equity:
+            return 0.0
+
+        return float((peak_equity - current_equity) / peak_equity)
 
     def _calculate_buy_and_hold_return(
         self,
@@ -1122,6 +1160,77 @@ class BacktestService:
             }
         )
 
+    def _apply_drawdown_guard_decision(
+        self,
+        *,
+        request: BacktestRequest,
+        snapshot: BacktestSignalSnapshot,
+        position_quantity: int,
+        current_drawdown: float,
+    ) -> BacktestSignalSnapshot:
+        risk_control = request.risk_control
+
+        if not risk_control.enable_max_drawdown_guard:
+            return snapshot.model_copy(
+                update={
+                    "current_drawdown": current_drawdown,
+                }
+            )
+
+        if risk_control.max_drawdown_guard_rate is None:
+            return snapshot.model_copy(
+                update={
+                    "current_drawdown": current_drawdown,
+                }
+            )
+
+        if position_quantity > 0:
+            return snapshot.model_copy(
+                update={
+                    "current_drawdown": current_drawdown,
+                }
+            )
+
+        if current_drawdown < risk_control.max_drawdown_guard_rate:
+            return snapshot.model_copy(
+                update={
+                    "current_drawdown": current_drawdown,
+                }
+            )
+
+        if snapshot.decision != "buy":
+            return snapshot.model_copy(
+                update={
+                    "current_drawdown": current_drawdown,
+                }
+            )
+
+        warnings = [
+            *snapshot.warnings,
+            (
+                "当前账户回撤已触发最大回撤保护："
+                f"当前回撤 {current_drawdown:.2%}，"
+                f"保护阈值 {risk_control.max_drawdown_guard_rate:.2%}，"
+                "本次 buy 信号暂不执行。"
+            ),
+        ]
+
+        return snapshot.model_copy(
+            update={
+                "decision": "drawdown_guard",
+                "risk_rule": "drawdown_guard",
+                "risk_triggered": True,
+                "current_drawdown": current_drawdown,
+                "reason": (
+                    "当前账户权益回撤已触发最大回撤保护，"
+                    f"当前回撤 {current_drawdown:.2%}，"
+                    f"保护阈值 {risk_control.max_drawdown_guard_rate:.2%}，"
+                    "虽然策略出现 buy 信号，但本交易日跳过买入。"
+                ),
+                "warnings": warnings[:10],
+            }
+        )
+
     def _apply_cooldown_decision(
         self,
         *,
@@ -1130,6 +1239,9 @@ class BacktestService:
         position_quantity: int,
         cooldown_days_left: int,
     ) -> BacktestSignalSnapshot:
+        if snapshot.decision == "drawdown_guard":
+            return snapshot
+
         risk_control = request.risk_control
 
         if not risk_control.enable_cooldown:

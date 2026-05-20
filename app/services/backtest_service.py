@@ -77,6 +77,7 @@ class BacktestService:
             candles=candles,
             trades=trades,
             daily_equity=daily_equity,
+            signal_snapshots=signal_snapshots,
         )
 
         return BacktestResponse(
@@ -101,7 +102,7 @@ class BacktestService:
             input_snapshot=candle_data.input_snapshot,
             warnings=[
                 *candle_data.warnings,
-                "当前为阶段六点二：已支持手续费、滑点、止损和止盈计算；冷却期和最大回撤保护将在后续步骤继续接入。",
+                "当前为阶段六点二：已支持手续费、滑点、止损、止盈和冷却期计算；最大回撤保护将在后续步骤继续接入。",
             ],
         )
 
@@ -218,6 +219,7 @@ class BacktestService:
         cash = request.initial_cash
         position_quantity = 0
         open_buy_trade: BacktestTrade | None = None
+        cooldown_days_left = 0
 
         for index, snapshot in enumerate(signal_snapshots):
             next_index = index + 1
@@ -243,6 +245,16 @@ class BacktestService:
                 snapshot=snapshot,
                 position_quantity=position_quantity,
                 open_buy_trade=open_buy_trade,
+            )
+            signal_snapshots[index] = snapshot
+
+            cooldown_checked = cooldown_days_left > 0
+
+            snapshot = self._apply_cooldown_decision(
+                request=request,
+                snapshot=snapshot,
+                position_quantity=position_quantity,
+                cooldown_days_left=cooldown_days_left,
             )
             signal_snapshots[index] = snapshot
 
@@ -412,6 +424,14 @@ class BacktestService:
                 )
                 open_buy_trade = None
 
+                if (
+                    request.risk_control.enable_cooldown
+                    and request.risk_control.cooldown_days > 0
+                ):
+                    cooldown_days_left = request.risk_control.cooldown_days
+            if cooldown_checked and cooldown_days_left > 0:
+                cooldown_days_left -= 1
+
         return trades
 
     def _build_daily_equity(
@@ -488,6 +508,7 @@ class BacktestService:
         candles: list[MarketCandle],
         trades: list[BacktestTrade],
         daily_equity: list[BacktestDailyEquity],
+        signal_snapshots: list[BacktestSignalSnapshot],
     ) -> BacktestMetrics:
         final_equity = (
             daily_equity[-1].total_equity
@@ -520,6 +541,9 @@ class BacktestService:
         )
         take_profit_trigger_count = sum(
             1 for trade in trades if trade.risk_rule == "take_profit"
+        )
+        cooldown_skip_count = sum(
+            1 for snapshot in signal_snapshots if snapshot.decision == "cooldown"
         )
 
 
@@ -622,6 +646,7 @@ class BacktestService:
             total_slippage_cost=total_slippage_cost,
             stop_loss_trigger_count=stop_loss_trigger_count,
             take_profit_trigger_count=take_profit_trigger_count,
+            cooldown_skip_count=cooldown_skip_count,
         )
 
     def _build_daily_returns(
@@ -1092,6 +1117,59 @@ class BacktestService:
                     "当前持仓触发止盈规则，"
                     f"收盘价 {snapshot.close_price} 已高于或等于止盈触发价 "
                     f"{take_profit_price}，将在下一交易日开盘价模拟卖出。"
+                ),
+                "warnings": warnings[:10],
+            }
+        )
+
+    def _apply_cooldown_decision(
+        self,
+        *,
+        request: BacktestRequest,
+        snapshot: BacktestSignalSnapshot,
+        position_quantity: int,
+        cooldown_days_left: int,
+    ) -> BacktestSignalSnapshot:
+        risk_control = request.risk_control
+
+        if not risk_control.enable_cooldown:
+            return snapshot
+
+        if risk_control.cooldown_days <= 0:
+            return snapshot
+
+        if position_quantity > 0:
+            return snapshot
+
+        if cooldown_days_left <= 0:
+            return snapshot
+
+        if snapshot.decision != "buy":
+            return snapshot.model_copy(
+                update={
+                    "cooldown_days_left": cooldown_days_left,
+                }
+            )
+
+        warnings = [
+            *snapshot.warnings,
+            (
+                "当前仍处于冷却期，"
+                f"剩余 {cooldown_days_left} 个交易日，"
+                "本次 buy 信号暂不执行。"
+            ),
+        ]
+
+        return snapshot.model_copy(
+            update={
+                "decision": "cooldown",
+                "risk_rule": "cooldown",
+                "risk_triggered": True,
+                "cooldown_days_left": cooldown_days_left,
+                "reason": (
+                    "当前处于卖出后的冷却期，"
+                    f"剩余 {cooldown_days_left} 个交易日，"
+                    "虽然策略出现 buy 信号，但本交易日跳过买入。"
                 ),
                 "warnings": warnings[:10],
             }

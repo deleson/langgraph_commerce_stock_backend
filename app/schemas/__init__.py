@@ -152,6 +152,23 @@ from app.schemas.portfolio_backtest import (
     PortfolioBacktestTradeReason,
     PortfolioBacktestUnavailableReason,
 )
+from app.schemas.stock_candidate import (
+    StockCandidateDataQualitySnapshot,
+    StockCandidateDecision,
+    StockCandidateGrade,
+    StockCandidateInputSnapshot,
+    StockCandidateItem,
+    StockCandidateRequest,
+    StockCandidateResponse,
+    StockCandidateScoreBreakdown,
+    StockCandidateScoreDimension,
+    StockCandidateScoreRuleResult,
+    StockCandidateStatus,
+    StockCandidateStrategySignalSnapshot,
+    StockCandidateSymbol,
+    StockCandidateUnavailableReason,
+    StockCandidateUniverseSource,
+)
 
 __all__ = [
     "ApiResponse",
@@ -287,4 +304,20 @@ __all__ = [
     "PortfolioBacktestTradeAction",
     "PortfolioBacktestTradeReason",
     "PortfolioBacktestUnavailableReason",
+
+    "StockCandidateDataQualitySnapshot",
+    "StockCandidateDecision",
+    "StockCandidateGrade",
+    "StockCandidateInputSnapshot",
+    "StockCandidateItem",
+    "StockCandidateRequest",
+    "StockCandidateResponse",
+    "StockCandidateScoreBreakdown",
+    "StockCandidateScoreDimension",
+    "StockCandidateScoreRuleResult",
+    "StockCandidateStatus",
+    "StockCandidateStrategySignalSnapshot",
+    "StockCandidateSymbol",
+    "StockCandidateUnavailableReason",
+    "StockCandidateUniverseSource",
 ]

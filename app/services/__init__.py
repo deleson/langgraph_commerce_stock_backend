@@ -36,6 +36,7 @@ from app.services.portfolio_backtest_data_service import (
     PortfolioBacktestCandleData,
     PortfolioBacktestDataService,
 )
+from app.services.portfolio_backtest_service import PortfolioBacktestService
 # from app.services.stock_analysis_service import StockAnalysisService
 
 
@@ -75,5 +76,6 @@ __all__ = [
     "BacktestQueryService",
     "PortfolioBacktestCandleData",
     "PortfolioBacktestDataService",
+    "PortfolioBacktestService",
     # "StockAnalysisService",
 ]

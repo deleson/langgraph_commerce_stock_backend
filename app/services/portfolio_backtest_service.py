@@ -1,4 +1,5 @@
 from decimal import Decimal
+import math
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +20,7 @@ from app.services.portfolio_backtest_data_service import (
 
 class PortfolioBacktestService:
     """Run portfolio backtests with shared cash and multi-asset equity snapshots."""
+    TRADING_DAYS_PER_YEAR = 252
 
     def __init__(
         self,
@@ -55,7 +57,7 @@ class PortfolioBacktestService:
             entry_price_by_symbol=portfolio_state["entry_price_by_symbol"],
             trades=trades,
         )
-        metrics = self._build_initial_metrics(
+        metrics = self._build_metrics(
             request=request,
             daily_equity=daily_equity,
             trades=trades,
@@ -697,7 +699,7 @@ class PortfolioBacktestService:
 
         return cash
 
-    def _build_initial_metrics(
+    def _build_metrics(
         self,
         *,
         request: PortfolioBacktestRequest,
@@ -709,26 +711,43 @@ class PortfolioBacktestService:
             if daily_equity
             else request.initial_cash
         )
-        daily_returns = [
-            item.daily_return
-            for item in daily_equity
-            if item.daily_return is not None
-        ]
+        daily_returns = self._build_daily_returns(daily_equity)
+
+        total_return = self._calculate_total_return(
+            initial_cash=request.initial_cash,
+            final_equity=final_equity,
+        )
+        average_daily_return = self._calculate_average_daily_return(daily_returns)
+        max_drawdown = max((item.drawdown for item in daily_equity), default=0)
+
+        daily_return_volatility = self._calculate_daily_return_volatility(
+            daily_returns
+        )
+        annualized_volatility = self._calculate_annualized_volatility(
+            daily_return_volatility
+        )
 
         return PortfolioBacktestMetrics(
             initial_cash=request.initial_cash,
             final_equity=final_equity,
-            total_return=self._calculate_total_return(
+            total_return=total_return,
+            annualized_return=self._calculate_annualized_return(
                 initial_cash=request.initial_cash,
                 final_equity=final_equity,
+                trading_days=len(daily_equity),
             ),
-            annualized_return=None,
-            average_daily_return=self._calculate_average_daily_return(daily_returns),
-            max_drawdown=max((item.drawdown for item in daily_equity), default=0),
-            daily_return_volatility=None,
-            annualized_volatility=None,
-            sharpe_ratio=None,
-            return_drawdown_ratio=None,
+            average_daily_return=average_daily_return,
+            max_drawdown=max_drawdown,
+            daily_return_volatility=daily_return_volatility,
+            annualized_volatility=annualized_volatility,
+            sharpe_ratio=self._calculate_sharpe_ratio(
+                average_daily_return=average_daily_return,
+                daily_return_volatility=daily_return_volatility,
+            ),
+            return_drawdown_ratio=self._calculate_return_drawdown_ratio(
+                total_return=total_return,
+                max_drawdown=max_drawdown,
+            ),
             trade_count=len(trades),
             buy_count=sum(1 for trade in trades if trade.action == "buy"),
             sell_count=sum(1 for trade in trades if trade.action == "sell"),
@@ -743,10 +762,129 @@ class PortfolioBacktestService:
             total_slippage_cost=Decimal("0"),
             average_cash_ratio=self._calculate_average_cash_ratio(daily_equity),
             average_position_ratio=self._calculate_average_position_ratio(daily_equity),
-            turnover_rate=0.0,
+            turnover_rate=self._calculate_turnover_rate(
+                trades=trades,
+                daily_equity=daily_equity,
+            ),
             best_day_return=max(daily_returns) if daily_returns else None,
             worst_day_return=min(daily_returns) if daily_returns else None,
         )
+
+    def _build_daily_returns(
+        self,
+        daily_equity: list[PortfolioBacktestDailyEquity],
+    ) -> list[float]:
+        return [
+            item.daily_return
+            for item in daily_equity
+            if item.daily_return is not None
+        ]
+
+    def _calculate_annualized_return(
+        self,
+        *,
+        initial_cash: Decimal,
+        final_equity: Decimal,
+        trading_days: int,
+    ) -> float | None:
+        if trading_days <= 0:
+            return None
+
+        if initial_cash <= 0:
+            return None
+
+        equity_ratio = float(final_equity / initial_cash)
+
+        return equity_ratio ** (self.TRADING_DAYS_PER_YEAR / trading_days) - 1
+
+    def _calculate_daily_return_volatility(
+        self,
+        daily_returns: list[float],
+    ) -> float | None:
+        if len(daily_returns) < 2:
+            return None
+
+        average_return = sum(daily_returns) / len(daily_returns)
+        variance = sum(
+            (daily_return - average_return) ** 2
+            for daily_return in daily_returns
+        ) / (len(daily_returns) - 1)
+
+        return math.sqrt(variance)
+
+    def _calculate_annualized_volatility(
+        self,
+        daily_return_volatility: float | None,
+    ) -> float | None:
+        if daily_return_volatility is None:
+            return None
+
+        return daily_return_volatility * math.sqrt(self.TRADING_DAYS_PER_YEAR)
+
+    def _calculate_sharpe_ratio(
+        self,
+        *,
+        average_daily_return: float | None,
+        daily_return_volatility: float | None,
+    ) -> float | None:
+        if average_daily_return is None:
+            return None
+
+        if daily_return_volatility is None or daily_return_volatility == 0:
+            return None
+
+        return (
+            average_daily_return
+            / daily_return_volatility
+            * math.sqrt(self.TRADING_DAYS_PER_YEAR)
+        )
+
+    def _calculate_return_drawdown_ratio(
+        self,
+        *,
+        total_return: float,
+        max_drawdown: float,
+    ) -> float | None:
+        if max_drawdown <= 0:
+            return None
+
+        return total_return / max_drawdown
+
+    def _calculate_turnover_rate(
+        self,
+        *,
+        trades: list[PortfolioBacktestTrade],
+        daily_equity: list[PortfolioBacktestDailyEquity],
+    ) -> float | None:
+        average_total_equity = self._calculate_average_total_equity(daily_equity)
+
+        if average_total_equity is None or average_total_equity <= 0:
+            return None
+
+        rebalance_trade_value = sum(
+            (
+                trade.trade_value
+                for trade in trades
+                if trade.reason == "rebalance"
+            ),
+            Decimal("0"),
+        )
+
+        return float(rebalance_trade_value / average_total_equity)
+
+    def _calculate_average_total_equity(
+        self,
+        daily_equity: list[PortfolioBacktestDailyEquity],
+    ) -> Decimal | None:
+        if not daily_equity:
+            return None
+
+        total_equity = sum(
+            (item.total_equity for item in daily_equity),
+            Decimal("0"),
+        )
+
+        return total_equity / Decimal(len(daily_equity))
 
     def _calculate_average_cash_ratio(
         self,
@@ -786,16 +924,22 @@ class PortfolioBacktestService:
         metrics: PortfolioBacktestMetrics,
     ) -> str:
         return (
-            "阶段六点三组合回测已完成目标权重初始建仓和固定频率调仓。"
+            "阶段六点三组合回测已完成目标权重初始建仓、固定频率调仓、每日权益快照和组合绩效指标计算。"
             f"本次组合包含 {len(request.assets)} 只股票，"
             f"共同交易日 {len(data.common_trade_dates)} 个，"
             f"初始资金 {self._format_decimal(request.initial_cash)}，"
             f"最终权益 {self._format_decimal(metrics.final_equity)}，"
             f"总收益率 {self._format_percent(metrics.total_return)}，"
+            f"年化收益率 {self._format_percent(metrics.annualized_return)}，"
+            f"最大回撤 {self._format_percent(metrics.max_drawdown)}，"
+            f"年化波动率 {self._format_percent(metrics.annualized_volatility)}，"
+            f"夏普比率 {self._format_float(metrics.sharpe_ratio)}，"
+            f"收益回撤比 {self._format_float(metrics.return_drawdown_ratio)}，"
+            f"换手率 {self._format_percent(metrics.turnover_rate)}，"
             f"交易次数 {metrics.trade_count} 次，"
             f"调仓次数 {metrics.rebalance_count} 次。"
-            "当前步骤已实现固定频率调仓，但尚未计算手续费、滑点和组合风控，"
-            "因此调仓结果仍是无交易成本版本。"
+            "当前步骤仍未计算手续费、滑点和组合风控，"
+            "因此组合绩效属于无交易成本版本。"
         )
 
     def _build_initial_warnings(
@@ -805,10 +949,11 @@ class PortfolioBacktestService:
         trades: list[PortfolioBacktestTrade],
     ) -> list[str]:
         warnings = [
-            "阶段六点三步骤七已实现组合固定频率调仓。",
-            "调仓规则为 T 日收盘后判断，T+1 日开盘价执行。",
-            "调仓时先卖出超配股票，再买入低配股票。",
-            "当前调仓暂未计算手续费和滑点，步骤十会接入交易成本。",
+            "阶段六点三步骤九已实现组合绩效指标计算。",
+            "组合每日权益使用收盘价估算，调仓交易仍按 T 日收盘后判断、T+1 日开盘价执行。",
+            "组合年化收益、年化波动率和夏普比率均按 252 个交易日估算。",
+            "换手率第一版只统计调仓交易金额，不统计初始建仓金额。",
+            "当前组合回测暂未计算手续费和滑点，步骤十会接入交易成本。",
             "本组合回测仅基于历史行情和规则模拟，不构成投资建议，也不代表未来收益。",
         ]
 
@@ -883,6 +1028,15 @@ class PortfolioBacktestService:
             return "不可计算"
 
         return f"{value:.2%}"
+
+    def _format_float(
+        self,
+        value: float | None,
+    ) -> str:
+        if value is None:
+            return "不可计算"
+
+        return f"{value:.2f}"
 
     def _build_symbol_key(
         self,

@@ -38,6 +38,11 @@ from app.services.portfolio_backtest_data_service import (
 )
 from app.services.portfolio_backtest_service import PortfolioBacktestService
 from app.services.portfolio_backtest_query_service import PortfolioBacktestQueryService
+from app.services.stock_candidate_data_service import (
+    StockCandidateDataItem,
+    StockCandidateDataService,
+    StockCandidateUniverseItem,
+)
 # from app.services.stock_analysis_service import StockAnalysisService
 
 
@@ -79,5 +84,8 @@ __all__ = [
     "PortfolioBacktestDataService",
     "PortfolioBacktestService",
     "PortfolioBacktestQueryService",
+    "StockCandidateUniverseItem",
+    "StockCandidateDataItem",
+    "StockCandidateDataService",
     # "StockAnalysisService",
 ]

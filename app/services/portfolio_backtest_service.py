@@ -53,6 +53,7 @@ class PortfolioBacktestService:
             cash=portfolio_state["cash"],
             positions_by_symbol=portfolio_state["positions_by_symbol"],
             entry_price_by_symbol=portfolio_state["entry_price_by_symbol"],
+            trades=trades,
         )
         metrics = self._build_initial_metrics(
             request=request,
@@ -187,12 +188,13 @@ class PortfolioBacktestService:
         cash: Decimal,
         positions_by_symbol: dict[str, int],
         entry_price_by_symbol: dict[str, Decimal],
+        trades: list[PortfolioBacktestTrade],
     ) -> list[PortfolioBacktestDailyEquity]:
         daily_equity: list[PortfolioBacktestDailyEquity] = []
         previous_total_equity: Decimal | None = None
         equity_high_watermark = request.initial_cash
 
-        for trade_date in data.common_trade_dates:
+        for trade_day_index, trade_date in enumerate(data.common_trade_dates):
             positions = self._build_position_snapshots(
                 request=request,
                 trade_date=trade_date,
@@ -237,10 +239,30 @@ class PortfolioBacktestService:
                 )
             )
 
+            if self._should_rebalance(
+                request=request,
+                trade_day_index=trade_day_index,
+                common_trade_dates=data.common_trade_dates,
+            ):
+                next_trade_date = data.common_trade_dates[trade_day_index + 1]
+                current_values_by_symbol = self._build_current_values_by_symbol(
+                    positions=positions,
+                )
+                cash = self._execute_rebalance(
+                    request=request,
+                    execution_date=next_trade_date,
+                    portfolio_equity=total_equity,
+                    current_values_by_symbol=current_values_by_symbol,
+                    cash=cash,
+                    positions_by_symbol=positions_by_symbol,
+                    entry_price_by_symbol=entry_price_by_symbol,
+                    candle_by_symbol_and_date=candle_by_symbol_and_date,
+                    trades=trades,
+                )
+
             previous_total_equity = total_equity
 
         return daily_equity
-
     def _build_position_snapshots(
         self,
         *,
@@ -310,6 +332,273 @@ class PortfolioBacktestService:
 
         return rebuilt_positions
 
+    def _should_rebalance(
+        self,
+        *,
+        request: PortfolioBacktestRequest,
+        trade_day_index: int,
+        common_trade_dates,
+    ) -> bool:
+        if request.rebalance_frequency == "none":
+            return False
+
+        if trade_day_index >= len(common_trade_dates) - 1:
+            return False
+
+        if request.rebalance_frequency == "daily":
+            return True
+
+        if request.rebalance_frequency == "weekly":
+            return (trade_day_index + 1) % 5 == 0
+
+        if request.rebalance_frequency == "monthly":
+            return (trade_day_index + 1) % 20 == 0
+
+        if request.rebalance_frequency == "interval":
+            interval_days = request.rebalance_interval_days
+            if interval_days is None or interval_days <= 0:
+                return False
+            return (trade_day_index + 1) % interval_days == 0
+
+        return False
+
+    def _build_current_values_by_symbol(
+        self,
+        *,
+        positions: list[PortfolioBacktestPositionSnapshot],
+    ) -> dict[str, Decimal]:
+        return {
+            self._build_symbol_key(
+                market=position.market,
+                symbol=position.symbol,
+            ): position.market_value
+            for position in positions
+        }
+
+    def _execute_rebalance(
+        self,
+        *,
+        request: PortfolioBacktestRequest,
+        execution_date,
+        portfolio_equity: Decimal,
+        current_values_by_symbol: dict[str, Decimal],
+        cash: Decimal,
+        positions_by_symbol: dict[str, int],
+        entry_price_by_symbol: dict[str, Decimal],
+        candle_by_symbol_and_date: dict[str, dict],
+        trades: list[PortfolioBacktestTrade],
+    ) -> Decimal:
+        target_values = self._build_target_values(
+            request=request,
+            portfolio_equity=portfolio_equity,
+        )
+
+        cash = self._execute_rebalance_sells(
+            request=request,
+            execution_date=execution_date,
+            target_values=target_values,
+            current_values_by_symbol=current_values_by_symbol,
+            cash=cash,
+            positions_by_symbol=positions_by_symbol,
+            candle_by_symbol_and_date=candle_by_symbol_and_date,
+            trades=trades,
+        )
+
+        cash = self._execute_rebalance_buys(
+            request=request,
+            execution_date=execution_date,
+            target_values=target_values,
+            current_values_by_symbol=current_values_by_symbol,
+            cash=cash,
+            positions_by_symbol=positions_by_symbol,
+            entry_price_by_symbol=entry_price_by_symbol,
+            candle_by_symbol_and_date=candle_by_symbol_and_date,
+            trades=trades,
+        )
+
+        return cash
+
+    def _build_target_values(
+        self,
+        *,
+        request: PortfolioBacktestRequest,
+        portfolio_equity: Decimal,
+    ) -> dict[str, Decimal]:
+        target_values: dict[str, Decimal] = {}
+
+        for asset in request.assets:
+            symbol_key = self._build_symbol_key(
+                market=asset.market,
+                symbol=asset.symbol,
+            )
+            target_values[symbol_key] = portfolio_equity * asset.target_weight
+
+        return target_values
+
+    def _execute_rebalance_sells(
+        self,
+        *,
+        request: PortfolioBacktestRequest,
+        execution_date,
+        target_values: dict[str, Decimal],
+        current_values_by_symbol: dict[str, Decimal],
+        cash: Decimal,
+        positions_by_symbol: dict[str, int],
+        candle_by_symbol_and_date: dict[str, dict],
+        trades: list[PortfolioBacktestTrade],
+    ) -> Decimal:
+        for asset in request.assets:
+            symbol_key = self._build_symbol_key(
+                market=asset.market,
+                symbol=asset.symbol,
+            )
+            current_quantity = positions_by_symbol.get(symbol_key, 0)
+
+            if current_quantity <= 0:
+                continue
+
+            current_value = current_values_by_symbol.get(symbol_key, Decimal("0"))
+            target_value = target_values[symbol_key]
+
+            if current_value <= target_value:
+                continue
+
+            execution_candle = candle_by_symbol_and_date[symbol_key][execution_date]
+            execution_price = execution_candle.open
+
+            if execution_price <= 0:
+                continue
+
+            value_to_sell = current_value - target_value
+            quantity_to_sell = int(value_to_sell // execution_price)
+            quantity_to_sell = min(quantity_to_sell, current_quantity)
+
+            if quantity_to_sell <= 0:
+                continue
+
+            trade_value = execution_price * Decimal(quantity_to_sell)
+            cash_before = cash
+            position_before = current_quantity
+
+            cash = cash + trade_value
+            positions_by_symbol[symbol_key] = current_quantity - quantity_to_sell
+
+            trades.append(
+                PortfolioBacktestTrade(
+                    sequence_no=len(trades) + 1,
+                    symbol=asset.symbol,
+                    market=asset.market,
+                    action="sell",
+                    reason="rebalance",
+                    trade_date=execution_date,
+                    price=execution_price,
+                    quantity=quantity_to_sell,
+                    raw_price=execution_price,
+                    execution_price_type="next_open",
+                    trade_value=trade_value,
+                    commission=Decimal("0"),
+                    slippage_amount=Decimal("0"),
+                    slippage_cost=Decimal("0"),
+                    cash_before=cash_before,
+                    cash_after=cash,
+                    position_before=position_before,
+                    position_after=positions_by_symbol[symbol_key],
+                    target_weight=asset.target_weight,
+                    actual_weight_before=(
+                        current_value / portfolio_equity
+                        if (portfolio_equity := sum(target_values.values())) > 0
+                        else None
+                    ),
+                    actual_weight_after=None,
+                    portfolio_equity_after=cash,
+                )
+            )
+
+        return cash
+
+    def _execute_rebalance_buys(
+        self,
+        *,
+        request: PortfolioBacktestRequest,
+        execution_date,
+        target_values: dict[str, Decimal],
+        current_values_by_symbol: dict[str, Decimal],
+        cash: Decimal,
+        positions_by_symbol: dict[str, int],
+        entry_price_by_symbol: dict[str, Decimal],
+        candle_by_symbol_and_date: dict[str, dict],
+        trades: list[PortfolioBacktestTrade],
+    ) -> Decimal:
+        for asset in request.assets:
+            symbol_key = self._build_symbol_key(
+                market=asset.market,
+                symbol=asset.symbol,
+            )
+            current_quantity = positions_by_symbol.get(symbol_key, 0)
+            current_value = current_values_by_symbol.get(symbol_key, Decimal("0"))
+            target_value = target_values[symbol_key]
+
+            if current_value >= target_value:
+                continue
+
+            execution_candle = candle_by_symbol_and_date[symbol_key][execution_date]
+            execution_price = execution_candle.open
+
+            if execution_price <= 0:
+                continue
+
+            value_to_buy = target_value - current_value
+            affordable_value = min(value_to_buy, cash)
+            quantity_to_buy = int(affordable_value // execution_price)
+
+            if quantity_to_buy <= 0:
+                continue
+
+            trade_value = execution_price * Decimal(quantity_to_buy)
+
+            if trade_value > cash:
+                quantity_to_buy = int(cash // execution_price)
+                trade_value = execution_price * Decimal(quantity_to_buy)
+
+            if quantity_to_buy <= 0:
+                continue
+
+            cash_before = cash
+            position_before = current_quantity
+
+            cash = cash - trade_value
+            positions_by_symbol[symbol_key] = current_quantity + quantity_to_buy
+            entry_price_by_symbol[symbol_key] = execution_price
+
+            trades.append(
+                PortfolioBacktestTrade(
+                    sequence_no=len(trades) + 1,
+                    symbol=asset.symbol,
+                    market=asset.market,
+                    action="buy",
+                    reason="rebalance",
+                    trade_date=execution_date,
+                    price=execution_price,
+                    quantity=quantity_to_buy,
+                    raw_price=execution_price,
+                    execution_price_type="next_open",
+                    trade_value=trade_value,
+                    commission=Decimal("0"),
+                    slippage_amount=Decimal("0"),
+                    slippage_cost=Decimal("0"),
+                    cash_before=cash_before,
+                    cash_after=cash,
+                    position_before=position_before,
+                    position_after=positions_by_symbol[symbol_key],
+                    target_weight=asset.target_weight,
+                    actual_weight_before=None,
+                    actual_weight_after=None,
+                    portfolio_equity_after=cash,
+                )
+            )
+
+        return cash
+
     def _build_initial_metrics(
         self,
         *,
@@ -345,15 +634,51 @@ class PortfolioBacktestService:
             trade_count=len(trades),
             buy_count=sum(1 for trade in trades if trade.action == "buy"),
             sell_count=sum(1 for trade in trades if trade.action == "sell"),
-            rebalance_count=0,
+            rebalance_count=len(
+                {
+                    trade.trade_date
+                    for trade in trades
+                    if trade.reason == "rebalance"
+                }
+            ),
             total_commission=Decimal("0"),
             total_slippage_cost=Decimal("0"),
-            average_cash_ratio=1.0 if daily_equity else None,
-            average_position_ratio=0.0 if daily_equity else None,
+            average_cash_ratio=self._calculate_average_cash_ratio(daily_equity),
+            average_position_ratio=self._calculate_average_position_ratio(daily_equity),
             turnover_rate=0.0,
             best_day_return=max(daily_returns) if daily_returns else None,
             worst_day_return=min(daily_returns) if daily_returns else None,
         )
+
+    def _calculate_average_cash_ratio(
+        self,
+        daily_equity: list[PortfolioBacktestDailyEquity],
+    ) -> float | None:
+        ratios: list[float] = []
+
+        for item in daily_equity:
+            if item.total_equity > 0:
+                ratios.append(float(item.cash / item.total_equity))
+
+        if not ratios:
+            return None
+
+        return sum(ratios) / len(ratios)
+
+    def _calculate_average_position_ratio(
+        self,
+        daily_equity: list[PortfolioBacktestDailyEquity],
+    ) -> float | None:
+        ratios: list[float] = []
+
+        for item in daily_equity:
+            if item.total_equity > 0:
+                ratios.append(float(item.position_market_value / item.total_equity))
+
+        if not ratios:
+            return None
+
+        return sum(ratios) / len(ratios)
 
     def _build_summary(
         self,
@@ -363,15 +688,16 @@ class PortfolioBacktestService:
         metrics: PortfolioBacktestMetrics,
     ) -> str:
         return (
-            "阶段六点三组合回测已完成目标权重初始建仓。"
+            "阶段六点三组合回测已完成目标权重初始建仓和固定频率调仓。"
             f"本次组合包含 {len(request.assets)} 只股票，"
             f"共同交易日 {len(data.common_trade_dates)} 个，"
             f"初始资金 {self._format_decimal(request.initial_cash)}，"
             f"最终权益 {self._format_decimal(metrics.final_equity)}，"
             f"总收益率 {self._format_percent(metrics.total_return)}，"
-            f"交易次数 {metrics.trade_count} 次。"
-            "当前步骤尚未实现调仓、手续费、滑点和组合风控，"
-            "因此结果主要反映初始权重买入后的持有表现。"
+            f"交易次数 {metrics.trade_count} 次，"
+            f"调仓次数 {metrics.rebalance_count} 次。"
+            "当前步骤已实现固定频率调仓，但尚未计算手续费、滑点和组合风控，"
+            "因此调仓结果仍是无交易成本版本。"
         )
 
     def _build_initial_warnings(
@@ -381,9 +707,10 @@ class PortfolioBacktestService:
         trades: list[PortfolioBacktestTrade],
     ) -> list[str]:
         warnings = [
-            "阶段六点三步骤六已按目标权重完成初始建仓，但尚未执行调仓。",
-            "当前买入数量按整数股计算，买不满目标权重的资金会保留为现金。",
-            "当前初始建仓暂未计算手续费和滑点，步骤十会接入交易成本。",
+            "阶段六点三步骤七已实现组合固定频率调仓。",
+            "调仓规则为 T 日收盘后判断，T+1 日开盘价执行。",
+            "调仓时先卖出超配股票，再买入低配股票。",
+            "当前调仓暂未计算手续费和滑点，步骤十会接入交易成本。",
             "本组合回测仅基于历史行情和规则模拟，不构成投资建议，也不代表未来收益。",
         ]
 
@@ -392,9 +719,9 @@ class PortfolioBacktestService:
                 "本次组合回测没有生成初始建仓交易，可能是股票价格过高或可投入资金不足。"
             )
 
-        if request.rebalance_frequency != "none":
+        if request.rebalance_frequency == "none":
             warnings.append(
-                "调仓频率参数已记录，但步骤六尚未执行调仓逻辑。"
+                "本次组合回测设置为不调仓，仅保留初始建仓后的持有表现。"
             )
 
         return warnings

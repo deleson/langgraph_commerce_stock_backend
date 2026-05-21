@@ -120,32 +120,53 @@ class PortfolioBacktestService:
                 symbol=asset.symbol,
             )
             candle = candle_by_symbol_and_date[symbol_key][first_trade_date]
-            open_price = candle.open
+            raw_price = candle.open
 
             positions_by_symbol[symbol_key] = 0
 
-            if open_price <= 0:
+            if raw_price <= 0:
                 continue
+
+            execution_price, slippage_amount, execution_price_type = (
+                self._apply_slippage(
+                    raw_price=raw_price,
+                    action="buy",
+                    slippage_rate=request.risk_control.slippage_rate,
+                )
+            )
 
             target_cash = deploy_cash * asset.target_weight
-            quantity = int(target_cash // open_price)
+            quantity, trade_value, commission = self._calculate_buy_quantity_with_cost(
+                cash=cash,
+                target_cash=target_cash,
+                execution_price=execution_price,
+                commission_rate=request.risk_control.commission_rate,
+                min_commission=request.risk_control.min_commission,
+            )
 
             if quantity <= 0:
                 continue
 
-            trade_value = open_price * Decimal(quantity)
-
-            if trade_value > cash:
-                quantity = int(cash // open_price)
-                trade_value = open_price * Decimal(quantity)
-
-            if quantity <= 0:
-                continue
+            slippage_cost = slippage_amount * Decimal(quantity)
 
             cash_before = cash
-            cash = cash - trade_value
+            cash = cash - trade_value - commission
             positions_by_symbol[symbol_key] = quantity
-            entry_price_by_symbol[symbol_key] = open_price
+            entry_price_by_symbol[symbol_key] = execution_price
+
+            portfolio_market_value_after = self._calculate_portfolio_market_value(
+                execution_date=first_trade_date,
+                positions_by_symbol=positions_by_symbol,
+                candle_by_symbol_and_date=candle_by_symbol_and_date,
+            )
+            portfolio_equity_after = cash + portfolio_market_value_after
+            actual_weight_after = self._calculate_actual_weight_after_trade(
+                symbol_key=symbol_key,
+                execution_date=first_trade_date,
+                cash=cash,
+                positions_by_symbol=positions_by_symbol,
+                candle_by_symbol_and_date=candle_by_symbol_and_date,
+            )
 
             trades.append(
                 PortfolioBacktestTrade(
@@ -155,22 +176,22 @@ class PortfolioBacktestService:
                     action="buy",
                     reason="initial_build",
                     trade_date=first_trade_date,
-                    price=open_price,
+                    price=execution_price,
                     quantity=quantity,
-                    raw_price=open_price,
-                    execution_price_type="next_open",
+                    raw_price=raw_price,
+                    execution_price_type=execution_price_type,
                     trade_value=trade_value,
-                    commission=Decimal("0"),
-                    slippage_amount=Decimal("0"),
-                    slippage_cost=Decimal("0"),
+                    commission=commission,
+                    slippage_amount=slippage_amount,
+                    slippage_cost=slippage_cost,
                     cash_before=cash_before,
                     cash_after=cash,
                     position_before=0,
                     position_after=quantity,
                     target_weight=asset.target_weight,
                     actual_weight_before=Decimal("0"),
-                    actual_weight_after=None,
-                    portfolio_equity_after=request.initial_cash,
+                    actual_weight_after=actual_weight_after,
+                    portfolio_equity_after=portfolio_equity_after,
                 )
             )
 
@@ -530,10 +551,18 @@ class PortfolioBacktestService:
                 continue
 
             execution_candle = candle_by_symbol_and_date[symbol_key][execution_date]
-            execution_price = execution_candle.open
+            raw_price = execution_candle.open
 
-            if execution_price <= 0:
+            if raw_price <= 0:
                 continue
+
+            execution_price, slippage_amount, execution_price_type = (
+                self._apply_slippage(
+                    raw_price=raw_price,
+                    action="sell",
+                    slippage_rate=request.risk_control.slippage_rate,
+                )
+            )
 
             value_to_sell = current_value - target_value
             quantity_to_sell = int(value_to_sell // execution_price)
@@ -543,10 +572,17 @@ class PortfolioBacktestService:
                 continue
 
             trade_value = execution_price * Decimal(quantity_to_sell)
+            commission = self._calculate_commission(
+                trade_value=trade_value,
+                commission_rate=request.risk_control.commission_rate,
+                min_commission=request.risk_control.min_commission,
+            )
+            slippage_cost = slippage_amount * Decimal(quantity_to_sell)
+
             cash_before = cash
             position_before = current_quantity
 
-            cash = cash + trade_value
+            cash = cash + trade_value - commission
             positions_by_symbol[symbol_key] = current_quantity - quantity_to_sell
 
             if positions_by_symbol[symbol_key] <= 0:
@@ -576,12 +612,12 @@ class PortfolioBacktestService:
                     trade_date=execution_date,
                     price=execution_price,
                     quantity=quantity_to_sell,
-                    raw_price=execution_price,
-                    execution_price_type="next_open",
+                    raw_price=raw_price,
+                    execution_price_type=execution_price_type,
                     trade_value=trade_value,
-                    commission=Decimal("0"),
-                    slippage_amount=Decimal("0"),
-                    slippage_cost=Decimal("0"),
+                    commission=commission,
+                    slippage_amount=slippage_amount,
+                    slippage_cost=slippage_cost,
                     cash_before=cash_before,
                     cash_after=cash,
                     position_before=position_before,
@@ -621,31 +657,39 @@ class PortfolioBacktestService:
                 continue
 
             execution_candle = candle_by_symbol_and_date[symbol_key][execution_date]
-            execution_price = execution_candle.open
+            raw_price = execution_candle.open
 
-            if execution_price <= 0:
+            if raw_price <= 0:
                 continue
+
+            execution_price, slippage_amount, execution_price_type = (
+                self._apply_slippage(
+                    raw_price=raw_price,
+                    action="buy",
+                    slippage_rate=request.risk_control.slippage_rate,
+                )
+            )
 
             value_to_buy = target_value - current_value
-            affordable_value = min(value_to_buy, cash)
-            quantity_to_buy = int(affordable_value // execution_price)
+            quantity_to_buy, trade_value, commission = (
+                self._calculate_buy_quantity_with_cost(
+                    cash=cash,
+                    target_cash=value_to_buy,
+                    execution_price=execution_price,
+                    commission_rate=request.risk_control.commission_rate,
+                    min_commission=request.risk_control.min_commission,
+                )
+            )
 
             if quantity_to_buy <= 0:
                 continue
 
-            trade_value = execution_price * Decimal(quantity_to_buy)
-
-            if trade_value > cash:
-                quantity_to_buy = int(cash // execution_price)
-                trade_value = execution_price * Decimal(quantity_to_buy)
-
-            if quantity_to_buy <= 0:
-                continue
+            slippage_cost = slippage_amount * Decimal(quantity_to_buy)
 
             cash_before = cash
             position_before = current_quantity
 
-            cash = cash - trade_value
+            cash = cash - trade_value - commission
             entry_price_by_symbol[symbol_key] = (
                 self._calculate_weighted_average_entry_price(
                     current_quantity=current_quantity,
@@ -680,12 +724,12 @@ class PortfolioBacktestService:
                     trade_date=execution_date,
                     price=execution_price,
                     quantity=quantity_to_buy,
-                    raw_price=execution_price,
-                    execution_price_type="next_open",
+                    raw_price=raw_price,
+                    execution_price_type=execution_price_type,
                     trade_value=trade_value,
-                    commission=Decimal("0"),
-                    slippage_amount=Decimal("0"),
-                    slippage_cost=Decimal("0"),
+                    commission=commission,
+                    slippage_amount=slippage_amount,
+                    slippage_cost=slippage_cost,
                     cash_before=cash_before,
                     cash_after=cash,
                     position_before=position_before,
@@ -758,8 +802,8 @@ class PortfolioBacktestService:
                     if trade.reason == "rebalance"
                 }
             ),
-            total_commission=Decimal("0"),
-            total_slippage_cost=Decimal("0"),
+            total_commission=self._calculate_total_commission(trades),
+            total_slippage_cost=self._calculate_total_slippage_cost(trades),
             average_cash_ratio=self._calculate_average_cash_ratio(daily_equity),
             average_position_ratio=self._calculate_average_position_ratio(daily_equity),
             turnover_rate=self._calculate_turnover_rate(
@@ -886,6 +930,94 @@ class PortfolioBacktestService:
 
         return total_equity / Decimal(len(daily_equity))
 
+    def _calculate_commission(
+        self,
+        *,
+        trade_value: Decimal,
+        commission_rate: float,
+        min_commission: Decimal,
+    ) -> Decimal:
+        if trade_value <= 0 or commission_rate <= 0:
+            return Decimal("0")
+
+        commission = trade_value * Decimal(str(commission_rate))
+
+        if min_commission > 0 and commission < min_commission:
+            return min_commission
+
+        return commission
+
+    def _apply_slippage(
+        self,
+        *,
+        raw_price: Decimal,
+        action: str,
+        slippage_rate: float,
+    ) -> tuple[Decimal, Decimal, str]:
+        if raw_price <= 0 or slippage_rate <= 0:
+            return raw_price, Decimal("0"), "next_open"
+
+        rate = Decimal(str(slippage_rate))
+
+        if action == "buy":
+            execution_price = raw_price * (Decimal("1") + rate)
+            return execution_price, execution_price - raw_price, "next_open_with_slippage"
+
+        if action == "sell":
+            execution_price = raw_price * (Decimal("1") - rate)
+            return execution_price, raw_price - execution_price, "next_open_with_slippage"
+
+        return raw_price, Decimal("0"), "next_open"
+
+    def _calculate_buy_quantity_with_cost(
+        self,
+        *,
+        cash: Decimal,
+        target_cash: Decimal,
+        execution_price: Decimal,
+        commission_rate: float,
+        min_commission: Decimal,
+    ) -> tuple[int, Decimal, Decimal]:
+        available_cash = min(cash, target_cash)
+
+        if available_cash <= 0 or execution_price <= 0:
+            return 0, Decimal("0"), Decimal("0")
+
+        quantity = int(available_cash // execution_price)
+
+        while quantity > 0:
+            trade_value = execution_price * Decimal(quantity)
+            commission = self._calculate_commission(
+                trade_value=trade_value,
+                commission_rate=commission_rate,
+                min_commission=min_commission,
+            )
+
+            if trade_value + commission <= available_cash:
+                return quantity, trade_value, commission
+
+            quantity -= 1
+
+        return 0, Decimal("0"), Decimal("0")
+
+    def _calculate_total_commission(
+        self,
+        trades: list[PortfolioBacktestTrade],
+    ) -> Decimal:
+        return sum(
+            (trade.commission for trade in trades),
+            Decimal("0"),
+        )
+
+    def _calculate_total_slippage_cost(
+        self,
+        trades: list[PortfolioBacktestTrade],
+    ) -> Decimal:
+        return sum(
+            (trade.slippage_cost for trade in trades),
+            Decimal("0"),
+        )
+
     def _calculate_average_cash_ratio(
         self,
         daily_equity: list[PortfolioBacktestDailyEquity],
@@ -938,8 +1070,10 @@ class PortfolioBacktestService:
             f"换手率 {self._format_percent(metrics.turnover_rate)}，"
             f"交易次数 {metrics.trade_count} 次，"
             f"调仓次数 {metrics.rebalance_count} 次。"
-            "当前步骤仍未计算手续费、滑点和组合风控，"
-            "因此组合绩效属于无交易成本版本。"
+            f"总手续费 {self._format_decimal(metrics.total_commission)}，"
+            f"总滑点成本 {self._format_decimal(metrics.total_slippage_cost)}。"
+            "当前步骤已接入手续费和滑点，"
+            "但组合层暂未执行止损、止盈、冷却期和最大回撤保护。"
         )
 
     def _build_initial_warnings(
@@ -949,13 +1083,23 @@ class PortfolioBacktestService:
         trades: list[PortfolioBacktestTrade],
     ) -> list[str]:
         warnings = [
-            "阶段六点三步骤九已实现组合绩效指标计算。",
+            "阶段六点三步骤十已接入组合回测交易成本。",
             "组合每日权益使用收盘价估算，调仓交易仍按 T 日收盘后判断、T+1 日开盘价执行。",
-            "组合年化收益、年化波动率和夏普比率均按 252 个交易日估算。",
+            "手续费按 trade_value * commission_rate 计算，并支持 min_commission 最低手续费。",
+            "滑点按成交方向调整开盘价：买入价格上调，卖出价格下调。",
             "换手率第一版只统计调仓交易金额，不统计初始建仓金额。",
-            "当前组合回测暂未计算手续费和滑点，步骤十会接入交易成本。",
             "本组合回测仅基于历史行情和规则模拟，不构成投资建议，也不代表未来收益。",
         ]
+        risk_control = request.risk_control
+        if (
+            risk_control.enable_stop_loss
+            or risk_control.enable_take_profit
+            or risk_control.enable_cooldown
+            or risk_control.enable_max_drawdown_guard
+        ):
+            warnings.append(
+                "当前组合回测第一版只复用手续费和滑点配置，暂不执行止损、止盈、冷却期和最大回撤保护。"
+            )
 
         if not trades:
             warnings.append(

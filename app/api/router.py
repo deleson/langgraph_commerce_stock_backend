@@ -16,6 +16,7 @@ from app.api.routers.market_data_quality import router as market_data_quality_ro
 from app.api.routers.analysis_conversations import router as analysis_conversations_router
 from app.api.routers.strategy_signals import router as strategy_signals_router
 from app.api.routers.backtests import router as backtests_router
+from app.api.routers.portfolio_backtests import router as portfolio_backtests_router
 from app.core.config import get_settings
 
 settings = get_settings()
@@ -37,3 +38,4 @@ api_router.include_router(strategy_signals_router)
 api_router.include_router(backtests_router)
 api_router.include_router(market_data_quality_router)
 api_router.include_router(analysis_conversations_router)
+api_router.include_router(portfolio_backtests_router)

@@ -201,7 +201,6 @@ class PortfolioBacktestService:
                 candle_by_symbol_and_date=candle_by_symbol_and_date,
                 positions_by_symbol=positions_by_symbol,
                 entry_price_by_symbol=entry_price_by_symbol,
-                portfolio_cash=cash,
             )
             position_market_value = sum(
                 (position.market_value for position in positions),
@@ -271,7 +270,6 @@ class PortfolioBacktestService:
         candle_by_symbol_and_date: dict[str, dict],
         positions_by_symbol: dict[str, int],
         entry_price_by_symbol: dict[str, Decimal],
-        portfolio_cash: Decimal,
     ) -> list[PortfolioBacktestPositionSnapshot]:
         positions: list[PortfolioBacktestPositionSnapshot] = []
 
@@ -282,6 +280,7 @@ class PortfolioBacktestService:
             )
             candle = candle_by_symbol_and_date[symbol_key][trade_date]
             quantity = positions_by_symbol.get(symbol_key, 0)
+            # Daily position snapshots use close price because daily equity is marked at close.
             market_value = candle.close * Decimal(quantity)
             entry_price = entry_price_by_symbol.get(symbol_key)
 
@@ -375,6 +374,69 @@ class PortfolioBacktestService:
             for position in positions
         }
 
+    def _calculate_portfolio_market_value(
+        self,
+        *,
+        execution_date,
+        positions_by_symbol: dict[str, int],
+        candle_by_symbol_and_date: dict[str, dict],
+    ) -> Decimal:
+        market_value = Decimal("0")
+
+        for symbol_key, quantity in positions_by_symbol.items():
+            if quantity <= 0:
+                continue
+
+            candle = candle_by_symbol_and_date[symbol_key][execution_date]
+            market_value += candle.open * Decimal(quantity)
+
+        return market_value
+
+    def _calculate_weighted_average_entry_price(
+        self,
+        *,
+        current_quantity: int,
+        current_entry_price: Decimal | None,
+        buy_quantity: int,
+        buy_price: Decimal,
+    ) -> Decimal:
+        if current_quantity <= 0 or current_entry_price is None:
+            return buy_price
+
+        total_quantity = current_quantity + buy_quantity
+
+        if total_quantity <= 0:
+            return buy_price
+
+        current_cost = current_entry_price * Decimal(current_quantity)
+        new_cost = buy_price * Decimal(buy_quantity)
+
+        return (current_cost + new_cost) / Decimal(total_quantity)
+
+    def _calculate_actual_weight_after_trade(
+        self,
+        *,
+        symbol_key: str,
+        execution_date,
+        cash: Decimal,
+        positions_by_symbol: dict[str, int],
+        candle_by_symbol_and_date: dict[str, dict],
+    ) -> Decimal | None:
+        position_market_value = self._calculate_portfolio_market_value(
+            execution_date=execution_date,
+            positions_by_symbol=positions_by_symbol,
+            candle_by_symbol_and_date=candle_by_symbol_and_date,
+        )
+        total_equity = cash + position_market_value
+
+        if total_equity <= 0:
+            return None
+
+        candle = candle_by_symbol_and_date[symbol_key][execution_date]
+        symbol_value = candle.open * Decimal(positions_by_symbol.get(symbol_key, 0))
+
+        return symbol_value / total_equity
+
     def _execute_rebalance(
         self,
         *,
@@ -400,6 +462,7 @@ class PortfolioBacktestService:
             current_values_by_symbol=current_values_by_symbol,
             cash=cash,
             positions_by_symbol=positions_by_symbol,
+            entry_price_by_symbol=entry_price_by_symbol,
             candle_by_symbol_and_date=candle_by_symbol_and_date,
             trades=trades,
         )
@@ -444,6 +507,7 @@ class PortfolioBacktestService:
         current_values_by_symbol: dict[str, Decimal],
         cash: Decimal,
         positions_by_symbol: dict[str, int],
+        entry_price_by_symbol: dict[str, Decimal],
         candle_by_symbol_and_date: dict[str, dict],
         trades: list[PortfolioBacktestTrade],
     ) -> Decimal:
@@ -483,6 +547,23 @@ class PortfolioBacktestService:
             cash = cash + trade_value
             positions_by_symbol[symbol_key] = current_quantity - quantity_to_sell
 
+            if positions_by_symbol[symbol_key] <= 0:
+                entry_price_by_symbol.pop(symbol_key, None)
+
+            portfolio_market_value_after = self._calculate_portfolio_market_value(
+                execution_date=execution_date,
+                positions_by_symbol=positions_by_symbol,
+                candle_by_symbol_and_date=candle_by_symbol_and_date,
+            )
+            portfolio_equity_after = cash + portfolio_market_value_after
+            actual_weight_after = self._calculate_actual_weight_after_trade(
+                symbol_key=symbol_key,
+                execution_date=execution_date,
+                cash=cash,
+                positions_by_symbol=positions_by_symbol,
+                candle_by_symbol_and_date=candle_by_symbol_and_date,
+            )
+
             trades.append(
                 PortfolioBacktestTrade(
                     sequence_no=len(trades) + 1,
@@ -504,13 +585,9 @@ class PortfolioBacktestService:
                     position_before=position_before,
                     position_after=positions_by_symbol[symbol_key],
                     target_weight=asset.target_weight,
-                    actual_weight_before=(
-                        current_value / portfolio_equity
-                        if (portfolio_equity := sum(target_values.values())) > 0
-                        else None
-                    ),
-                    actual_weight_after=None,
-                    portfolio_equity_after=cash,
+                    actual_weight_before=None,
+                    actual_weight_after=actual_weight_after,
+                    portfolio_equity_after=portfolio_equity_after,
                 )
             )
 
@@ -567,8 +644,29 @@ class PortfolioBacktestService:
             position_before = current_quantity
 
             cash = cash - trade_value
+            entry_price_by_symbol[symbol_key] = (
+                self._calculate_weighted_average_entry_price(
+                    current_quantity=current_quantity,
+                    current_entry_price=entry_price_by_symbol.get(symbol_key),
+                    buy_quantity=quantity_to_buy,
+                    buy_price=execution_price,
+                )
+            )
             positions_by_symbol[symbol_key] = current_quantity + quantity_to_buy
-            entry_price_by_symbol[symbol_key] = execution_price
+
+            portfolio_market_value_after = self._calculate_portfolio_market_value(
+                execution_date=execution_date,
+                positions_by_symbol=positions_by_symbol,
+                candle_by_symbol_and_date=candle_by_symbol_and_date,
+            )
+            portfolio_equity_after = cash + portfolio_market_value_after
+            actual_weight_after = self._calculate_actual_weight_after_trade(
+                symbol_key=symbol_key,
+                execution_date=execution_date,
+                cash=cash,
+                positions_by_symbol=positions_by_symbol,
+                candle_by_symbol_and_date=candle_by_symbol_and_date,
+            )
 
             trades.append(
                 PortfolioBacktestTrade(
@@ -592,8 +690,8 @@ class PortfolioBacktestService:
                     position_after=positions_by_symbol[symbol_key],
                     target_weight=asset.target_weight,
                     actual_weight_before=None,
-                    actual_weight_after=None,
-                    portfolio_equity_after=cash,
+                    actual_weight_after=actual_weight_after,
+                    portfolio_equity_after=portfolio_equity_after,
                 )
             )
 

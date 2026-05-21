@@ -120,7 +120,7 @@ class PortfolioBacktestService:
                 symbol=asset.symbol,
             )
             candle = candle_by_symbol_and_date[symbol_key][first_trade_date]
-            raw_price = candle.open
+            raw_price = candle.open_price
 
             positions_by_symbol[symbol_key] = 0
 
@@ -304,7 +304,7 @@ class PortfolioBacktestService:
             candle = candle_by_symbol_and_date[symbol_key][trade_date]
             quantity = positions_by_symbol.get(symbol_key, 0)
             # Daily position snapshots use close price because daily equity is marked at close.
-            market_value = candle.close * Decimal(quantity)
+            market_value = candle.close_price * Decimal(quantity)
             entry_price = entry_price_by_symbol.get(symbol_key)
 
             unrealized_pnl: Decimal | None = None
@@ -321,7 +321,7 @@ class PortfolioBacktestService:
                     symbol=asset.symbol,
                     market=asset.market,
                     quantity=quantity,
-                    close_price=candle.close,
+                    close_price=candle.close_price,
                     market_value=market_value,
                     target_weight=asset.target_weight,
                     actual_weight=Decimal("0"),
@@ -411,7 +411,7 @@ class PortfolioBacktestService:
                 continue
 
             candle = candle_by_symbol_and_date[symbol_key][execution_date]
-            market_value += candle.open * Decimal(quantity)
+            market_value += candle.open_price * Decimal(quantity)
 
         return market_value
 
@@ -456,7 +456,7 @@ class PortfolioBacktestService:
             return None
 
         candle = candle_by_symbol_and_date[symbol_key][execution_date]
-        symbol_value = candle.open * Decimal(positions_by_symbol.get(symbol_key, 0))
+        symbol_value = candle.open_price * Decimal(positions_by_symbol.get(symbol_key, 0))
 
         return symbol_value / total_equity
 
@@ -551,7 +551,7 @@ class PortfolioBacktestService:
                 continue
 
             execution_candle = candle_by_symbol_and_date[symbol_key][execution_date]
-            raw_price = execution_candle.open
+            raw_price = execution_candle.open_price
 
             if raw_price <= 0:
                 continue
@@ -657,7 +657,7 @@ class PortfolioBacktestService:
                 continue
 
             execution_candle = candle_by_symbol_and_date[symbol_key][execution_date]
-            raw_price = execution_candle.open
+            raw_price = execution_candle.open_price
 
             if raw_price <= 0:
                 continue

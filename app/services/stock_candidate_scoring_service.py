@@ -20,8 +20,14 @@ class StockCandidateScoringService:
     DATA_QUALITY_AVAILABLE_SCORE = 5
     DATA_QUALITY_LIMITED_SCORE = -20
 
-    TREND_BULLISH_SCORE = 12
-    TREND_BEARISH_SCORE = -12
+    TREND_DIRECTION_BULLISH_SCORE = 8
+    TREND_DIRECTION_BEARISH_SCORE = -8
+    TREND_SHORT_ALIGNMENT_BULLISH_SCORE = 4
+    TREND_SHORT_ALIGNMENT_BEARISH_SCORE = -4
+    TREND_LONG_CONFIRM_BULLISH_SCORE = 4
+    TREND_LONG_CONFIRM_BEARISH_SCORE = -4
+    TREND_EMA_CONFIRM_BULLISH_SCORE = 2
+    TREND_EMA_CONFIRM_BEARISH_SCORE = -2
 
     MOMENTUM_BULLISH_SCORE = 8
     MOMENTUM_BEARISH_SCORE = -8
@@ -425,34 +431,124 @@ class StockCandidateScoringService:
         return score
 
     def _score_trend(
-        self,
-        data_item: StockCandidateDataItem,
-        rule_results: list[StockCandidateScoreRuleResult],
+            self,
+            data_item: StockCandidateDataItem,
+            rule_results: list[StockCandidateScoreRuleResult],
     ) -> int:
-        trend = data_item.technical_indicators.summary.moving_average.trend
+        moving_average = data_item.technical_indicators.summary.moving_average
 
-        if trend == "bullish":
-            score = self.TREND_BULLISH_SCORE
-            reason = "均线趋势偏多，价格结构对候选评分形成支持。"
-            warnings: list[str] = []
-        elif trend == "bearish":
-            score = self.TREND_BEARISH_SCORE
-            reason = "均线趋势偏空，价格结构对候选评分形成压制。"
-            warnings = ["趋势偏弱时，不宜只因为低位就提高研究优先级。"]
+        score = 0
+        reasons: list[str] = []
+        warnings: list[str] = []
+
+        if moving_average.trend == "bullish":
+            score += self.TREND_DIRECTION_BULLISH_SCORE
+            reasons.append("均线趋势方向偏多，价格结构对候选评分形成基础支持。")
+        elif moving_average.trend == "bearish":
+            score += self.TREND_DIRECTION_BEARISH_SCORE
+            reasons.append("均线趋势方向偏空，价格结构对候选评分形成压制。")
+            warnings.append("趋势偏弱时，不宜只因为短期反弹或低位状态提高研究优先级。")
         else:
-            score = 0
-            reason = "均线趋势中性，暂不对候选评分做明显调整。"
-            warnings = []
+            reasons.append("均线趋势方向中性，趋势方向本身暂不提供明显加分。")
+
+        if self._is_bullish_short_ma_alignment(moving_average):
+            score += self.TREND_SHORT_ALIGNMENT_BULLISH_SCORE
+            reasons.append("短期均线呈 ma5 > ma10 > ma20 的多头排列。")
+        elif self._is_bearish_short_ma_alignment(moving_average):
+            score += self.TREND_SHORT_ALIGNMENT_BEARISH_SCORE
+            reasons.append("短期均线呈 ma5 < ma10 < ma20 的空头排列。")
+            warnings.append("短期均线空头排列说明近期价格结构仍偏弱。")
+
+        if self._is_bullish_long_ma_confirmation(moving_average):
+            score += self.TREND_LONG_CONFIRM_BULLISH_SCORE
+            reasons.append("ma20 高于 ma60，中期趋势对多头方向形成确认。")
+        elif self._is_bearish_long_ma_confirmation(moving_average):
+            score += self.TREND_LONG_CONFIRM_BEARISH_SCORE
+            reasons.append("ma20 低于 ma60，中期趋势对空头方向形成确认。")
+            warnings.append("中期均线偏空时，需要谨慎看待短期技术反弹。")
+
+        if self._is_bullish_ema_confirmation(moving_average):
+            score += self.TREND_EMA_CONFIRM_BULLISH_SCORE
+            reasons.append("ema12 高于 ema26，EMA 动能对趋势形成小幅确认。")
+        elif self._is_bearish_ema_confirmation(moving_average):
+            score += self.TREND_EMA_CONFIRM_BEARISH_SCORE
+            reasons.append("ema12 低于 ema26，EMA 动能偏弱。")
+            warnings.append("EMA 动能偏弱时，趋势修复可能还不充分。")
+
+        if score == 0 and not warnings:
+            reasons.append("均线结构没有出现明确多空共振，趋势评分保持中性。")
 
         rule_results.append(
             StockCandidateScoreRuleResult(
                 dimension="trend",
                 score_delta=score,
-                reason=reason,
-                warnings=warnings,
+                reason=" ".join(reasons),
+                warnings=self._limit_text_list(warnings, limit=5),
             )
         )
         return score
+
+    def _is_bullish_short_ma_alignment(
+            self,
+            moving_average,
+    ) -> bool:
+        return (
+                moving_average.ma5 is not None
+                and moving_average.ma10 is not None
+                and moving_average.ma20 is not None
+                and moving_average.ma5 > moving_average.ma10 > moving_average.ma20
+        )
+
+    def _is_bearish_short_ma_alignment(
+            self,
+            moving_average,
+    ) -> bool:
+        return (
+                moving_average.ma5 is not None
+                and moving_average.ma10 is not None
+                and moving_average.ma20 is not None
+                and moving_average.ma5 < moving_average.ma10 < moving_average.ma20
+        )
+
+    def _is_bullish_long_ma_confirmation(
+            self,
+            moving_average,
+    ) -> bool:
+        return (
+                moving_average.ma20 is not None
+                and moving_average.ma60 is not None
+                and moving_average.ma20 > moving_average.ma60
+        )
+
+    def _is_bearish_long_ma_confirmation(
+            self,
+            moving_average,
+    ) -> bool:
+        return (
+                moving_average.ma20 is not None
+                and moving_average.ma60 is not None
+                and moving_average.ma20 < moving_average.ma60
+        )
+
+    def _is_bullish_ema_confirmation(
+            self,
+            moving_average,
+    ) -> bool:
+        return (
+                moving_average.ema12 is not None
+                and moving_average.ema26 is not None
+                and moving_average.ema12 > moving_average.ema26
+        )
+
+    def _is_bearish_ema_confirmation(
+            self,
+            moving_average,
+    ) -> bool:
+        return (
+                moving_average.ema12 is not None
+                and moving_average.ema26 is not None
+                and moving_average.ema12 < moving_average.ema26
+        )
 
     def _score_momentum(
         self,

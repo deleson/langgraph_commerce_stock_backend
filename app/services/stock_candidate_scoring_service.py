@@ -75,8 +75,24 @@ class StockCandidateScoringService:
     VOLATILITY_LOW_SCORE = 4
     VOLATILITY_HIGH_RISK_SCORE = -12
 
-    VOLUME_EXPANDING_SCORE = 5
-    VOLUME_SHRINKING_SCORE = -5
+    VOLUME_MILD_EXPANDING_SCORE = 6
+    VOLUME_STRONG_EXPANDING_SCORE = 3
+    VOLUME_EXTREME_EXPANDING_RISK_SCORE = -3
+    VOLUME_MILD_SHRINKING_SCORE = -3
+    VOLUME_STRONG_SHRINKING_SCORE = -6
+
+    LIQUIDITY_MISSING_MA20_SCORE = -4
+    LIQUIDITY_ZERO_MA20_SCORE = -8
+    LIQUIDITY_EXTREME_LOW_VOLUME_SCORE = -6
+    LIQUIDITY_EXTREME_HIGH_VOLUME_SCORE = -4
+
+    MILD_VOLUME_EXPANDING_RATIO = 1.2
+    STRONG_VOLUME_EXPANDING_RATIO = 2.0
+    EXTREME_VOLUME_EXPANDING_RATIO = 3.0
+    EXTREME_LIQUIDITY_EXPANDING_RATIO = 4.0
+    MILD_VOLUME_SHRINKING_RATIO = 0.8
+    STRONG_VOLUME_SHRINKING_RATIO = 0.5
+    EXTREME_LOW_VOLUME_RATIO = 0.2
 
     STRATEGY_BUY_SCORE = 15
     STRATEGY_HOLD_SCORE = 3
@@ -141,6 +157,7 @@ class StockCandidateScoringService:
         macd_score = self._score_macd(data_item, rule_results)
         volatility_score = self._score_volatility(data_item, rule_results)
         volume_score = self._score_volume(data_item, rule_results)
+        liquidity_score = self._score_liquidity(data_item, rule_results)
         strategy_signal_score = self._score_strategy_signal(data_item, rule_results)
         risk_score = self._score_risk(data_item, rule_results)
         user_preference_score = self._score_user_preference(
@@ -158,6 +175,7 @@ class StockCandidateScoringService:
                 + macd_score
                 + volatility_score
                 + volume_score
+                + liquidity_score
                 + strategy_signal_score
                 + risk_score
                 + user_preference_score
@@ -203,6 +221,7 @@ class StockCandidateScoringService:
                     macd_score=macd_score,
                     volatility_score=volatility_score,
                     volume_score=volume_score,
+                    liquidity_score=liquidity_score,
                     strategy_signal_score=strategy_signal_score,
                     risk_score=risk_score,
                     user_preference_score=user_preference_score,
@@ -962,31 +981,90 @@ class StockCandidateScoringService:
         return score
 
     def _score_volume(
-        self,
-        data_item: StockCandidateDataItem,
-        rule_results: list[StockCandidateScoreRuleResult],
+            self,
+            data_item: StockCandidateDataItem,
+            rule_results: list[StockCandidateScoreRuleResult],
     ) -> int:
         volume = data_item.technical_indicators.summary.volume_factor
+        volume_ratio = volume.volume_ratio
 
-        if volume.status == "expanding":
-            score = self.VOLUME_EXPANDING_SCORE
-            reason = "成交量处于放量状态，市场参与度提升。"
-            warnings: list[str] = []
-        elif volume.status == "shrinking":
-            score = self.VOLUME_SHRINKING_SCORE
-            reason = "成交量处于缩量状态，当前信号确认度不足。"
-            warnings = ["缩量状态下的上涨或反弹需要谨慎确认。"]
+        score = 0
+        reasons: list[str] = []
+        warnings: list[str] = []
+
+        if volume_ratio is None:
+            reasons.append("缺少 volume_ratio，成交量评分保持中性。")
+        elif volume_ratio >= self.EXTREME_VOLUME_EXPANDING_RATIO:
+            score += self.VOLUME_EXTREME_EXPANDING_RISK_SCORE
+            reasons.append(f"volume_ratio 为 {volume_ratio:.2f}，属于异常放量，已进行风险降温。")
+            warnings.append("异常放量不一定代表健康上涨，可能来自短期冲高或资金异动。")
+        elif volume_ratio >= self.STRONG_VOLUME_EXPANDING_RATIO:
+            score += self.VOLUME_STRONG_EXPANDING_SCORE
+            reasons.append(f"volume_ratio 为 {volume_ratio:.2f}，属于明显放量，市场参与度提升。")
+            warnings.append("明显放量需要结合价格位置和趋势确认，避免追高。")
+        elif volume_ratio >= self.MILD_VOLUME_EXPANDING_RATIO:
+            score += self.VOLUME_MILD_EXPANDING_SCORE
+            reasons.append(f"volume_ratio 为 {volume_ratio:.2f}，属于温和放量，对候选评分形成支持。")
+        elif volume_ratio <= self.STRONG_VOLUME_SHRINKING_RATIO:
+            score += self.VOLUME_STRONG_SHRINKING_SCORE
+            reasons.append(f"volume_ratio 为 {volume_ratio:.2f}，属于明显缩量，信号确认度不足。")
+            warnings.append("明显缩量时，价格信号的可靠性需要降低看待。")
+        elif volume_ratio < self.MILD_VOLUME_SHRINKING_RATIO:
+            score += self.VOLUME_MILD_SHRINKING_SCORE
+            reasons.append(f"volume_ratio 为 {volume_ratio:.2f}，属于轻微缩量，市场参与度略弱。")
+            warnings.append("轻微缩量不一定是风险，但会降低信号确认度。")
         else:
-            score = 0
-            reason = "成交量状态正常。"
-            warnings = []
+            reasons.append(f"volume_ratio 为 {volume_ratio:.2f}，成交量处于相对正常区间。")
 
         rule_results.append(
             StockCandidateScoreRuleResult(
                 dimension="volume",
                 score_delta=score,
-                reason=reason,
-                warnings=warnings,
+                reason=" ".join(reasons),
+                warnings=self._limit_text_list(warnings, limit=5),
+            )
+        )
+        return score
+
+    def _score_liquidity(
+            self,
+            data_item: StockCandidateDataItem,
+            rule_results: list[StockCandidateScoreRuleResult],
+    ) -> int:
+        volume = data_item.technical_indicators.summary.volume_factor
+
+        score = 0
+        reasons: list[str] = []
+        warnings: list[str] = []
+
+        if volume.volume_ma20 is None:
+            score += self.LIQUIDITY_MISSING_MA20_SCORE
+            reasons.append("缺少 20 日平均成交量，流动性判断依据不足。")
+            warnings.append("缺少 volume_ma20 时，成交量和流动性评分可信度下降。")
+        elif volume.volume_ma20 == 0:
+            score += self.LIQUIDITY_ZERO_MA20_SCORE
+            reasons.append("20 日平均成交量为 0，流动性存在明显异常。")
+            warnings.append("volume_ma20 为 0 时，候选股票可能缺乏有效成交。")
+
+        if volume.volume_ratio is not None:
+            if volume.volume_ratio <= self.EXTREME_LOW_VOLUME_RATIO:
+                score += self.LIQUIDITY_EXTREME_LOW_VOLUME_SCORE
+                reasons.append(f"volume_ratio 为 {volume.volume_ratio:.2f}，成交活跃度极低。")
+                warnings.append("极端低量环境下，价格信号可能缺乏足够成交确认。")
+            elif volume.volume_ratio >= self.EXTREME_LIQUIDITY_EXPANDING_RATIO:
+                score += self.LIQUIDITY_EXTREME_HIGH_VOLUME_SCORE
+                reasons.append(f"volume_ratio 为 {volume.volume_ratio:.2f}，出现极端放量。")
+                warnings.append("极端放量可能代表事件冲击或短期资金异动，需要谨慎确认。")
+
+        if score == 0:
+            reasons.append("未触发额外流动性风险，liquidity_score 保持中性。")
+
+        rule_results.append(
+            StockCandidateScoreRuleResult(
+                dimension="liquidity",
+                score_delta=score,
+                reason=" ".join(reasons),
+                warnings=self._limit_text_list(warnings, limit=5),
             )
         )
         return score

@@ -59,6 +59,19 @@ class StockCandidateScoringService:
     MACD_ZERO_AXIS_BULLISH_SCORE = 2
     MACD_ZERO_AXIS_BEARISH_SCORE = -2
 
+    RISK_DATA_STALE_SCORE = -6
+    RISK_DATA_WARNING_SCORE = -4
+    RISK_HIGH_VOLATILITY_SCORE = -6
+    RISK_EXTREME_VOLATILITY_SCORE = -10
+    RISK_RSI_EXTREME_OVERBOUGHT_SCORE = -4
+    RISK_STRATEGY_SELL_SCORE = -6
+    RISK_STRONG_SELL_SCORE = -4
+    RISK_MULTI_BEARISH_TECHNICAL_SCORE = -5
+
+    EXTREME_ANNUALIZED_VOLATILITY = 0.6
+    MIN_RISK_SCORE = -30
+    MAX_RISK_SCORE = 0
+
     VOLATILITY_LOW_SCORE = 4
     VOLATILITY_HIGH_RISK_SCORE = -12
 
@@ -129,24 +142,27 @@ class StockCandidateScoringService:
         volatility_score = self._score_volatility(data_item, rule_results)
         volume_score = self._score_volume(data_item, rule_results)
         strategy_signal_score = self._score_strategy_signal(data_item, rule_results)
+        risk_score = self._score_risk(data_item, rule_results)
         user_preference_score = self._score_user_preference(
             data_item=data_item,
             risk_preference=risk_preference,
             rule_results=rule_results,
         )
 
-        final_score = self._clamp_score(
-            self.BASE_SCORE
-            + data_quality_score
-            + trend_score
-            + momentum_score
-            + rsi_score
-            + macd_score
-            + volatility_score
-            + volume_score
-            + strategy_signal_score
-            + user_preference_score
+        raw_score = (
+                self.BASE_SCORE
+                + data_quality_score
+                + trend_score
+                + momentum_score
+                + rsi_score
+                + macd_score
+                + volatility_score
+                + volume_score
+                + strategy_signal_score
+                + risk_score
+                + user_preference_score
         )
+        final_score = self._clamp_score(raw_score)
 
         grade = self._grade_from_score(final_score)
         normalized_risk_preference = self._normalize_risk_preference(risk_preference)
@@ -188,7 +204,9 @@ class StockCandidateScoringService:
                     volatility_score=volatility_score,
                     volume_score=volume_score,
                     strategy_signal_score=strategy_signal_score,
+                    risk_score=risk_score,
                     user_preference_score=user_preference_score,
+                    raw_score=raw_score,
                     final_score=final_score,
                     rule_results=rule_results,
                 )
@@ -1014,6 +1032,107 @@ class StockCandidateScoringService:
             )
         )
         return score
+
+    def _score_risk(
+            self,
+            data_item: StockCandidateDataItem,
+            rule_results: list[StockCandidateScoreRuleResult],
+    ) -> int:
+        score = 0
+        reasons: list[str] = []
+        warnings: list[str] = []
+
+        data_quality = data_item.data_quality
+        technical_indicators = data_item.technical_indicators
+        strategy_signal = data_item.strategy_signal
+
+        if data_quality is not None:
+            if data_quality.is_stale:
+                score += self.RISK_DATA_STALE_SCORE
+                reasons.append("行情数据存在过旧风险，候选评分需要额外降温。")
+                warnings.append("数据过旧会降低技术指标和策略信号的参考价值。")
+
+            if data_quality.warnings:
+                score += self.RISK_DATA_WARNING_SCORE
+                reasons.append("数据质量报告存在 warning，候选评分需要额外谨慎。")
+                warnings.extend(data_quality.warnings)
+
+        if technical_indicators is not None:
+            volatility = technical_indicators.summary.volatility
+            rsi = technical_indicators.summary.rsi
+
+            if (
+                    volatility.annualized_volatility is not None
+                    and volatility.annualized_volatility >= self.EXTREME_ANNUALIZED_VOLATILITY
+            ):
+                score += self.RISK_EXTREME_VOLATILITY_SCORE
+                reasons.append(
+                    f"年化波动率为 {volatility.annualized_volatility:.2%}，处于极端高波动区域。"
+                )
+                warnings.append("极端高波动股票可能带来更大回撤，不适合作为低风险候选。")
+            elif volatility.level == "high":
+                score += self.RISK_HIGH_VOLATILITY_SCORE
+                reasons.append("波动率等级为 high，候选风险需要额外扣分。")
+                warnings.append("高波动股票需要结合仓位管理和风险承受能力谨慎研究。")
+
+            primary_rsi = self._select_candidate_primary_rsi(rsi)
+            if primary_rsi is not None and primary_rsi >= 80:
+                score += self.RISK_RSI_EXTREME_OVERBOUGHT_SCORE
+                reasons.append(f"主要 RSI 为 {primary_rsi:.2f}，极端超买带来额外追高风险。")
+                warnings.append("极端超买不代表一定下跌，但短期回撤风险可能上升。")
+
+            if self._has_multi_bearish_technical_risk(data_item):
+                score += self.RISK_MULTI_BEARISH_TECHNICAL_SCORE
+                reasons.append("趋势、动量或 MACD 中多个技术项偏弱，形成综合技术风险。")
+                warnings.append("多个技术项同时偏弱时，不宜只看单一加分项提高候选优先级。")
+
+        if strategy_signal is not None and strategy_signal.status == "available":
+            if strategy_signal.signal == "sell":
+                score += self.RISK_STRATEGY_SELL_SCORE
+                reasons.append("策略信号为 sell，综合风险评分额外扣分。")
+                warnings.extend(strategy_signal.risks or ["策略信号偏弱。"])
+
+                if strategy_signal.strength == "strong":
+                    score += self.RISK_STRONG_SELL_SCORE
+                    reasons.append("策略信号强度为 strong，sell 风险进一步提高。")
+                    warnings.append("强 sell 信号下，候选研究优先级需要明显降低。")
+
+        score = max(self.MIN_RISK_SCORE, min(self.MAX_RISK_SCORE, score))
+
+        if score == 0:
+            reasons.append("未触发额外综合风险扣分，risk_score 保持中性。")
+
+        rule_results.append(
+            StockCandidateScoreRuleResult(
+                dimension="risk",
+                score_delta=score,
+                reason=" ".join(reasons),
+                warnings=self._limit_text_list(warnings, limit=5),
+            )
+        )
+        return score
+
+    def _has_multi_bearish_technical_risk(
+            self,
+            data_item: StockCandidateDataItem,
+    ) -> bool:
+        technical_indicators = data_item.technical_indicators
+        if technical_indicators is None:
+            return False
+
+        summary = technical_indicators.summary
+        bearish_count = 0
+
+        if summary.moving_average.trend == "bearish":
+            bearish_count += 1
+
+        if summary.momentum.direction == "bearish":
+            bearish_count += 1
+
+        if summary.macd.signal == "bearish":
+            bearish_count += 1
+
+        return bearish_count >= 2
 
     def _score_user_preference(
         self,

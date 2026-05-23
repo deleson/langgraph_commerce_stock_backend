@@ -142,6 +142,20 @@ class StockCandidateScoringService:
         "balanced": "当前解释已按均衡型风险偏好处理，综合考虑收益机会与风险暴露。",
         "aggressive": "当前解释已按激进型风险偏好处理，会更关注趋势、动量和进攻性信号，但不会忽略风险。",
     }
+    DIMENSION_DISPLAY_NAMES = {
+        "data_quality": "数据质量",
+        "trend": "趋势",
+        "momentum": "动量",
+        "rsi": "RSI",
+        "macd": "MACD",
+        "volatility": "波动率",
+        "volume": "成交量",
+        "liquidity": "流动性",
+        "strategy_signal": "策略信号",
+        "backtest_performance": "回测表现",
+        "risk": "综合风险",
+        "user_preference": "用户风险偏好",
+    }
 
     def score_candidate(
         self,
@@ -1514,6 +1528,7 @@ class StockCandidateScoringService:
                 final_score=final_score,
                 grade=grade,
             ),
+            self._build_formula_summary(rule_results),
             self.RISK_PREFERENCE_EXPLANATIONS.get(
                 risk_preference,
                 self.RISK_PREFERENCE_EXPLANATIONS["balanced"],
@@ -1521,13 +1536,15 @@ class StockCandidateScoringService:
         ]
 
         values.extend(
-            result.reason
-            for result in rule_results
-            if result.score_delta > 0
+            self._build_top_rule_summaries(
+                rule_results=rule_results,
+                positive=True,
+                limit=5,
+            )
         )
 
         if data_item.strategy_signal is not None:
-            values.extend(data_item.strategy_signal.reasons)
+            values.extend(data_item.strategy_signal.reasons[:2])
 
         if not values:
             values = ["当前候选评分未出现明显加分项，建议仅作为观察对象。"]
@@ -1550,10 +1567,16 @@ class StockCandidateScoringService:
             )
         ]
 
+        values.extend(
+            self._build_top_rule_summaries(
+                rule_results=rule_results,
+                positive=False,
+                limit=5,
+            )
+        )
+
         for result in rule_results:
             values.extend(result.warnings)
-            if result.score_delta < 0:
-                values.append(result.reason)
 
         values.extend(data_item.warnings)
         values.extend(data_item.errors)
@@ -1566,10 +1589,76 @@ class StockCandidateScoringService:
         elif risk_preference == "conservative":
             values.append("保守型偏好会降低高波动或弱信号股票优先级，但仍不能完全避免亏损。")
 
-        values.append("候选评分基于历史行情和技术指标，不代表未来一定上涨。")
+        values.append("候选评分基于历史行情、技术指标和规则评分，不代表未来一定上涨。")
         values.append("本结果只作为研究线索，不构成投资建议，也不承诺未来收益。")
 
         return self._limit_text_list(values, limit=self.MAX_RISK_COUNT)
+
+    def _build_formula_summary(
+        self,
+        rule_results: list[StockCandidateScoreRuleResult],
+    ) -> str:
+        active_rule_count = sum(
+            1
+            for result in rule_results
+            if result.score_delta != 0
+        )
+
+        return (
+            f"评分公式：基础分 {self.BASE_SCORE} 分，加上数据质量、趋势、动量、RSI、"
+            f"MACD、波动率、成交量、流动性、策略信号、回测表现、综合风险和用户偏好等维度；"
+            f"本次共有 {active_rule_count} 个维度产生实际加减分。"
+        )
+
+    def _build_top_rule_summaries(
+        self,
+        *,
+        rule_results: list[StockCandidateScoreRuleResult],
+        positive: bool,
+        limit: int,
+    ) -> list[str]:
+        if positive:
+            filtered_results = [
+                result
+                for result in rule_results
+                if result.score_delta > 0
+            ]
+            sorted_results = sorted(
+                filtered_results,
+                key=lambda result: result.score_delta,
+                reverse=True,
+            )
+        else:
+            filtered_results = [
+                result
+                for result in rule_results
+                if result.score_delta < 0
+            ]
+            sorted_results = sorted(
+                filtered_results,
+                key=lambda result: result.score_delta,
+            )
+
+        return [
+            self._format_rule_score_summary(result)
+            for result in sorted_results[:limit]
+        ]
+
+    def _format_rule_score_summary(
+        self,
+        result: StockCandidateScoreRuleResult,
+    ) -> str:
+        dimension_name = self.DIMENSION_DISPLAY_NAMES.get(
+            result.dimension,
+            result.dimension,
+        )
+        score_text = (
+            f"+{result.score_delta}"
+            if result.score_delta > 0
+            else str(result.score_delta)
+        )
+
+        return f"{dimension_name} {score_text} 分：{result.reason}"
 
     def _build_grade_explanation(
         self,

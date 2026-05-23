@@ -1115,7 +1115,7 @@ class StockCandidateScoringService:
             rule_results.append(
                 StockCandidateScoreRuleResult(
                     dimension="strategy_signal",
-                    score=score,
+                    score_delta=score,
                     reason=reason,
                     warnings=warnings,
                 )
@@ -1165,7 +1165,7 @@ class StockCandidateScoringService:
         rule_results.append(
             StockCandidateScoreRuleResult(
                 dimension="strategy_signal",
-                score=score,
+                score_delta=score,
                 reason="；".join(reasons),
                 warnings=warnings,
             )

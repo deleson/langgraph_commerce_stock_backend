@@ -170,6 +170,10 @@ class StockCandidateScoringService:
         volume_score = self._score_volume(data_item, rule_results)
         liquidity_score = self._score_liquidity(data_item, rule_results)
         strategy_signal_score = self._score_strategy_signal(data_item, rule_results)
+        backtest_performance_score = self._score_backtest_performance(
+            data_item,
+            rule_results,
+        )
         risk_score = self._score_risk(data_item, rule_results)
         user_preference_score = self._score_user_preference(
             data_item=data_item,
@@ -188,6 +192,7 @@ class StockCandidateScoringService:
                 + volume_score
                 + liquidity_score
                 + strategy_signal_score
+                + backtest_performance_score
                 + risk_score
                 + user_preference_score
         )
@@ -234,6 +239,7 @@ class StockCandidateScoringService:
                     volume_score=volume_score,
                     liquidity_score=liquidity_score,
                     strategy_signal_score=strategy_signal_score,
+                    backtest_performance_score=backtest_performance_score,
                     risk_score=risk_score,
                     user_preference_score=user_preference_score,
                     raw_score=raw_score,
@@ -1150,6 +1156,30 @@ class StockCandidateScoringService:
                 warnings=warnings,
             )
         )
+        return score
+
+    def _score_backtest_performance(
+            self,
+            data_item: StockCandidateDataItem,
+            rule_results: list[StockCandidateScoreRuleResult],
+    ) -> int:
+        score = 0
+
+        rule_results.append(
+            StockCandidateScoreRuleResult(
+                dimension="backtest_performance",
+                score_delta=score,
+                reason=(
+                    "回测表现评分维度已预留；当前候选评分接口默认不批量执行历史回测，"
+                    "因此本维度暂不加分也不扣分。"
+                ),
+                warnings=[
+                    "历史回测需要明确开始日期、结束日期和回测规则，当前候选评分暂不默认触发。",
+                    "后续可在请求参数中显式开启回测表现评分，再接入 BacktestQueryService。",
+                ],
+            )
+        )
+
         return score
 
     def _score_strategy_strength(

@@ -41,11 +41,23 @@ class StockCandidateScoringService:
     MOMENTUM_BEARISH_CONFLUENCE_SCORE = -3
     MOMENTUM_SHORT_OVERHEAT_RISK_SCORE = -2
 
+    RSI_EXTREME_OVERSOLD_SCORE = 4
     RSI_OVERSOLD_SCORE = 6
+    RSI_NEUTRAL_HEALTHY_SCORE = 2
     RSI_OVERBOUGHT_SCORE = -8
+    RSI_EXTREME_OVERBOUGHT_SCORE = -12
+    RSI_SHORT_REBOUND_CONFIRM_SCORE = 2
+    RSI_SHORT_OVERHEAT_RISK_SCORE = -2
+    RSI_MULTI_OVERBOUGHT_RISK_SCORE = -3
 
-    MACD_BULLISH_SCORE = 10
-    MACD_BEARISH_SCORE = -10
+    MACD_SIGNAL_BULLISH_SCORE = 8
+    MACD_SIGNAL_BEARISH_SCORE = -8
+    MACD_HISTOGRAM_BULLISH_SCORE = 3
+    MACD_HISTOGRAM_BEARISH_SCORE = -3
+    MACD_LINE_BULLISH_SCORE = 3
+    MACD_LINE_BEARISH_SCORE = -3
+    MACD_ZERO_AXIS_BULLISH_SCORE = 2
+    MACD_ZERO_AXIS_BEARISH_SCORE = -2
 
     VOLATILITY_LOW_SCORE = 4
     VOLATILITY_HIGH_RISK_SCORE = -12
@@ -691,64 +703,215 @@ class StockCandidateScoringService:
         return momentum.momentum_5 > 0 and momentum.momentum_20 <= 0
 
     def _score_rsi(
-        self,
-        data_item: StockCandidateDataItem,
-        rule_results: list[StockCandidateScoreRuleResult],
+            self,
+            data_item: StockCandidateDataItem,
+            rule_results: list[StockCandidateScoreRuleResult],
     ) -> int:
         rsi = data_item.technical_indicators.summary.rsi
+        primary_rsi = self._select_candidate_primary_rsi(rsi)
 
-        if rsi.status == "oversold":
-            score = self.RSI_OVERSOLD_SCORE
-            reason = "RSI 处于超卖区域，存在修复观察价值。"
-            warnings = ["超卖不等于一定反弹，需要结合趋势和成交量确认。"]
-        elif rsi.status == "overbought":
-            score = self.RSI_OVERBOUGHT_SCORE
-            reason = "RSI 处于超买区域，短期追高风险上升。"
-            warnings = ["超买状态下应谨慎对待高分候选。"]
+        score = 0
+        reasons: list[str] = []
+        warnings: list[str] = []
+
+        if primary_rsi is None:
+            reasons.append("缺少可用 RSI 数值，RSI 评分保持中性。")
+        elif primary_rsi <= 20:
+            score += self.RSI_EXTREME_OVERSOLD_SCORE
+            reasons.append(f"主要 RSI 为 {primary_rsi:.2f}，处于极端超卖区域，存在修复观察价值。")
+            warnings.append("极端超卖可能来自持续下跌，不应直接等同于买入机会。")
+        elif primary_rsi <= 30:
+            score += self.RSI_OVERSOLD_SCORE
+            reasons.append(f"主要 RSI 为 {primary_rsi:.2f}，处于超卖区域，存在修复观察价值。")
+            warnings.append("超卖不等于一定反弹，需要结合趋势和成交量确认。")
+        elif primary_rsi >= 80:
+            score += self.RSI_EXTREME_OVERBOUGHT_SCORE
+            reasons.append(f"主要 RSI 为 {primary_rsi:.2f}，处于极端超买区域，追高风险较高。")
+            warnings.append("极端超买状态下，短期回撤风险可能上升。")
+        elif primary_rsi >= 70:
+            score += self.RSI_OVERBOUGHT_SCORE
+            reasons.append(f"主要 RSI 为 {primary_rsi:.2f}，处于超买区域，短期追高风险上升。")
+            warnings.append("超买状态下应谨慎对待高分候选。")
+        elif 45 <= primary_rsi <= 60:
+            score += self.RSI_NEUTRAL_HEALTHY_SCORE
+            reasons.append(f"主要 RSI 为 {primary_rsi:.2f}，处于相对健康的中性区间。")
         else:
-            score = 0
-            reason = "RSI 处于中性区域。"
-            warnings = []
+            reasons.append(f"主要 RSI 为 {primary_rsi:.2f}，暂不触发明显加分或扣分。")
+
+        if self._has_rsi_short_rebound_confirmation(rsi):
+            score += self.RSI_SHORT_REBOUND_CONFIRM_SCORE
+            reasons.append("rsi6 高于 rsi12，短期 RSI 有修复迹象。")
+
+        if self._has_rsi_short_overheat_risk(rsi):
+            score += self.RSI_SHORT_OVERHEAT_RISK_SCORE
+            reasons.append("rsi6 已进入超买，但 rsi12 尚未确认，已进行轻微降温处理。")
+            warnings.append("短期 RSI 过热但中期未确认时，需要防范追高风险。")
+
+        if self._has_rsi_multi_period_overbought_risk(rsi):
+            score += self.RSI_MULTI_OVERBOUGHT_RISK_SCORE
+            reasons.append("rsi6 / rsi12 / rsi24 均处于超买区域，多周期超买风险上升。")
+            warnings.append("多周期 RSI 同时超买时，候选评分需要更谨慎。")
 
         rule_results.append(
             StockCandidateScoreRuleResult(
                 dimension="rsi",
                 score_delta=score,
-                reason=reason,
-                warnings=warnings,
+                reason=" ".join(reasons),
+                warnings=self._limit_text_list(warnings, limit=5),
             )
         )
         return score
 
+    def _select_candidate_primary_rsi(
+            self,
+            rsi,
+    ) -> float | None:
+        for value in (rsi.rsi12, rsi.rsi6, rsi.rsi24):
+            if value is not None:
+                return value
+
+        return None
+
+    def _has_rsi_short_rebound_confirmation(
+            self,
+            rsi,
+    ) -> bool:
+        return (
+                rsi.rsi6 is not None
+                and rsi.rsi12 is not None
+                and rsi.rsi6 > rsi.rsi12
+                and rsi.rsi12 <= 60
+        )
+
+    def _has_rsi_short_overheat_risk(
+            self,
+            rsi,
+    ) -> bool:
+        return (
+                rsi.rsi6 is not None
+                and rsi.rsi12 is not None
+                and rsi.rsi6 >= 70
+                and rsi.rsi12 < 70
+        )
+
+    def _has_rsi_multi_period_overbought_risk(
+            self,
+            rsi,
+    ) -> bool:
+        values = [rsi.rsi6, rsi.rsi12, rsi.rsi24]
+        return all(value is not None and value >= 70 for value in values)
+
     def _score_macd(
-        self,
-        data_item: StockCandidateDataItem,
-        rule_results: list[StockCandidateScoreRuleResult],
+            self,
+            data_item: StockCandidateDataItem,
+            rule_results: list[StockCandidateScoreRuleResult],
     ) -> int:
         macd = data_item.technical_indicators.summary.macd
 
+        score = 0
+        reasons: list[str] = []
+        warnings: list[str] = []
+
         if macd.signal == "bullish":
-            score = self.MACD_BULLISH_SCORE
-            reason = "MACD 为多头信号，趋势动能对候选评分形成支持。"
-            warnings: list[str] = []
+            score += self.MACD_SIGNAL_BULLISH_SCORE
+            reasons.append("MACD 信号偏多，趋势动能对候选评分形成基础支持。")
         elif macd.signal == "bearish":
-            score = self.MACD_BEARISH_SCORE
-            reason = "MACD 为空头信号，趋势动能偏弱。"
-            warnings = ["MACD 偏弱时需要谨慎进入候选优先列表。"]
+            score += self.MACD_SIGNAL_BEARISH_SCORE
+            reasons.append("MACD 信号偏空，趋势动能偏弱。")
+            warnings.append("MACD 偏弱时需要谨慎进入候选优先列表。")
         else:
-            score = 0
-            reason = "MACD 当前中性。"
-            warnings = []
+            reasons.append("MACD 信号中性，方向本身暂不对候选评分做明显调整。")
+
+        if self._has_macd_bullish_histogram(macd):
+            score += self.MACD_HISTOGRAM_BULLISH_SCORE
+            reasons.append("MACD histogram 大于 0，柱体对多头动能形成确认。")
+        elif self._has_macd_bearish_histogram(macd):
+            score += self.MACD_HISTOGRAM_BEARISH_SCORE
+            reasons.append("MACD histogram 小于 0，柱体显示空头动能。")
+            warnings.append("MACD 柱体偏弱时，趋势修复可能还不充分。")
+
+        if self._has_macd_bullish_line_confirmation(macd):
+            score += self.MACD_LINE_BULLISH_SCORE
+            reasons.append("MACD DIF 高于 DEA，快线对慢线形成多头确认。")
+        elif self._has_macd_bearish_line_confirmation(macd):
+            score += self.MACD_LINE_BEARISH_SCORE
+            reasons.append("MACD DIF 低于 DEA，快线对慢线形成空头确认。")
+            warnings.append("DIF 低于 DEA 时，动能结构偏弱。")
+
+        if self._has_macd_bullish_zero_axis_confirmation(macd):
+            score += self.MACD_ZERO_AXIS_BULLISH_SCORE
+            reasons.append("MACD DIF 和 DEA 均位于 0 轴上方，多头趋势质量更好。")
+        elif self._has_macd_bearish_zero_axis_confirmation(macd):
+            score += self.MACD_ZERO_AXIS_BEARISH_SCORE
+            reasons.append("MACD DIF 和 DEA 均位于 0 轴下方，弱势特征更明显。")
+            warnings.append("MACD 位于 0 轴下方时，即使短期反弹也需要谨慎确认。")
+
+        if score == 0 and not warnings:
+            reasons.append("MACD 数据没有给出明确多空优势，MACD 评分保持中性。")
 
         rule_results.append(
             StockCandidateScoreRuleResult(
                 dimension="macd",
                 score_delta=score,
-                reason=reason,
-                warnings=warnings,
+                reason=" ".join(reasons),
+                warnings=self._limit_text_list(warnings, limit=5),
             )
         )
         return score
+
+    def _has_macd_bullish_histogram(
+            self,
+            macd,
+    ) -> bool:
+        return macd.histogram is not None and macd.histogram > 0
+
+    def _has_macd_bearish_histogram(
+            self,
+            macd,
+    ) -> bool:
+        return macd.histogram is not None and macd.histogram < 0
+
+    def _has_macd_bullish_line_confirmation(
+            self,
+            macd,
+    ) -> bool:
+        return (
+                macd.dif is not None
+                and macd.dea is not None
+                and macd.dif > macd.dea
+        )
+
+    def _has_macd_bearish_line_confirmation(
+            self,
+            macd,
+    ) -> bool:
+        return (
+                macd.dif is not None
+                and macd.dea is not None
+                and macd.dif < macd.dea
+        )
+
+    def _has_macd_bullish_zero_axis_confirmation(
+            self,
+            macd,
+    ) -> bool:
+        return (
+                macd.dif is not None
+                and macd.dea is not None
+                and macd.dif > 0
+                and macd.dea > 0
+        )
+
+    def _has_macd_bearish_zero_axis_confirmation(
+            self,
+            macd,
+    ) -> bool:
+        return (
+                macd.dif is not None
+                and macd.dea is not None
+                and macd.dif < 0
+                and macd.dea < 0
+        )
 
     def _score_volatility(
         self,

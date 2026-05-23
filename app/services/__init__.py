@@ -44,6 +44,7 @@ from app.services.stock_candidate_data_service import (
     StockCandidateUniverseItem,
 )
 from app.services.stock_candidate_scoring_service import StockCandidateScoringService
+from app.services.stock_candidate_query_service import StockCandidateQueryService
 # from app.services.stock_analysis_service import StockAnalysisService
 
 
@@ -89,5 +90,6 @@ __all__ = [
     "StockCandidateDataItem",
     "StockCandidateDataService",
     "StockCandidateScoringService",
+    "StockCandidateQueryService",
     # "StockAnalysisService",
 ]

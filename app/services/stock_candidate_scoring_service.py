@@ -94,10 +94,21 @@ class StockCandidateScoringService:
     STRONG_VOLUME_SHRINKING_RATIO = 0.5
     EXTREME_LOW_VOLUME_RATIO = 0.2
 
-    STRATEGY_BUY_SCORE = 15
-    STRATEGY_HOLD_SCORE = 3
-    STRATEGY_OBSERVE_SCORE = 0
-    STRATEGY_SELL_SCORE = -18
+    STRATEGY_BUY_BASE_SCORE = 10
+    STRATEGY_HOLD_BASE_SCORE = 2
+    STRATEGY_OBSERVE_BASE_SCORE = 0
+    STRATEGY_SELL_BASE_SCORE = -12
+
+    STRATEGY_STRONG_BUY_CONFIRM_SCORE = 4
+    STRATEGY_MEDIUM_BUY_CONFIRM_SCORE = 2
+
+    STRATEGY_HIGH_SCORE_CONFIRM_SCORE = 3
+    STRATEGY_LOW_SCORE_RISK_SCORE = -3
+
+    STRATEGY_HIGH_SCORE_THRESHOLD = 75
+    STRATEGY_LOW_SCORE_THRESHOLD = 35
+    STRATEGY_NEUTRAL_LOW_THRESHOLD = 45
+    STRATEGY_NEUTRAL_HIGH_THRESHOLD = 55
 
     MAX_REASON_COUNT = 10
     MAX_RISK_COUNT = 10
@@ -1070,9 +1081,9 @@ class StockCandidateScoringService:
         return score
 
     def _score_strategy_signal(
-        self,
-        data_item: StockCandidateDataItem,
-        rule_results: list[StockCandidateScoreRuleResult],
+            self,
+            data_item: StockCandidateDataItem,
+            rule_results: list[StockCandidateScoreRuleResult],
     ) -> int:
         strategy_signal = data_item.strategy_signal
 
@@ -1080,36 +1091,142 @@ class StockCandidateScoringService:
             score = 0
             reason = "当前缺少可用策略信号，暂不根据策略信号调整候选评分。"
             warnings = ["缺少策略信号时，候选评分主要依赖技术指标。"]
-        elif strategy_signal.signal == "buy":
-            score = self.STRATEGY_BUY_SCORE
-            reason = "策略信号为 buy，对候选评分形成明显加分。"
-            warnings = strategy_signal.risks
+
+            rule_results.append(
+                StockCandidateScoreRuleResult(
+                    dimension="strategy_signal",
+                    score=score,
+                    reason=reason,
+                    warnings=warnings,
+                )
+            )
+            return score
+
+        score = 0
+        reasons: list[str] = []
+        warnings: list[str] = []
+
+        if strategy_signal.signal == "buy":
+            score += self.STRATEGY_BUY_BASE_SCORE
+            reasons.append("策略信号为 buy，说明多项技术规则合成后偏向买入观察。")
         elif strategy_signal.signal == "hold":
-            score = self.STRATEGY_HOLD_SCORE
-            reason = "策略信号为 hold，对候选评分小幅加分。"
-            warnings = strategy_signal.risks
+            score += self.STRATEGY_HOLD_BASE_SCORE
+            reasons.append("策略信号为 hold，说明当前更适合持有或继续观察。")
         elif strategy_signal.signal == "observe":
-            score = self.STRATEGY_OBSERVE_SCORE
-            reason = "策略信号为 observe，当前更适合作为观察对象。"
-            warnings = strategy_signal.risks
+            score += self.STRATEGY_OBSERVE_BASE_SCORE
+            reasons.append("策略信号为 observe，说明当前方向不够明确，暂不明显加分。")
+            warnings.append("策略信号处于观察状态，候选结论需要结合其他指标确认。")
         elif strategy_signal.signal == "sell":
-            score = self.STRATEGY_SELL_SCORE
-            reason = "策略信号为 sell，候选评分需要明显扣分。"
-            warnings = strategy_signal.risks or ["策略信号偏弱。"]
+            score += self.STRATEGY_SELL_BASE_SCORE
+            reasons.append("策略信号为 sell，说明规则系统对当前股票偏谨慎。")
+            warnings.append("策略信号偏弱，候选评分需要扣分。")
         else:
-            score = 0
-            reason = "策略信号暂未给出明确方向。"
-            warnings = []
+            reasons.append("策略信号暂未给出明确方向。")
+
+        strength_score, strength_reasons, strength_warnings = self._score_strategy_strength(
+            signal=strategy_signal.signal,
+            strength=strategy_signal.strength,
+        )
+        score += strength_score
+        reasons.extend(strength_reasons)
+        warnings.extend(strength_warnings)
+
+        numeric_score, numeric_reasons, numeric_warnings = self._score_strategy_numeric_score(
+            signal=strategy_signal.signal,
+            strategy_score=strategy_signal.score,
+        )
+        score += numeric_score
+        reasons.extend(numeric_reasons)
+        warnings.extend(numeric_warnings)
+
+        if strategy_signal.risks:
+            warnings.extend(strategy_signal.risks[:3])
 
         rule_results.append(
             StockCandidateScoreRuleResult(
                 dimension="strategy_signal",
-                score_delta=score,
-                reason=reason,
-                warnings=self._limit_text_list(warnings, limit=5),
+                score=score,
+                reason="；".join(reasons),
+                warnings=warnings,
             )
         )
         return score
+
+    def _score_strategy_strength(
+            self,
+            *,
+            signal: str | None,
+            strength: str | None,
+    ) -> tuple[int, list[str], list[str]]:
+        if strength == "strong" and signal == "buy":
+            return (
+                self.STRATEGY_STRONG_BUY_CONFIRM_SCORE,
+                ["策略信号强度为 strong，buy 信号确认度较高。"],
+                [],
+            )
+
+        if strength == "medium" and signal == "buy":
+            return (
+                self.STRATEGY_MEDIUM_BUY_CONFIRM_SCORE,
+                ["策略信号强度为 medium，buy 信号有一定确认度。"],
+                [],
+            )
+
+        if strength == "weak" and signal == "buy":
+            return (
+                0,
+                ["策略信号强度为 weak，buy 信号暂不额外加分。"],
+                ["buy 信号强度较弱，需要结合趋势、动量和风险评分确认。"],
+            )
+
+        if signal == "sell" and strength in {"medium", "strong"}:
+            return (
+                0,
+                ["sell 信号强度较高，额外风险交由 risk_score 统一处理。"],
+                ["策略信号偏空强度较高，综合风险评分会进一步反映该风险。"],
+            )
+
+        return (0, [], [])
+
+    def _score_strategy_numeric_score(
+            self,
+            *,
+            signal: str | None,
+            strategy_score: int | None,
+    ) -> tuple[int, list[str], list[str]]:
+        if strategy_score is None:
+            return (
+                0,
+                [],
+                ["策略信号缺少原始分数，无法进行分数确认。"],
+            )
+
+        if signal == "buy" and strategy_score >= self.STRATEGY_HIGH_SCORE_THRESHOLD:
+            return (
+                self.STRATEGY_HIGH_SCORE_CONFIRM_SCORE,
+                [f"策略信号原始分为 {strategy_score}，高于强确认阈值。"],
+                [],
+            )
+
+        if signal == "sell" and strategy_score <= self.STRATEGY_LOW_SCORE_THRESHOLD:
+            return (
+                self.STRATEGY_LOW_SCORE_RISK_SCORE,
+                [f"策略信号原始分为 {strategy_score}，低于偏弱阈值。"],
+                ["策略信号原始分偏低，候选评分需要谨慎。"],
+            )
+
+        if (
+                self.STRATEGY_NEUTRAL_LOW_THRESHOLD
+                <= strategy_score
+                <= self.STRATEGY_NEUTRAL_HIGH_THRESHOLD
+        ):
+            return (
+                0,
+                [f"策略信号原始分为 {strategy_score}，接近中性区间。"],
+                ["策略信号分数接近中性，方向确认度有限。"],
+            )
+
+        return (0, [], [])
 
     def _score_risk(
             self,

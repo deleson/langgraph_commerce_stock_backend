@@ -50,6 +50,7 @@ class StockCandidateScoringService:
         self,
         data_item: StockCandidateDataItem,
         *,
+        risk_preference: str = "balanced",
         include_score_breakdown: bool = True,
         include_strategy_signal: bool = True,
         include_data_quality: bool = True,
@@ -71,6 +72,11 @@ class StockCandidateScoringService:
         volatility_score = self._score_volatility(data_item, rule_results)
         volume_score = self._score_volume(data_item, rule_results)
         strategy_signal_score = self._score_strategy_signal(data_item, rule_results)
+        user_preference_score = self._score_user_preference(
+            data_item=data_item,
+            risk_preference=risk_preference,
+            rule_results=rule_results,
+        )
 
         final_score = self._clamp_score(
             self.BASE_SCORE
@@ -82,6 +88,7 @@ class StockCandidateScoringService:
             + volatility_score
             + volume_score
             + strategy_signal_score
+            + user_preference_score
         )
 
         reasons = self._build_reasons(data_item, rule_results)
@@ -109,7 +116,7 @@ class StockCandidateScoringService:
                     volatility_score=volatility_score,
                     volume_score=volume_score,
                     strategy_signal_score=strategy_signal_score,
-                    user_preference_score=0,
+                    user_preference_score=user_preference_score,
                     final_score=final_score,
                     rule_results=rule_results,
                 )
@@ -132,6 +139,7 @@ class StockCandidateScoringService:
         self,
         data_items: list[StockCandidateDataItem],
         *,
+        risk_preference: str = "balanced",
         include_score_breakdown: bool = True,
         include_strategy_signal: bool = True,
         include_data_quality: bool = True,
@@ -139,6 +147,7 @@ class StockCandidateScoringService:
         return [
             self.score_candidate(
                 data_item,
+                risk_preference=risk_preference,
                 include_score_breakdown=include_score_breakdown,
                 include_strategy_signal=include_strategy_signal,
                 include_data_quality=include_data_quality,
@@ -472,6 +481,147 @@ class StockCandidateScoringService:
             )
         )
         return score
+
+    def _score_user_preference(
+        self,
+        *,
+        data_item: StockCandidateDataItem,
+        risk_preference: str,
+        rule_results: list[StockCandidateScoreRuleResult],
+    ) -> int:
+        normalized_preference = self._normalize_risk_preference(risk_preference)
+
+        if normalized_preference == "conservative":
+            score, reason, warnings = self._score_conservative_preference(data_item)
+        elif normalized_preference == "aggressive":
+            score, reason, warnings = self._score_aggressive_preference(data_item)
+        else:
+            score = 0
+            reason = "用户风险偏好为 balanced，候选评分按默认风险权重处理。"
+            warnings = []
+
+        rule_results.append(
+            StockCandidateScoreRuleResult(
+                dimension="user_preference",
+                score_delta=score,
+                reason=reason,
+                warnings=self._limit_text_list(warnings, limit=5),
+            )
+        )
+        return score
+
+    def _score_conservative_preference(
+        self,
+        data_item: StockCandidateDataItem,
+    ) -> tuple[int, str, list[str]]:
+        volatility_level = self._get_volatility_level(data_item)
+        signal = self._get_strategy_signal_action(data_item)
+
+        score = 0
+        reasons: list[str] = []
+        warnings: list[str] = []
+
+        if volatility_level == "high":
+            score -= 10
+            reasons.append("保守型用户对高波动股票额外降权。")
+            warnings.append("该股票波动率较高，可能不适合保守型风险偏好。")
+
+        if signal == "sell":
+            score -= 6
+            reasons.append("保守型用户对 sell 策略信号额外谨慎。")
+            warnings.append("策略信号偏弱，保守型用户应降低研究优先级。")
+
+        if signal == "buy" and volatility_level != "high":
+            score += 2
+            reasons.append("策略信号较积极，且波动率未处于高风险状态，适合保守型用户作为观察候选。")
+
+        if not reasons:
+            reasons.append("保守型用户偏好下，本股票未触发额外风险调整。")
+
+        return score, " ".join(reasons), warnings
+
+    def _score_aggressive_preference(
+        self,
+        data_item: StockCandidateDataItem,
+    ) -> tuple[int, str, list[str]]:
+        volatility_level = self._get_volatility_level(data_item)
+        trend = self._get_trend_direction(data_item)
+        momentum = self._get_momentum_direction(data_item)
+        signal = self._get_strategy_signal_action(data_item)
+
+        score = 0
+        reasons: list[str] = []
+        warnings: list[str] = []
+
+        if signal == "buy":
+            score += 5
+            reasons.append("激进型用户对 buy 策略信号给予额外加权。")
+
+        if trend == "bullish" and momentum == "bullish":
+            score += 4
+            reasons.append("趋势和动量同时偏多，符合激进型用户更关注进攻性的偏好。")
+
+        if volatility_level == "high":
+            score -= 3
+            reasons.append("虽然用户偏好激进，但高波动仍需要轻微扣分。")
+            warnings.append("高波动股票可能带来更大回撤。")
+
+        if signal == "sell":
+            score -= 4
+            reasons.append("即使是激进型用户，sell 策略信号也需要降低研究优先级。")
+            warnings.append("策略信号偏弱时，不应只因为激进偏好而提高候选等级。")
+
+        if not reasons:
+            reasons.append("激进型用户偏好下，本股票未触发额外加分或扣分。")
+
+        return score, " ".join(reasons), warnings
+
+    def _normalize_risk_preference(
+        self,
+        risk_preference: str,
+    ) -> str:
+        value = str(risk_preference or "balanced").strip().lower()
+
+        if value in {"conservative", "balanced", "aggressive"}:
+            return value
+
+        return "balanced"
+
+    def _get_volatility_level(
+        self,
+        data_item: StockCandidateDataItem,
+    ) -> str | None:
+        if data_item.technical_indicators is None:
+            return None
+
+        return data_item.technical_indicators.summary.volatility.level
+
+    def _get_trend_direction(
+        self,
+        data_item: StockCandidateDataItem,
+    ) -> str | None:
+        if data_item.technical_indicators is None:
+            return None
+
+        return data_item.technical_indicators.summary.moving_average.trend
+
+    def _get_momentum_direction(
+        self,
+        data_item: StockCandidateDataItem,
+    ) -> str | None:
+        if data_item.technical_indicators is None:
+            return None
+
+        return data_item.technical_indicators.summary.momentum.direction
+
+    def _get_strategy_signal_action(
+        self,
+        data_item: StockCandidateDataItem,
+    ) -> str | None:
+        if data_item.strategy_signal is None:
+            return None
+
+        return data_item.strategy_signal.signal
 
     def _build_reasons(
         self,

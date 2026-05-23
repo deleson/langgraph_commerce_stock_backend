@@ -46,6 +46,23 @@ class StockCandidateScoringService:
     MAX_REASON_COUNT = 10
     MAX_RISK_COUNT = 10
 
+    MIN_CANDIDATE_SCORE = 50
+
+    GRADE_PRIORITY = {
+        "A": 4,
+        "B": 3,
+        "C": 2,
+        "D": 1,
+    }
+
+    SIGNAL_PRIORITY = {
+        "buy": 4,
+        "hold": 3,
+        "observe": 2,
+        "sell": 1,
+        None: 0,
+    }
+
     def score_candidate(
         self,
         data_item: StockCandidateDataItem,
@@ -134,6 +151,125 @@ class StockCandidateScoringService:
                 else None
             ),
         )
+
+    def rank_and_filter_candidates(
+        self,
+        candidates: list[StockCandidateItem],
+        *,
+        top_n: int,
+    ) -> tuple[list[StockCandidateItem], list[StockCandidateItem]]:
+        eligible_candidates: list[StockCandidateItem] = []
+        excluded_candidates: list[StockCandidateItem] = []
+
+        for candidate in candidates:
+            if candidate.decision == "excluded":
+                excluded_candidates.append(
+                    candidate.model_copy(
+                        update={
+                            "rank": None,
+                        }
+                    )
+                )
+                continue
+
+            if candidate.score < self.MIN_CANDIDATE_SCORE:
+                excluded_candidates.append(
+                    self._exclude_low_score_candidate(candidate)
+                )
+                continue
+
+            eligible_candidates.append(candidate)
+
+        sorted_candidates = sorted(
+            eligible_candidates,
+            key=self._build_candidate_sort_key,
+            reverse=True,
+        )
+
+        ranked_candidates = [
+            candidate.model_copy(
+                update={
+                    "rank": index + 1,
+                }
+            )
+            for index, candidate in enumerate(sorted_candidates[:top_n])
+        ]
+
+        overflow_candidates = [
+            self._exclude_overflow_candidate(candidate)
+            for candidate in sorted_candidates[top_n:]
+        ]
+
+        return ranked_candidates, [*excluded_candidates, *overflow_candidates]
+
+    def _exclude_low_score_candidate(
+        self,
+        candidate: StockCandidateItem,
+    ) -> StockCandidateItem:
+        excluded_reason = (
+            f"候选评分 {candidate.score} 低于最低候选分数 "
+            f"{self.MIN_CANDIDATE_SCORE}，暂不进入候选优先列表。"
+        )
+
+        risks = self._limit_text_list(
+            [
+                excluded_reason,
+                *candidate.risks,
+            ],
+            limit=self.MAX_RISK_COUNT,
+        )
+
+        return candidate.model_copy(
+            update={
+                "decision": "excluded",
+                "excluded_reason": excluded_reason,
+                "rank": None,
+                "risks": risks,
+            }
+        )
+
+    def _exclude_overflow_candidate(
+        self,
+        candidate: StockCandidateItem,
+    ) -> StockCandidateItem:
+        excluded_reason = "候选评分可用，但未进入本次 top_n 候选列表。"
+
+        risks = self._limit_text_list(
+            [
+                excluded_reason,
+                *candidate.risks,
+            ],
+            limit=self.MAX_RISK_COUNT,
+        )
+
+        return candidate.model_copy(
+            update={
+                "decision": "excluded",
+                "excluded_reason": excluded_reason,
+                "rank": None,
+                "risks": risks,
+            }
+        )
+
+    def _build_candidate_sort_key(
+        self,
+        candidate: StockCandidateItem,
+    ) -> tuple[int, int, int, str]:
+        return (
+            candidate.score,
+            self.GRADE_PRIORITY.get(candidate.grade, 0),
+            self._get_candidate_signal_priority(candidate),
+            candidate.symbol,
+        )
+
+    def _get_candidate_signal_priority(
+        self,
+        candidate: StockCandidateItem,
+    ) -> int:
+        if candidate.strategy_signal is None:
+            return 0
+
+        return self.SIGNAL_PRIORITY.get(candidate.strategy_signal.signal, 0)
 
     def score_candidates(
         self,

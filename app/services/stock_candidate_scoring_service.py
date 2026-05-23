@@ -29,8 +29,17 @@ class StockCandidateScoringService:
     TREND_EMA_CONFIRM_BULLISH_SCORE = 2
     TREND_EMA_CONFIRM_BEARISH_SCORE = -2
 
-    MOMENTUM_BULLISH_SCORE = 8
-    MOMENTUM_BEARISH_SCORE = -8
+    MOMENTUM_DIRECTION_BULLISH_SCORE = 4
+    MOMENTUM_DIRECTION_BEARISH_SCORE = -4
+    MOMENTUM_SHORT_BULLISH_SCORE = 2
+    MOMENTUM_SHORT_BEARISH_SCORE = -2
+    MOMENTUM_MEDIUM_BULLISH_SCORE = 3
+    MOMENTUM_MEDIUM_BEARISH_SCORE = -3
+    MOMENTUM_LONG_BULLISH_SCORE = 5
+    MOMENTUM_LONG_BEARISH_SCORE = -5
+    MOMENTUM_BULLISH_CONFLUENCE_SCORE = 3
+    MOMENTUM_BEARISH_CONFLUENCE_SCORE = -3
+    MOMENTUM_SHORT_OVERHEAT_RISK_SCORE = -2
 
     RSI_OVERSOLD_SCORE = 6
     RSI_OVERBOUGHT_SCORE = -8
@@ -551,34 +560,135 @@ class StockCandidateScoringService:
         )
 
     def _score_momentum(
-        self,
-        data_item: StockCandidateDataItem,
-        rule_results: list[StockCandidateScoreRuleResult],
+            self,
+            data_item: StockCandidateDataItem,
+            rule_results: list[StockCandidateScoreRuleResult],
     ) -> int:
         momentum = data_item.technical_indicators.summary.momentum
 
+        score = 0
+        reasons: list[str] = []
+        warnings: list[str] = []
+
         if momentum.direction == "bullish":
-            score = self.MOMENTUM_BULLISH_SCORE
-            reason = "动量方向偏多，近期价格变化对候选评分形成支持。"
-            warnings: list[str] = []
+            score += self.MOMENTUM_DIRECTION_BULLISH_SCORE
+            reasons.append("动量方向偏多，近期价格变化对候选评分形成基础支持。")
         elif momentum.direction == "bearish":
-            score = self.MOMENTUM_BEARISH_SCORE
-            reason = "动量方向偏空，近期价格变化显示下行压力。"
-            warnings = ["动量偏弱时需要谨慎确认是否仍处于下跌趋势。"]
+            score += self.MOMENTUM_DIRECTION_BEARISH_SCORE
+            reasons.append("动量方向偏空，近期价格变化显示下行压力。")
+            warnings.append("动量偏弱时需要谨慎确认是否仍处于下跌趋势。")
         else:
-            score = 0
-            reason = "动量方向中性，暂不对候选评分做明显调整。"
-            warnings = []
+            reasons.append("动量方向中性，方向本身暂不对候选评分做明显调整。")
+
+        score += self._score_one_momentum_value(
+            value=momentum.momentum_5,
+            bullish_score=self.MOMENTUM_SHORT_BULLISH_SCORE,
+            bearish_score=self.MOMENTUM_SHORT_BEARISH_SCORE,
+            bullish_reason="5 日动量为正，短期价格变化偏强。",
+            bearish_reason="5 日动量为负，短期价格变化偏弱。",
+            reasons=reasons,
+            warnings=warnings,
+        )
+        score += self._score_one_momentum_value(
+            value=momentum.momentum_10,
+            bullish_score=self.MOMENTUM_MEDIUM_BULLISH_SCORE,
+            bearish_score=self.MOMENTUM_MEDIUM_BEARISH_SCORE,
+            bullish_reason="10 日动量为正，中短期价格变化偏强。",
+            bearish_reason="10 日动量为负，中短期价格变化偏弱。",
+            reasons=reasons,
+            warnings=warnings,
+        )
+        score += self._score_one_momentum_value(
+            value=momentum.momentum_20,
+            bullish_score=self.MOMENTUM_LONG_BULLISH_SCORE,
+            bearish_score=self.MOMENTUM_LONG_BEARISH_SCORE,
+            bullish_reason="20 日动量为正，中期价格变化偏强。",
+            bearish_reason="20 日动量为负，中期价格变化偏弱。",
+            reasons=reasons,
+            warnings=warnings,
+        )
+
+        if self._is_all_positive_momentum(momentum):
+            score += self.MOMENTUM_BULLISH_CONFLUENCE_SCORE
+            reasons.append("5 日、10 日、20 日动量均为正，形成多周期上行动量共振。")
+        elif self._is_all_negative_momentum(momentum):
+            score += self.MOMENTUM_BEARISH_CONFLUENCE_SCORE
+            reasons.append("5 日、10 日、20 日动量均为负，形成多周期下行动量共振。")
+            warnings.append("多周期动量同步偏弱时，候选优先级需要降低。")
+
+        if self._has_short_momentum_overheat_risk(momentum):
+            score += self.MOMENTUM_SHORT_OVERHEAT_RISK_SCORE
+            reasons.append("短期动量明显强于中期动量，已进行轻微降温处理。")
+            warnings.append("短期快速拉升但中期动量未确认时，需要防范追高风险。")
+
+        if score == 0 and not warnings:
+            reasons.append("动量数据没有给出明确多空优势，动量评分保持中性。")
 
         rule_results.append(
             StockCandidateScoreRuleResult(
                 dimension="momentum",
                 score_delta=score,
-                reason=reason,
-                warnings=warnings,
+                reason=" ".join(reasons),
+                warnings=self._limit_text_list(warnings, limit=5),
             )
         )
         return score
+
+    def _score_one_momentum_value(
+            self,
+            *,
+            value: float | None,
+            bullish_score: int,
+            bearish_score: int,
+            bullish_reason: str,
+            bearish_reason: str,
+            reasons: list[str],
+            warnings: list[str],
+    ) -> int:
+        if value is None:
+            return 0
+
+        if value > 0:
+            reasons.append(bullish_reason)
+            return bullish_score
+
+        if value < 0:
+            reasons.append(bearish_reason)
+            warnings.append(bearish_reason)
+            return bearish_score
+
+        return 0
+
+    def _is_all_positive_momentum(
+            self,
+            momentum,
+    ) -> bool:
+        values = [
+            momentum.momentum_5,
+            momentum.momentum_10,
+            momentum.momentum_20,
+        ]
+        return all(value is not None and value > 0 for value in values)
+
+    def _is_all_negative_momentum(
+            self,
+            momentum,
+    ) -> bool:
+        values = [
+            momentum.momentum_5,
+            momentum.momentum_10,
+            momentum.momentum_20,
+        ]
+        return all(value is not None and value < 0 for value in values)
+
+    def _has_short_momentum_overheat_risk(
+            self,
+            momentum,
+    ) -> bool:
+        if momentum.momentum_5 is None or momentum.momentum_20 is None:
+            return False
+
+        return momentum.momentum_5 > 0 and momentum.momentum_20 <= 0
 
     def _score_rsi(
         self,

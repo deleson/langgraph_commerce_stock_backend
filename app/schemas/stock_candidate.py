@@ -52,6 +52,9 @@ StockCandidateScoreDimension = Literal[
     "volume",
     "strategy_signal",
     "user_preference",
+    "risk",
+    "liquidity",
+    "backtest_performance",
 ]
 
 
@@ -125,6 +128,12 @@ class StockCandidateScoreRuleResult(BaseModel):
 
 
 class StockCandidateScoreBreakdown(BaseModel):
+    formula_version: str = Field(
+        default="candidate_scoring_v1",
+        min_length=1,
+        max_length=50,
+    )
+
     base_score: int = Field(default=50, ge=0, le=100)
 
     data_quality_score: int = Field(default=0, ge=-100, le=100)
@@ -137,9 +146,13 @@ class StockCandidateScoreBreakdown(BaseModel):
     strategy_signal_score: int = Field(default=0, ge=-100, le=100)
     user_preference_score: int = Field(default=0, ge=-100, le=100)
 
+    risk_score: int = Field(default=0, ge=-100, le=100)
+    liquidity_score: int = Field(default=0, ge=-100, le=100)
+    backtest_performance_score: int = Field(default=0, ge=-100, le=100)
+
+    raw_score: int | None = Field(default=None, ge=-100, le=200)
     final_score: int = Field(ge=0, le=100)
     rule_results: list[StockCandidateScoreRuleResult] = Field(default_factory=list)
-
 
 class StockCandidateDataQualitySnapshot(BaseModel):
     status: StockCandidateStatus = "available"

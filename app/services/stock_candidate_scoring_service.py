@@ -63,6 +63,19 @@ class StockCandidateScoringService:
         None: 0,
     }
 
+    GRADE_EXPLANATIONS = {
+        "A": "等级 A：综合条件较强，适合作为本次优先研究候选。",
+        "B": "等级 B：综合条件较好，但仍需要结合风险项继续观察。",
+        "C": "等级 C：具备一定观察价值，但候选强度偏弱。",
+        "D": "等级 D：当前不适合进入候选优先列表。",
+    }
+
+    RISK_PREFERENCE_EXPLANATIONS = {
+        "conservative": "当前解释已按保守型风险偏好处理，更重视波动率、风险控制和弱信号过滤。",
+        "balanced": "当前解释已按均衡型风险偏好处理，综合考虑收益机会与风险暴露。",
+        "aggressive": "当前解释已按激进型风险偏好处理，会更关注趋势、动量和进攻性信号，但不会忽略风险。",
+    }
+
     def score_candidate(
         self,
         data_item: StockCandidateDataItem,
@@ -108,8 +121,23 @@ class StockCandidateScoringService:
             + user_preference_score
         )
 
-        reasons = self._build_reasons(data_item, rule_results)
-        risks = self._build_risks(data_item, rule_results)
+        grade = self._grade_from_score(final_score)
+        normalized_risk_preference = self._normalize_risk_preference(risk_preference)
+
+        reasons = self._build_reasons(
+            data_item=data_item,
+            rule_results=rule_results,
+            final_score=final_score,
+            grade=grade,
+            risk_preference=normalized_risk_preference,
+        )
+        risks = self._build_risks(
+            data_item=data_item,
+            rule_results=rule_results,
+            final_score=final_score,
+            grade=grade,
+            risk_preference=normalized_risk_preference,
+        )
 
         return StockCandidateItem(
             symbol=data_item.symbol,
@@ -119,7 +147,7 @@ class StockCandidateScoringService:
             excluded_reason=None,
             rank=None,
             score=final_score,
-            grade=self._grade_from_score(final_score),
+            grade=grade,
             reasons=reasons,
             risks=risks,
             score_breakdown=(
@@ -761,14 +789,29 @@ class StockCandidateScoringService:
 
     def _build_reasons(
         self,
+        *,
         data_item: StockCandidateDataItem,
         rule_results: list[StockCandidateScoreRuleResult],
+        final_score: int,
+        grade: str,
+        risk_preference: str,
     ) -> list[str]:
         values = [
+            self._build_grade_explanation(
+                final_score=final_score,
+                grade=grade,
+            ),
+            self.RISK_PREFERENCE_EXPLANATIONS.get(
+                risk_preference,
+                self.RISK_PREFERENCE_EXPLANATIONS["balanced"],
+            ),
+        ]
+
+        values.extend(
             result.reason
             for result in rule_results
             if result.score_delta > 0
-        ]
+        )
 
         if data_item.strategy_signal is not None:
             values.extend(data_item.strategy_signal.reasons)
@@ -780,10 +823,19 @@ class StockCandidateScoringService:
 
     def _build_risks(
         self,
+        *,
         data_item: StockCandidateDataItem,
         rule_results: list[StockCandidateScoreRuleResult],
+        final_score: int,
+        grade: str,
+        risk_preference: str,
     ) -> list[str]:
-        values: list[str] = []
+        values: list[str] = [
+            self._build_score_risk_boundary(
+                final_score=final_score,
+                grade=grade,
+            )
+        ]
 
         for result in rule_results:
             values.extend(result.warnings)
@@ -796,9 +848,44 @@ class StockCandidateScoringService:
         if data_item.strategy_signal is not None:
             values.extend(data_item.strategy_signal.risks)
 
+        if risk_preference == "aggressive":
+            values.append("激进型偏好可能提高进攻性候选的优先级，但不代表风险降低。")
+        elif risk_preference == "conservative":
+            values.append("保守型偏好会降低高波动或弱信号股票优先级，但仍不能完全避免亏损。")
+
         values.append("候选评分基于历史行情和技术指标，不代表未来一定上涨。")
+        values.append("本结果只作为研究线索，不构成投资建议，也不承诺未来收益。")
 
         return self._limit_text_list(values, limit=self.MAX_RISK_COUNT)
+
+    def _build_grade_explanation(
+        self,
+        *,
+        final_score: int,
+        grade: str,
+    ) -> str:
+        grade_text = self.GRADE_EXPLANATIONS.get(
+            grade,
+            "当前等级无法识别，建议谨慎参考。",
+        )
+        return f"综合评分 {final_score} 分，{grade_text}"
+
+    def _build_score_risk_boundary(
+        self,
+        *,
+        final_score: int,
+        grade: str,
+    ) -> str:
+        if grade == "A":
+            return "即使候选等级为 A，也只是历史数据和规则评分较强，不代表未来一定上涨。"
+
+        if grade == "B":
+            return "等级 B 仍需要结合行情环境、仓位管理和风险承受能力继续确认。"
+
+        if grade == "C":
+            return "等级 C 的候选强度有限，更适合观察，不适合直接当作买入依据。"
+
+        return f"当前综合评分为 {final_score} 分，候选强度偏弱，需要谨慎看待。"
 
     def _build_data_quality_snapshot(
         self,

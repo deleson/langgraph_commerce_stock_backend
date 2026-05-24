@@ -6,6 +6,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import ValidationError
 
 from app.core.llm import get_chat_model
+from app.core.exceptions import BadRequestException
 from app.schemas.stock_candidate import (
     StockCandidateItem,
     StockCandidateResponse,
@@ -20,7 +21,9 @@ from app.schemas.stock_candidate_ai_explanation import (
     StockCandidateAIExplanationResponse,
     StockCandidateAIResearchPriorityItem,
     StockCandidateAIRiskSummary,
+    StockCandidateAIExplanationUnavailableReason,
 )
+
 
 
 logger = logging.getLogger(__name__)
@@ -41,6 +44,20 @@ class StockCandidateAIExplanationService:
 
     MAX_COMPARISON_ITEMS = 10
     SCORE_DIFF_THRESHOLD = 5
+
+    FORBIDDEN_INVESTMENT_PHRASES = (
+        "必须买入",
+        "建议买入",
+        "推荐买入",
+        "可以直接买入",
+        "稳赚",
+        "保证收益",
+        "一定上涨",
+        "必涨",
+        "无风险",
+        "满仓",
+        "梭哈",
+    )
 
     DISCLAIMER = (
         "本 AI 候选解释仅基于系统已生成的量化候选评分结果进行中文解释、"
@@ -101,7 +118,18 @@ class StockCandidateAIExplanationService:
             llm = get_chat_model()
             llm_response = await llm.ainvoke(messages)
             raw_content = str(llm_response.content).strip()
+        except Exception as exc:
+            logger.exception("stock candidate ai explanation llm call failed")
+            return self._build_exception_response(
+                request=request,
+                candidate_result=candidate_result,
+                candidates=candidates,
+                input_snapshot=input_snapshot,
+                unavailable_reason=self._resolve_llm_error_reason(exc),
+                exc=exc,
+            )
 
+        try:
             return self._parse_ai_response(
                 raw_content=raw_content,
                 request=request,
@@ -109,23 +137,14 @@ class StockCandidateAIExplanationService:
                 input_snapshot=input_snapshot,
             )
         except Exception as exc:
-            logger.exception("stock candidate ai explanation failed")
-
-            if request.allow_fallback:
-                return self._build_fallback_response(
-                    request=request,
-                    candidate_result=candidate_result,
-                    candidates=candidates,
-                    input_snapshot=input_snapshot,
-                    fallback_reason=self._safe_exception_message(exc),
-                )
-
-            return self._build_unavailable_response(
+            logger.exception("stock candidate ai explanation parse failed")
+            return self._build_exception_response(
                 request=request,
                 candidate_result=candidate_result,
+                candidates=candidates,
                 input_snapshot=input_snapshot,
-                unavailable_reason="llm_error",
-                fallback_reason=self._safe_exception_message(exc),
+                unavailable_reason="llm_parse_error",
+                exc=exc,
             )
 
     def _build_messages(
@@ -287,7 +306,148 @@ class StockCandidateAIExplanationService:
         if not response.candidate_explanations:
             raise ValueError("AI response candidate_explanations is empty")
 
+        self._validate_ai_response_against_source(
+            response=response,
+            candidate_result=candidate_result,
+        )
+        self._validate_ai_response_safety(response)
+
         return response
+
+    def _validate_ai_response_against_source(
+        self,
+        *,
+        response: StockCandidateAIExplanationResponse,
+        candidate_result: StockCandidateResponse,
+    ) -> None:
+        source_map = self._build_source_candidate_map(candidate_result)
+
+        for item in response.candidate_explanations:
+            source = source_map.get((item.symbol.upper(), str(item.market).upper()))
+            if source is None:
+                raise ValueError(
+                    f"AI response contains unknown candidate: {item.symbol}/{item.market}"
+                )
+
+            self._validate_candidate_identity(
+                symbol=item.symbol,
+                market=str(item.market),
+                score=item.score,
+                grade=item.grade,
+                rank=item.rank,
+                source=source,
+            )
+
+        for item in response.research_priorities:
+            source = source_map.get((item.symbol.upper(), str(item.market).upper()))
+            if source is None:
+                raise ValueError(
+                    f"AI research priority contains unknown candidate: {item.symbol}/{item.market}"
+                )
+
+            self._validate_candidate_identity(
+                symbol=item.symbol,
+                market=str(item.market),
+                score=item.score,
+                grade=item.grade,
+                rank=None,
+                source=source,
+            )
+
+        for item in response.comparisons:
+            source = source_map.get((item.symbol.upper(), str(item.market).upper()))
+            if source is None:
+                raise ValueError(
+                    f"AI comparison contains unknown candidate: {item.symbol}/{item.market}"
+                )
+
+    def _build_source_candidate_map(
+        self,
+        candidate_result: StockCandidateResponse,
+    ) -> dict[tuple[str, str], StockCandidateItem]:
+        return {
+            (candidate.symbol.upper(), str(candidate.market).upper()): candidate
+            for candidate in candidate_result.candidates
+        }
+
+    def _validate_candidate_identity(
+        self,
+        *,
+        symbol: str,
+        market: str,
+        score: int,
+        grade: str,
+        rank: int | None,
+        source: StockCandidateItem,
+    ) -> None:
+        if score != source.score:
+            raise ValueError(
+                f"AI response changed score for {symbol}/{market}: {score} != {source.score}"
+            )
+
+        if grade != source.grade:
+            raise ValueError(
+                f"AI response changed grade for {symbol}/{market}: {grade} != {source.grade}"
+            )
+
+        if rank is not None and source.rank is not None and rank != source.rank:
+            raise ValueError(
+                f"AI response changed rank for {symbol}/{market}: {rank} != {source.rank}"
+            )
+
+    def _validate_ai_response_safety(
+        self,
+        response: StockCandidateAIExplanationResponse,
+    ) -> None:
+        for text in self._iter_ai_response_texts(response):
+            forbidden_phrase = self._find_forbidden_phrase(text)
+            if forbidden_phrase is not None:
+                raise ValueError(
+                    f"AI response contains forbidden investment phrase: {forbidden_phrase}"
+                )
+
+    def _iter_ai_response_texts(
+        self,
+        response: StockCandidateAIExplanationResponse,
+    ) -> list[str]:
+        values: list[str] = [
+            response.summary,
+            *response.warnings,
+        ]
+
+        for item in response.candidate_explanations:
+            values.append(item.explanation)
+            values.extend(item.key_strengths)
+            values.extend(item.key_risks)
+            values.extend(item.research_focus)
+
+        for item in response.comparisons:
+            values.append(item.comparison_summary)
+            values.extend(item.relative_strengths)
+            values.extend(item.relative_weaknesses)
+
+        for item in response.research_priorities:
+            values.append(item.reason)
+            values.extend(item.suggested_next_steps)
+
+        if response.risk_summary is not None:
+            values.append(response.risk_summary.summary)
+            values.extend(response.risk_summary.key_risks)
+            values.extend(response.risk_summary.risk_controls)
+
+        return [
+            value
+            for value in values
+            if isinstance(value, str) and value.strip()
+        ]
+
+    def _find_forbidden_phrase(self, text: str) -> str | None:
+        normalized = text.strip()
+        for phrase in self.FORBIDDEN_INVESTMENT_PHRASES:
+            if phrase in normalized:
+                return phrase
+
+        return None
 
     def _load_json_content(self, raw_content: str) -> dict[str, Any]:
         content = raw_content.strip()
@@ -745,6 +905,47 @@ class StockCandidateAIExplanationService:
             ai_context_truncated=True,
         )
 
+    def _build_exception_response(
+        self,
+        *,
+        request: StockCandidateAIExplanationRequest,
+        candidate_result: StockCandidateResponse,
+        candidates: list[StockCandidateItem],
+        input_snapshot: StockCandidateAIExplanationInputSnapshot,
+        unavailable_reason: StockCandidateAIExplanationUnavailableReason,
+        exc: Exception,
+    ) -> StockCandidateAIExplanationResponse:
+        fallback_reason = self._safe_exception_message(exc)
+
+        if request.allow_fallback:
+            return self._build_fallback_response(
+                request=request,
+                candidate_result=candidate_result,
+                candidates=candidates,
+                input_snapshot=input_snapshot,
+                unavailable_reason=unavailable_reason,
+                fallback_reason=fallback_reason,
+            )
+
+        return self._build_unavailable_response(
+            request=request,
+            candidate_result=candidate_result,
+            input_snapshot=input_snapshot,
+            unavailable_reason=unavailable_reason,
+            fallback_reason=fallback_reason,
+        )
+
+    def _resolve_llm_error_reason(
+        self,
+        exc: Exception,
+    ) -> StockCandidateAIExplanationUnavailableReason:
+        if isinstance(exc, BadRequestException):
+            message = str(getattr(exc, "message", exc)).lower()
+            if "missing deepseek_api_key" in message or "missing" in message:
+                return "llm_unavailable"
+
+        return "llm_error"
+
     def _build_fallback_response(
         self,
         *,
@@ -752,6 +953,7 @@ class StockCandidateAIExplanationService:
         candidate_result: StockCandidateResponse,
         candidates: list[StockCandidateItem],
         input_snapshot: StockCandidateAIExplanationInputSnapshot,
+        unavailable_reason: StockCandidateAIExplanationUnavailableReason,
         fallback_reason: str,
     ) -> StockCandidateAIExplanationResponse:
         explanations = [
@@ -766,7 +968,7 @@ class StockCandidateAIExplanationService:
 
         return StockCandidateAIExplanationResponse(
             status="fallback",
-            unavailable_reason="llm_error",
+            unavailable_reason=unavailable_reason,
             ai_used=False,
             fallback_reason=fallback_reason,
             summary=(
@@ -929,7 +1131,7 @@ class StockCandidateAIExplanationService:
         request: StockCandidateAIExplanationRequest,
         candidate_result: StockCandidateResponse,
         input_snapshot: StockCandidateAIExplanationInputSnapshot,
-        unavailable_reason: str,
+        unavailable_reason: StockCandidateAIExplanationUnavailableReason,
         fallback_reason: str,
     ) -> StockCandidateAIExplanationResponse:
         return StockCandidateAIExplanationResponse(
@@ -967,8 +1169,26 @@ class StockCandidateAIExplanationService:
         if isinstance(exc, ValidationError):
             return "AI 输出结构不符合候选解释响应格式。"
 
+        if isinstance(exc, BadRequestException):
+            message = str(getattr(exc, "message", exc)).strip()
+            if "missing DEEPSEEK_API_KEY" in message:
+                return "DeepSeek API Key 未配置，AI 候选解释暂时不可用。"
+            return message[:300] if message else "AI 候选解释请求参数不可用。"
+
         message = str(exc).strip()
         if not message:
             return "AI 候选解释调用失败。"
+
+        if "AI response is not valid JSON" in message:
+            return "AI 输出不是合法 JSON，已使用降级解释。"
+
+        if "AI response candidate_explanations is empty" in message:
+            return "AI 输出中缺少候选解释明细，已使用降级解释。"
+
+        if "forbidden investment phrase" in message:
+            return "AI 输出包含不符合安全边界的投资表述，已使用降级解释。"
+
+        if "changed score" in message or "changed grade" in message or "changed rank" in message:
+            return "AI 输出修改了候选评分、等级或排名，已使用降级解释。"
 
         return message[:300]

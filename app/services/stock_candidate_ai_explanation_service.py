@@ -39,6 +39,9 @@ class StockCandidateAIExplanationService:
     MAX_RULES = 5
     MAX_WARNINGS = 5
 
+    MAX_COMPARISON_ITEMS = 10
+    SCORE_DIFF_THRESHOLD = 5
+
     DISCLAIMER = (
         "本 AI 候选解释仅基于系统已生成的量化候选评分结果进行中文解释、"
         "候选对比和研究优先级总结，只能作为研究线索，"
@@ -158,6 +161,8 @@ class StockCandidateAIExplanationService:
             "5. 如果策略信号为 buy，只能解释为规则偏积极，不能写成买入建议。\n"
             "6. 如果数据质量存在 warnings 或 errors，必须在风险中体现。\n"
             "7. 输出必须是严格 JSON，并符合给定字段结构。\n\n"
+            "8. 如果 comparison_context 不为空，comparisons 必须基于 comparison_context 中的事实生成。\n"
+            "9. 对比候选时要优先比较 score、grade、趋势分、动量分、风险分、策略信号和数据质量，不要编造外部理由。\n\n"
             f"{self._build_style_instruction(style)}\n\n"
             f"{self._build_output_format_instruction()}\n\n"
             "候选评分上下文如下：\n"
@@ -332,6 +337,11 @@ class StockCandidateAIExplanationService:
                 self._build_candidate_context(candidate)
                 for candidate in candidates
             ],
+            "comparison_context": (
+                self._build_comparison_context(candidates)
+                if request.include_comparison
+                else []
+            ),
             "warnings": self._trim_text_list(
                 candidate_result.warnings,
                 limit=self.MAX_WARNINGS,
@@ -366,6 +376,261 @@ class StockCandidateAIExplanationService:
                 if candidate.strategy_signal
                 else None
             ),
+        }
+
+    def _build_comparison_context(
+        self,
+        candidates: list[StockCandidateItem],
+    ) -> list[dict[str, Any]]:
+        if len(candidates) <= 1:
+            return []
+
+        sorted_candidates = sorted(
+            candidates,
+            key=lambda item: (
+                item.rank if item.rank is not None else 999999,
+                -item.score,
+                item.symbol,
+            ),
+        )
+        best_candidate = sorted_candidates[0]
+        result: list[dict[str, Any]] = []
+
+        for index, candidate in enumerate(sorted_candidates, start=1):
+            other_candidates = [
+                item
+                for item in sorted_candidates
+                if item.symbol != candidate.symbol or item.market != candidate.market
+            ]
+
+            result.append(
+                {
+                    "symbol": candidate.symbol,
+                    "market": candidate.market,
+                    "name": candidate.name,
+                    "group_rank": index,
+                    "score": candidate.score,
+                    "grade": candidate.grade,
+                    "score_gap_to_best": best_candidate.score - candidate.score,
+                    "compared_with": [
+                        item.symbol
+                        for item in other_candidates[: self.MAX_COMPARISON_ITEMS]
+                    ],
+                    "dimension_scores": self._build_dimension_score_context(candidate),
+                    "strategy_signal": (
+                        self._build_strategy_signal_context(candidate.strategy_signal)
+                        if candidate.strategy_signal
+                        else None
+                    ),
+                    "data_quality": (
+                        self._build_data_quality_context(candidate.data_quality)
+                        if candidate.data_quality
+                        else None
+                    ),
+                    "relative_strengths": self._build_relative_strengths(
+                        candidate=candidate,
+                        peers=other_candidates,
+                    ),
+                    "relative_weaknesses": self._build_relative_weaknesses(
+                        candidate=candidate,
+                        peers=other_candidates,
+                    ),
+                }
+            )
+
+            if len(result) >= self.MAX_COMPARISON_ITEMS:
+                break
+
+        return result
+
+    def _build_dimension_score_context(
+        self,
+        candidate: StockCandidateItem,
+    ) -> dict[str, int | None]:
+        breakdown = candidate.score_breakdown
+        if breakdown is None:
+            return {
+                "trend_score": None,
+                "momentum_score": None,
+                "rsi_score": None,
+                "macd_score": None,
+                "volatility_score": None,
+                "volume_score": None,
+                "liquidity_score": None,
+                "strategy_signal_score": None,
+                "risk_score": None,
+                "user_preference_score": None,
+            }
+
+        return {
+            "trend_score": breakdown.trend_score,
+            "momentum_score": breakdown.momentum_score,
+            "rsi_score": breakdown.rsi_score,
+            "macd_score": breakdown.macd_score,
+            "volatility_score": breakdown.volatility_score,
+            "volume_score": breakdown.volume_score,
+            "liquidity_score": breakdown.liquidity_score,
+            "strategy_signal_score": breakdown.strategy_signal_score,
+            "risk_score": breakdown.risk_score,
+            "user_preference_score": breakdown.user_preference_score,
+        }
+
+    def _build_relative_strengths(
+        self,
+        *,
+        candidate: StockCandidateItem,
+        peers: list[StockCandidateItem],
+    ) -> list[str]:
+        strengths: list[str] = []
+
+        if not peers:
+            return self._trim_text_list(candidate.reasons, limit=3)
+
+        best_peer_score = max(peer.score for peer in peers)
+        if candidate.score >= best_peer_score + self.SCORE_DIFF_THRESHOLD:
+            strengths.append(
+                f"综合评分比其他候选高至少 {self.SCORE_DIFF_THRESHOLD} 分。"
+            )
+
+        breakdown = candidate.score_breakdown
+        if breakdown is not None:
+            strengths.extend(
+                self._build_dimension_advantages(
+                    candidate_breakdown=breakdown,
+                    peers=peers,
+                )
+            )
+
+        if candidate.strategy_signal is not None:
+            signal = candidate.strategy_signal.signal
+            strength = candidate.strategy_signal.strength
+            if signal == "buy":
+                strengths.append(f"策略信号为 buy，强度为 {strength}，相对更积极。")
+            elif signal == "hold":
+                strengths.append("策略信号为 hold，相比弱势信号更偏稳健。")
+
+        if candidate.data_quality is not None and candidate.data_quality.is_enough:
+            strengths.append(
+                f"数据质量满足要求，K 线数量为 {candidate.data_quality.candle_count}。"
+            )
+
+        if not strengths:
+            strengths.extend(candidate.reasons)
+
+        return self._trim_text_list(strengths, limit=5)
+
+    def _build_relative_weaknesses(
+        self,
+        *,
+        candidate: StockCandidateItem,
+        peers: list[StockCandidateItem],
+    ) -> list[str]:
+        weaknesses: list[str] = []
+
+        if not peers:
+            return self._trim_text_list(candidate.risks, limit=3)
+
+        best_peer_score = max(peer.score for peer in peers)
+        if best_peer_score >= candidate.score + self.SCORE_DIFF_THRESHOLD:
+            weaknesses.append(
+                f"综合评分比最高候选低 {best_peer_score - candidate.score} 分。"
+            )
+
+        breakdown = candidate.score_breakdown
+        if breakdown is not None:
+            weaknesses.extend(
+                self._build_dimension_disadvantages(
+                    candidate_breakdown=breakdown,
+                    peers=peers,
+                )
+            )
+
+        if candidate.strategy_signal is not None:
+            signal = candidate.strategy_signal.signal
+            if signal == "sell":
+                weaknesses.append("策略信号为 sell，相比其他候选更需要谨慎。")
+            elif signal == "observe":
+                weaknesses.append("策略信号为 observe，方向确认度相对不足。")
+
+        if candidate.data_quality is not None:
+            if candidate.data_quality.is_stale:
+                weaknesses.append("数据存在过旧风险，对比时需要降低解释置信度。")
+            if not candidate.data_quality.is_enough:
+                weaknesses.append("K 线数量不足，数据基础弱于数据充足的候选。")
+            if candidate.data_quality.warnings:
+                weaknesses.extend(candidate.data_quality.warnings[:2])
+
+        if not weaknesses:
+            weaknesses.extend(candidate.risks)
+
+        return self._trim_text_list(weaknesses, limit=5)
+
+    def _build_dimension_advantages(
+        self,
+        *,
+        candidate_breakdown: StockCandidateScoreBreakdown,
+        peers: list[StockCandidateItem],
+    ) -> list[str]:
+        advantages: list[str] = []
+        dimension_names = self._get_comparison_dimension_names()
+
+        for field_name, display_name in dimension_names.items():
+            candidate_value = getattr(candidate_breakdown, field_name)
+            peer_values = [
+                getattr(peer.score_breakdown, field_name)
+                for peer in peers
+                if peer.score_breakdown is not None
+            ]
+            if not peer_values:
+                continue
+
+            peer_best = max(peer_values)
+            if candidate_value >= peer_best + self.SCORE_DIFF_THRESHOLD:
+                advantages.append(
+                    f"{display_name}明显更强，当前为 {candidate_value}，对比候选最高为 {peer_best}。"
+                )
+
+        return advantages[:3]
+
+    def _build_dimension_disadvantages(
+        self,
+        *,
+        candidate_breakdown: StockCandidateScoreBreakdown,
+        peers: list[StockCandidateItem],
+    ) -> list[str]:
+        disadvantages: list[str] = []
+        dimension_names = self._get_comparison_dimension_names()
+
+        for field_name, display_name in dimension_names.items():
+            candidate_value = getattr(candidate_breakdown, field_name)
+            peer_values = [
+                getattr(peer.score_breakdown, field_name)
+                for peer in peers
+                if peer.score_breakdown is not None
+            ]
+            if not peer_values:
+                continue
+
+            peer_best = max(peer_values)
+            if peer_best >= candidate_value + self.SCORE_DIFF_THRESHOLD:
+                disadvantages.append(
+                    f"{display_name}弱于对比候选，当前为 {candidate_value}，对比候选最高为 {peer_best}。"
+                )
+
+        return disadvantages[:3]
+
+    def _get_comparison_dimension_names(self) -> dict[str, str]:
+        return {
+            "trend_score": "趋势分",
+            "momentum_score": "动量分",
+            "rsi_score": "RSI 分",
+            "macd_score": "MACD 分",
+            "volatility_score": "波动率分",
+            "volume_score": "成交量分",
+            "liquidity_score": "流动性分",
+            "strategy_signal_score": "策略信号分",
+            "risk_score": "综合风险分",
+            "user_preference_score": "用户偏好分",
         }
 
     def _build_score_breakdown_context(
@@ -508,7 +773,11 @@ class StockCandidateAIExplanationService:
                 "AI 候选解释暂时不可用，系统已基于确定性候选评分结果生成降级解释。"
             ),
             candidate_explanations=explanations,
-            comparisons=[],
+            comparisons=(
+                self._build_fallback_comparisons(candidates)
+                if request.include_comparison
+                else []
+            ),
             research_priorities=research_priorities,
             risk_summary=(
                 self._build_fallback_risk_summary(candidates)
@@ -551,6 +820,55 @@ class StockCandidateAIExplanationService:
                 "结合自身风险偏好继续研究。",
             ],
         )
+
+    def _build_fallback_comparisons(
+        self,
+        candidates: list[StockCandidateItem],
+    ) -> list[StockCandidateAIComparisonItem]:
+        if len(candidates) <= 1:
+            return []
+
+        sorted_candidates = sorted(
+            candidates,
+            key=lambda item: (
+                item.rank if item.rank is not None else 999999,
+                -item.score,
+                item.symbol,
+            ),
+        )
+        comparisons: list[StockCandidateAIComparisonItem] = []
+
+        for candidate in sorted_candidates:
+            peers = [
+                item
+                for item in sorted_candidates
+                if item.symbol != candidate.symbol or item.market != candidate.market
+            ]
+            relative_strengths = self._build_relative_strengths(
+                candidate=candidate,
+                peers=peers,
+            )
+            relative_weaknesses = self._build_relative_weaknesses(
+                candidate=candidate,
+                peers=peers,
+            )
+
+            comparisons.append(
+                StockCandidateAIComparisonItem(
+                    symbol=candidate.symbol,
+                    market=candidate.market,
+                    compared_with=[item.symbol for item in peers],
+                    relative_strengths=relative_strengths,
+                    relative_weaknesses=relative_weaknesses,
+                    comparison_summary=(
+                        f"{candidate.symbol} 当前评分 {candidate.score}，"
+                        f"等级 {candidate.grade}。该对比由确定性评分维度生成，"
+                        "用于辅助研究，不构成投资建议。"
+                    ),
+                )
+            )
+
+        return comparisons[: self.MAX_COMPARISON_ITEMS]
 
     def _build_fallback_priority(
         self,

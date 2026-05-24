@@ -45,6 +45,9 @@ from app.services.stock_candidate_data_service import (
 )
 from app.services.stock_candidate_scoring_service import StockCandidateScoringService
 from app.services.stock_candidate_query_service import StockCandidateQueryService
+from app.services.stock_candidate_ai_explanation_service import (
+    StockCandidateAIExplanationService,
+)
 # from app.services.stock_analysis_service import StockAnalysisService
 
 
@@ -91,5 +94,6 @@ __all__ = [
     "StockCandidateDataService",
     "StockCandidateScoringService",
     "StockCandidateQueryService",
+    "StockCandidateAIExplanationService",
     # "StockAnalysisService",
 ]

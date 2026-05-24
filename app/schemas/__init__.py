@@ -169,6 +169,19 @@ from app.schemas.stock_candidate import (
     StockCandidateUnavailableReason,
     StockCandidateUniverseSource,
 )
+from app.schemas.stock_candidate_ai_explanation import (
+    StockCandidateAIComparisonItem,
+    StockCandidateAIExplanationInputSnapshot,
+    StockCandidateAIExplanationItem,
+    StockCandidateAIExplanationRequest,
+    StockCandidateAIExplanationResponse,
+    StockCandidateAIExplanationStatus,
+    StockCandidateAIExplanationStyle,
+    StockCandidateAIExplanationUnavailableReason,
+    StockCandidateAIResearchPriorityItem,
+    StockCandidateAIResearchPriorityLevel,
+    StockCandidateAIRiskSummary,
+)
 
 __all__ = [
     "ApiResponse",
@@ -320,4 +333,16 @@ __all__ = [
     "StockCandidateSymbol",
     "StockCandidateUnavailableReason",
     "StockCandidateUniverseSource",
+
+    "StockCandidateAIComparisonItem",
+    "StockCandidateAIExplanationInputSnapshot",
+    "StockCandidateAIExplanationItem",
+    "StockCandidateAIExplanationRequest",
+    "StockCandidateAIExplanationResponse",
+    "StockCandidateAIExplanationStatus",
+    "StockCandidateAIExplanationStyle",
+    "StockCandidateAIExplanationUnavailableReason",
+    "StockCandidateAIResearchPriorityItem",
+    "StockCandidateAIResearchPriorityLevel",
+    "StockCandidateAIRiskSummary",
 ]

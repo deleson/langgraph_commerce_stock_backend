@@ -75,6 +75,13 @@ class StockCandidateAIExplanationService:
         "不得修改输入中的 score、grade、rank。"
     )
 
+    EXPLANATION_QUALITY_RULES = (
+        "解释要面向中文普通投资研究用户，避免生硬堆砌字段名。"
+        "每只候选要说明：评分来源、相对优势、主要风险、后续研究重点。"
+        "不要只重复“评分为多少、等级为多少”，要解释这些分数意味着什么。"
+        "如果信息不足，要直接说明信息不足，不要补充外部事实。"
+    )
+
     async def explain_candidates(
         self,
         *,
@@ -165,6 +172,7 @@ class StockCandidateAIExplanationService:
             "你的任务是把候选评分、评分拆解、策略信号、数据质量、风险提示解释得更清楚。\n"
             "你不是投资顾问，不是交易员，不能自由推荐股票，不能绕过量化评分系统。\n"
             f"{self.INVESTMENT_SAFETY_RULES}\n"
+            f"{self.EXPLANATION_QUALITY_RULES}\n"
             f"{self.JSON_OUTPUT_RULES}\n"
         )
 
@@ -182,6 +190,11 @@ class StockCandidateAIExplanationService:
             "7. 输出必须是严格 JSON，并符合给定字段结构。\n\n"
             "8. 如果 comparison_context 不为空，comparisons 必须基于 comparison_context 中的事实生成。\n"
             "9. 对比候选时要优先比较 score、grade、趋势分、动量分、风险分、策略信号和数据质量，不要编造外部理由。\n\n"
+            "10. candidate_explanations.explanation 要用自然中文解释，不要只罗列字段名。\n"
+            "11. key_strengths 要写成用户能理解的优势，不要只写 trend_score、macd_score 这类字段名。\n"
+            "12. key_risks 要明确风险来源，例如数据质量、波动、策略信号不确定、评分边界。\n"
+            "13. research_focus 要写成后续研究动作，例如继续观察趋势、核对数据质量、比较风险偏好。\n"
+            "14. research_priorities 是研究顺序，不是买入顺序。\n\n"
             f"{self._build_style_instruction(style)}\n\n"
             f"{self._build_output_format_instruction()}\n\n"
             "候选评分上下文如下：\n"
@@ -261,7 +274,9 @@ class StockCandidateAIExplanationService:
             "  },\n"
             '  "warnings": ["必要的风险提示"]\n'
             "}\n"
-            "priority_level 和 overall_risk_level 只能使用 high、medium、low。"
+            "priority_level 和 overall_risk_level 只能使用 high、medium、low。\n"
+            "所有 explanation、summary、comparison_summary、reason 都要使用自然中文，"
+            "避免只复述字段名或分数。"
         )
 
     def _parse_ai_response(
@@ -487,6 +502,7 @@ class StockCandidateAIExplanationService:
                 "do_not_recommend_direct_buy": True,
             },
             "explanation_style": request.explanation_style,
+            "explanation_guidance": self._build_explanation_guidance(request),
             "source_summary": candidate_result.summary,
             "input_snapshot": (
                 candidate_result.input_snapshot.model_dump(mode="json")
@@ -507,6 +523,30 @@ class StockCandidateAIExplanationService:
                 limit=self.MAX_WARNINGS,
             ),
             "disclaimer": candidate_result.disclaimer,
+        }
+
+    def _build_explanation_guidance(
+        self,
+        request: StockCandidateAIExplanationRequest,
+    ) -> dict[str, Any]:
+        return {
+            "audience": "中文股票研究用户，新手也需要能看懂。",
+            "tone": "谨慎、清楚、像研究助理，不像销售话术。",
+            "must_explain": [
+                "为什么该候选进入列表",
+                "主要分数来自哪些维度",
+                "和其他候选相比有什么差异",
+                "当前最需要确认的风险是什么",
+                "下一步研究可以看什么",
+            ],
+            "must_avoid": [
+                "不要说必须买入",
+                "不要承诺收益",
+                "不要编造新闻、财报或公告",
+                "不要把研究优先级写成买入顺序",
+                "不要改变 score、grade、rank",
+            ],
+            "style": request.explanation_style,
         }
 
     def _build_candidate_context(
@@ -995,6 +1035,34 @@ class StockCandidateAIExplanationService:
             disclaimer=self.DISCLAIMER,
         )
 
+    def _build_candidate_plain_summary(
+        self,
+        candidate: StockCandidateItem,
+    ) -> str:
+        signal_text = "策略信号暂不可用"
+        if candidate.strategy_signal is not None and candidate.strategy_signal.signal:
+            signal_text = (
+                f"策略信号为 {candidate.strategy_signal.signal}"
+                f"，强度为 {candidate.strategy_signal.strength or '未知'}"
+            )
+
+        data_quality_text = "数据质量信息暂不可用"
+        if candidate.data_quality is not None:
+            if candidate.data_quality.is_enough and not candidate.data_quality.is_stale:
+                data_quality_text = (
+                    f"数据质量满足基本要求，K 线数量为 {candidate.data_quality.candle_count}"
+                )
+            elif candidate.data_quality.is_stale:
+                data_quality_text = "数据存在过旧风险"
+            elif not candidate.data_quality.is_enough:
+                data_quality_text = "K 线数量不足，数据基础需要谨慎"
+
+        return (
+            f"{candidate.symbol} 当前排名第 {candidate.rank or '-'}，"
+            f"评分 {candidate.score}，等级 {candidate.grade}。"
+            f"{signal_text}，{data_quality_text}。"
+        )
+
     def _build_fallback_explanation(
         self,
         candidate: StockCandidateItem,
@@ -1010,18 +1078,35 @@ class StockCandidateAIExplanationService:
             score=candidate.score,
             grade=candidate.grade,
             explanation=(
-                f"{candidate.symbol} 当前候选评分为 {candidate.score} 分，"
-                f"等级为 {candidate.grade}。该解释基于系统确定性评分规则生成，"
-                "未使用 AI 扩展分析。"
+                f"{self._build_candidate_plain_summary(candidate)}"
+                "该解释基于系统确定性评分规则生成，未使用 AI 扩展分析；"
+                "适合作为后续研究线索，而不是直接买卖依据。"
             ),
             key_strengths=strengths,
             key_risks=risks,
-            research_focus=[
-                "查看主要加分维度是否稳定。",
-                "确认主要风险项是否可以接受。",
-                "结合自身风险偏好继续研究。",
-            ],
+            research_focus=self._build_fallback_research_focus(candidate),
         )
+
+    def _build_fallback_research_focus(
+        self,
+        candidate: StockCandidateItem,
+    ) -> list[str]:
+        focus = [
+            "查看主要加分维度是否具有持续性。",
+            "确认主要风险项是否可以接受。",
+            "结合自身风险偏好继续研究。",
+        ]
+
+        if candidate.strategy_signal is not None:
+            focus.append("继续观察策略信号是否保持稳定。")
+
+        if candidate.data_quality is not None:
+            focus.append("核对数据质量、K 线数量和是否存在过旧风险。")
+
+        if candidate.score_breakdown is not None:
+            focus.append("重点查看趋势、动量、风险和策略信号分的变化。")
+
+        return self._trim_text_list(focus, limit=5)
 
     def _build_fallback_comparisons(
         self,
@@ -1063,9 +1148,9 @@ class StockCandidateAIExplanationService:
                     relative_strengths=relative_strengths,
                     relative_weaknesses=relative_weaknesses,
                     comparison_summary=(
-                        f"{candidate.symbol} 当前评分 {candidate.score}，"
-                        f"等级 {candidate.grade}。该对比由确定性评分维度生成，"
-                        "用于辅助研究，不构成投资建议。"
+                        f"{candidate.symbol} 当前评分 {candidate.score}，等级 {candidate.grade}。"
+                        "相对优势和劣势来自候选之间的评分维度、策略信号和数据质量对比；"
+                        "该对比用于辅助研究，不构成投资建议。"
                     ),
                 )
             )
@@ -1094,12 +1179,14 @@ class StockCandidateAIExplanationService:
             score=candidate.score,
             reason=(
                 f"{candidate.symbol} 当前排名第 {candidate.rank or index}，"
-                f"评分 {candidate.score}，等级 {candidate.grade}，"
-                "可按评分排序作为研究优先级参考。"
+                f"评分 {candidate.score}，等级 {candidate.grade}。"
+                "该优先级来自确定性候选评分排序，表示它更适合优先研究，"
+                "不代表应当直接买入。"
             ),
             suggested_next_steps=[
                 "查看评分拆解中的主要加分和扣分项。",
                 "结合策略信号和数据质量继续判断。",
+                "如果后续用于模拟交易，需要先设置资金和风控边界。",
             ],
         )
 
@@ -1114,14 +1201,15 @@ class StockCandidateAIExplanationService:
         return StockCandidateAIRiskSummary(
             overall_risk_level="medium",
             summary=(
-                "当前风险摘要由确定性候选评分结果生成。候选评分较高不代表未来收益，"
-                "仍需要关注市场波动、数据质量、策略信号失效和个人风险承受能力。"
+                "当前风险摘要由确定性候选评分结果生成。候选评分较高只能说明它在当前规则体系下更值得研究，"
+                "不代表未来收益确定。仍需要关注市场波动、数据质量、策略信号失效、"
+                "评分公式适用边界和个人风险承受能力。"
             ),
             key_risks=self._trim_text_list(risk_items, limit=8),
             risk_controls=[
                 "不要把候选评分直接等同于买入建议。",
-                "不要只看单一分数，应结合风险项和数据质量。",
-                "后续如进入交易或模拟盘，应设置资金和风控边界。",
+                "不要只看单一分数，应同时查看主要加分项、扣分项和数据质量。",
+                "如果后续进入回测、模拟交易或真实研究，应先设定资金比例和风控边界。",
             ],
         )
 

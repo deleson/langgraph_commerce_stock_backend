@@ -44,6 +44,16 @@ class StockCandidateAIExplanationService:
         "候选对比和研究优先级总结，只能作为研究线索，"
         "不构成投资建议，也不承诺未来收益。"
     )
+    JSON_OUTPUT_RULES = (
+        "你必须只输出一个合法 JSON 对象，不要输出 Markdown，不要输出代码块，"
+        "不要在 JSON 前后添加解释文字。所有自然语言内容必须使用简体中文。"
+    )
+
+    INVESTMENT_SAFETY_RULES = (
+        "禁止使用“必须买入”“稳赚”“保证收益”“一定上涨”“无风险”等表达。"
+        "可以使用“可作为研究线索”“需要继续观察”“风险需要重点确认”等谨慎表达。"
+        "不得修改输入中的 score、grade、rank。"
+    )
 
     async def explain_candidates(
         self,
@@ -119,32 +129,116 @@ class StockCandidateAIExplanationService:
         self,
         ai_context: dict[str, Any],
     ) -> list[SystemMessage | HumanMessage]:
-        system_prompt = (
-            "你是一个中文股票研究助理。"
-            "你只能基于用户提供的量化候选评分结果进行解释和对比。"
-            "你不能自由推荐股票，不能修改 score、grade、rank，"
-            "不能承诺收益，不能说必须买入，不能构成投资建议。"
-            "请输出严格 JSON，不要输出 Markdown。"
-        )
-
-        human_prompt = (
-            "请根据下面的候选评分上下文，生成中文 AI 候选解释。\n"
-            "输出 JSON 字段必须包含：summary, candidate_explanations, "
-            "comparisons, research_priorities, risk_summary, warnings。\n"
-            "candidate_explanations 每项包含：symbol, market, name, rank, score, "
-            "grade, explanation, key_strengths, key_risks, research_focus。\n"
-            "comparisons 每项包含：symbol, market, compared_with, "
-            "relative_strengths, relative_weaknesses, comparison_summary。\n"
-            "research_priorities 每项包含：priority_rank, priority_level, symbol, "
-            "market, grade, score, reason, suggested_next_steps。\n"
-            "risk_summary 包含：overall_risk_level, summary, key_risks, risk_controls。\n\n"
-            f"{json.dumps(ai_context, ensure_ascii=False)}"
-        )
+        system_prompt = self._build_system_prompt()
+        human_prompt = self._build_human_prompt(ai_context)
 
         return [
             SystemMessage(content=system_prompt),
             HumanMessage(content=human_prompt),
         ]
+
+    def _build_system_prompt(self) -> str:
+        return (
+            "你是一个中文股票研究助理，负责解释系统已经计算好的量化候选股票结果。\n"
+            "你的任务是把候选评分、评分拆解、策略信号、数据质量、风险提示解释得更清楚。\n"
+            "你不是投资顾问，不是交易员，不能自由推荐股票，不能绕过量化评分系统。\n"
+            f"{self.INVESTMENT_SAFETY_RULES}\n"
+            f"{self.JSON_OUTPUT_RULES}\n"
+        )
+
+    def _build_human_prompt(self, ai_context: dict[str, Any]) -> str:
+        style = str(ai_context.get("explanation_style") or "balanced")
+        return (
+            "请根据下面的候选评分上下文，生成 AI 候选解释结果。\n\n"
+            "你必须遵守以下要求：\n"
+            "1. 只能基于输入中的候选评分结果解释，不能编造新闻、财报、公告或外部信息。\n"
+            "2. 不能改变每只股票的 score、grade、rank。\n"
+            "3. 不能输出直接买卖指令，只能输出研究线索和风险提醒。\n"
+            "4. 如果某只股票评分高，也要说明它仍然存在风险。\n"
+            "5. 如果策略信号为 buy，只能解释为规则偏积极，不能写成买入建议。\n"
+            "6. 如果数据质量存在 warnings 或 errors，必须在风险中体现。\n"
+            "7. 输出必须是严格 JSON，并符合给定字段结构。\n\n"
+            f"{self._build_style_instruction(style)}\n\n"
+            f"{self._build_output_format_instruction()}\n\n"
+            "候选评分上下文如下：\n"
+            f"{json.dumps(ai_context, ensure_ascii=False)}"
+        )
+
+    def _build_style_instruction(self, style: str) -> str:
+        if style == "concise":
+            return (
+                "解释风格：简洁。\n"
+                "summary 控制在 150 字以内；"
+                "每只候选 explanation 控制在 180 字以内；"
+                "每个列表字段尽量 2 到 3 条。"
+            )
+
+        if style == "detailed":
+            return (
+                "解释风格：详细。\n"
+                "summary 可以更完整；"
+                "每只候选 explanation 可以详细解释评分来源、优势、风险和研究重点；"
+                "每个列表字段可以 3 到 5 条。"
+            )
+
+        return (
+            "解释风格：均衡。\n"
+            "summary 控制在 300 字以内；"
+            "每只候选 explanation 控制在 300 字以内；"
+            "每个列表字段建议 3 条左右。"
+        )
+
+    def _build_output_format_instruction(self) -> str:
+        return (
+            "输出 JSON 格式必须如下：\n"
+            "{\n"
+            '  "summary": "总体中文总结",\n'
+            '  "candidate_explanations": [\n'
+            "    {\n"
+            '      "symbol": "股票代码，必须与输入一致",\n'
+            '      "market": "市场，必须与输入一致",\n'
+            '      "name": "股票名称，没有则为 null",\n'
+            '      "rank": 1,\n'
+            '      "score": 90,\n'
+            '      "grade": "A",\n'
+            '      "explanation": "这只候选的中文解释",\n'
+            '      "key_strengths": ["主要优势"],\n'
+            '      "key_risks": ["主要风险"],\n'
+            '      "research_focus": ["后续研究重点"]\n'
+            "    }\n"
+            "  ],\n"
+            '  "comparisons": [\n'
+            "    {\n"
+            '      "symbol": "股票代码",\n'
+            '      "market": "市场",\n'
+            '      "compared_with": ["其他股票代码"],\n'
+            '      "relative_strengths": ["相对优势"],\n'
+            '      "relative_weaknesses": ["相对劣势"],\n'
+            '      "comparison_summary": "候选之间的对比总结"\n'
+            "    }\n"
+            "  ],\n"
+            '  "research_priorities": [\n'
+            "    {\n"
+            '      "priority_rank": 1,\n'
+            '      "priority_level": "high",\n'
+            '      "symbol": "股票代码",\n'
+            '      "market": "市场",\n'
+            '      "grade": "A",\n'
+            '      "score": 90,\n'
+            '      "reason": "为什么优先研究",\n'
+            '      "suggested_next_steps": ["下一步研究动作"]\n'
+            "    }\n"
+            "  ],\n"
+            '  "risk_summary": {\n'
+            '    "overall_risk_level": "medium",\n'
+            '    "summary": "总体风险总结",\n'
+            '    "key_risks": ["关键风险"],\n'
+            '    "risk_controls": ["研究过程中的风控提醒"]\n'
+            "  },\n"
+            '  "warnings": ["必要的风险提示"]\n'
+            "}\n"
+            "priority_level 和 overall_risk_level 只能使用 high、medium、low。"
+        )
 
     def _parse_ai_response(
         self,

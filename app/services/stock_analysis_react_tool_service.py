@@ -26,6 +26,13 @@ from app.schemas.stock_candidate import (
     StockCandidateResponse,
     StockCandidateSymbol,
 )
+from app.schemas.stock_candidate_ai_explanation import (
+    StockCandidateAIExplanationRequest,
+    StockCandidateAIExplanationResponse,
+)
+from app.services.stock_candidate_ai_explanation_query_service import (
+    StockCandidateAIExplanationQueryService,
+)
 from app.services.stock_candidate_query_service import StockCandidateQueryService
 
 class StockAnalysisReactToolService:
@@ -41,6 +48,11 @@ class StockAnalysisReactToolService:
     MAX_STOCK_CANDIDATE_RISKS = 3
     MAX_STOCK_CANDIDATE_WARNINGS = 5
     MAX_STOCK_CANDIDATE_DATA_QUALITY_MESSAGES = 3
+    MAX_STOCK_CANDIDATE_AI_EXPLANATIONS = 5
+    MAX_STOCK_CANDIDATE_AI_COMPARISONS = 5
+    MAX_STOCK_CANDIDATE_AI_PRIORITIES = 5
+    MAX_STOCK_CANDIDATE_AI_TEXT_LENGTH = 600
+    MAX_STOCK_CANDIDATE_AI_LIST_ITEMS = 3
 
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
@@ -53,6 +65,9 @@ class StockAnalysisReactToolService:
         self.market_data_quality_report_service = MarketDataQualityReportService(db)
         self.backtest_query_service = BacktestQueryService(db)
         self.stock_candidate_query_service = StockCandidateQueryService(db)
+        self.stock_candidate_ai_explanation_query_service = (
+            StockCandidateAIExplanationQueryService(db)
+        )
 
     async def get_analysis_record(
         self,
@@ -387,10 +402,41 @@ class StockAnalysisReactToolService:
             include_data_quality=True,
         )
 
-        response = await self.stock_candidate_query_service.run_stock_candidates(
-            request=request,
-            user=user,
-        )
+        ai_explanation_response: StockCandidateAIExplanationResponse | None = None
+
+        if include_ai_explanation:
+            ai_request = StockCandidateAIExplanationRequest(
+                candidate_request=request,
+                explanation_style=explanation_style,
+                max_candidates_to_explain=min(
+                    int(max_candidates_to_explain),
+                    request.top_n,
+                ),
+                include_comparison=True,
+                include_research_priority=True,
+                include_risk_summary=True,
+                allow_fallback=True,
+            )
+
+            ai_explanation_response = (
+                await self.stock_candidate_ai_explanation_query_service.run_ai_explanation(
+                    request=ai_request,
+                    user=user,
+                )
+            )
+
+            response = ai_explanation_response.source_candidate_result
+
+            if response is None:
+                response = await self.stock_candidate_query_service.run_stock_candidates(
+                    request=request,
+                    user=user,
+                )
+        else:
+            response = await self.stock_candidate_query_service.run_stock_candidates(
+                request=request,
+                user=user,
+            )
 
         return ReactObservation(
             tool_name="get_stock_candidates",
@@ -419,6 +465,7 @@ class StockAnalysisReactToolService:
             tool_output=self._serialize_stock_candidate_response(
                 response,
                 include_ai_explanation=include_ai_explanation,
+                ai_explanation_response=ai_explanation_response,
             ),
             success=True,
             created_at=datetime.now(UTC),
@@ -588,6 +635,7 @@ class StockAnalysisReactToolService:
         response: StockCandidateResponse,
         *,
         include_ai_explanation: bool = False,
+        ai_explanation_response: StockCandidateAIExplanationResponse | None = None,
     ) -> dict[str, Any]:
         payload = response.model_dump(mode="json")
         candidates = payload.get("candidates") or []
@@ -639,7 +687,8 @@ class StockAnalysisReactToolService:
                 )
                 for item in returned_excluded
             ],
-            "ai_explanation": self._build_stock_candidate_ai_explanation_placeholder(
+            "ai_explanation": self._serialize_stock_candidate_ai_explanation(
+                ai_explanation_response,
                 include_ai_explanation=include_ai_explanation,
             ),
             "warnings": warnings[:5],
@@ -897,21 +946,185 @@ class StockAnalysisReactToolService:
             "errors": errors[: self.MAX_STOCK_CANDIDATE_DATA_QUALITY_MESSAGES],
         }
 
-    def _build_stock_candidate_ai_explanation_placeholder(
-        self,
-        *,
-        include_ai_explanation: bool,
+    def _serialize_stock_candidate_ai_explanation(
+            self,
+            response: StockCandidateAIExplanationResponse | None,
+            *,
+            include_ai_explanation: bool,
     ) -> dict[str, Any] | None:
         if not include_ai_explanation:
             return None
 
+        if response is None:
+            return {
+                "included": False,
+                "reason": "AI candidate explanation was requested but no response was generated.",
+            }
+
+        payload = response.model_dump(
+            mode="json",
+            exclude={"source_candidate_result"},
+        )
+
+        candidate_explanations = payload.get("candidate_explanations") or []
+        comparisons = payload.get("comparisons") or []
+        research_priorities = payload.get("research_priorities") or []
+        warnings = payload.get("warnings") or []
+
         return {
-            "included": False,
-            "reason": (
-                "include_ai_explanation is reserved in this step. "
-                "AI candidate explanation will be connected in stage 6.5-C step 9."
+            "included": True,
+            "status": payload.get("status"),
+            "unavailable_reason": payload.get("unavailable_reason"),
+            "ai_used": payload.get("ai_used"),
+            "fallback_reason": payload.get("fallback_reason"),
+            "summary": self._limit_stock_candidate_ai_text(payload.get("summary")),
+            "candidate_explanations": [
+                self._serialize_stock_candidate_ai_explanation_item(item)
+                for item in candidate_explanations[
+                            : self.MAX_STOCK_CANDIDATE_AI_EXPLANATIONS
+                            ]
+            ],
+            "comparisons": [
+                self._serialize_stock_candidate_ai_comparison_item(item)
+                for item in comparisons[: self.MAX_STOCK_CANDIDATE_AI_COMPARISONS]
+            ],
+            "research_priorities": [
+                self._serialize_stock_candidate_ai_priority_item(item)
+                for item in research_priorities[
+                            : self.MAX_STOCK_CANDIDATE_AI_PRIORITIES
+                            ]
+            ],
+            "risk_summary": self._serialize_stock_candidate_ai_risk_summary(
+                payload.get("risk_summary")
+            ),
+            "warnings": warnings[: self.MAX_STOCK_CANDIDATE_WARNINGS],
+            "generated_at": payload.get("generated_at"),
+            "disclaimer": payload.get("disclaimer"),
+            "output_limits": {
+                "source_candidate_result_included": False,
+                "max_candidate_explanations": self.MAX_STOCK_CANDIDATE_AI_EXPLANATIONS,
+                "max_comparisons": self.MAX_STOCK_CANDIDATE_AI_COMPARISONS,
+                "max_research_priorities": self.MAX_STOCK_CANDIDATE_AI_PRIORITIES,
+                "max_text_length": self.MAX_STOCK_CANDIDATE_AI_TEXT_LENGTH,
+                "max_list_items": self.MAX_STOCK_CANDIDATE_AI_LIST_ITEMS,
+                "detail_policy": (
+                    "AI explanation is trimmed before being returned to ReAct. "
+                    "The original source_candidate_result is not nested here because "
+                    "the deterministic candidate result is already returned separately."
+                ),
+            },
+        }
+
+    def _serialize_stock_candidate_ai_explanation_item(
+            self,
+            item: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "symbol": item.get("symbol"),
+            "market": item.get("market"),
+            "name": item.get("name"),
+            "rank": item.get("rank"),
+            "score": item.get("score"),
+            "grade": item.get("grade"),
+            "explanation": self._limit_stock_candidate_ai_text(
+                item.get("explanation")
+            ),
+            "key_strengths": self._limit_stock_candidate_ai_list(
+                item.get("key_strengths")
+            ),
+            "key_risks": self._limit_stock_candidate_ai_list(
+                item.get("key_risks")
+            ),
+            "research_focus": self._limit_stock_candidate_ai_list(
+                item.get("research_focus")
             ),
         }
+
+    def _serialize_stock_candidate_ai_comparison_item(
+            self,
+            item: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "symbol": item.get("symbol"),
+            "market": item.get("market"),
+            "compared_with": (item.get("compared_with") or [])[
+                             : self.MAX_STOCK_CANDIDATE_AI_LIST_ITEMS
+                             ],
+            "relative_strengths": self._limit_stock_candidate_ai_list(
+                item.get("relative_strengths")
+            ),
+            "relative_weaknesses": self._limit_stock_candidate_ai_list(
+                item.get("relative_weaknesses")
+            ),
+            "comparison_summary": self._limit_stock_candidate_ai_text(
+                item.get("comparison_summary")
+            ),
+        }
+
+    def _serialize_stock_candidate_ai_priority_item(
+            self,
+            item: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "priority_rank": item.get("priority_rank"),
+            "priority_level": item.get("priority_level"),
+            "symbol": item.get("symbol"),
+            "market": item.get("market"),
+            "grade": item.get("grade"),
+            "score": item.get("score"),
+            "reason": self._limit_stock_candidate_ai_text(item.get("reason")),
+            "suggested_next_steps": self._limit_stock_candidate_ai_list(
+                item.get("suggested_next_steps")
+            ),
+        }
+
+    def _serialize_stock_candidate_ai_risk_summary(
+            self,
+            risk_summary: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if not risk_summary:
+            return None
+
+        return {
+            "overall_risk_level": risk_summary.get("overall_risk_level"),
+            "summary": self._limit_stock_candidate_ai_text(
+                risk_summary.get("summary")
+            ),
+            "key_risks": self._limit_stock_candidate_ai_list(
+                risk_summary.get("key_risks")
+            ),
+            "risk_controls": self._limit_stock_candidate_ai_list(
+                risk_summary.get("risk_controls")
+            ),
+        }
+
+    def _limit_stock_candidate_ai_text(
+            self,
+            value: Any,
+    ) -> str | None:
+        if value is None:
+            return None
+
+        text = str(value).strip()
+        if len(text) <= self.MAX_STOCK_CANDIDATE_AI_TEXT_LENGTH:
+            return text
+
+        return text[: self.MAX_STOCK_CANDIDATE_AI_TEXT_LENGTH] + "..."
+
+    def _limit_stock_candidate_ai_list(
+            self,
+            values: Any,
+    ) -> list[str]:
+        if not isinstance(values, list):
+            return []
+
+        result: list[str] = []
+        for value in values[: self.MAX_STOCK_CANDIDATE_AI_LIST_ITEMS]:
+            text = self._limit_stock_candidate_ai_text(value)
+            if text:
+                result.append(text)
+
+        return result
 
     def _serialize_user_preference(
         self,

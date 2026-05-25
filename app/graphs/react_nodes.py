@@ -582,6 +582,54 @@ async def _call_react_tool(
                 "data_quality_stale_after_days"
             ),
         )
+    if tool_name == "get_stock_candidates":
+        return await tool_service.get_stock_candidates(
+            user_id=_get_required_int(state, "user_id"),
+            universe_source=tool_input.get("universe_source", "watchlist"),
+            symbols=tool_input.get("symbols") or [],
+            top_n=clamp_int(
+                tool_input.get("top_n"),
+                default=5,
+                min_value=1,
+                max_value=10,
+            ),
+            market=tool_input.get("market"),
+            timeframe=tool_input.get("timeframe", "1d"),
+            limit=clamp_int(
+                tool_input.get("limit"),
+                default=120,
+                min_value=30,
+                max_value=300,
+            ),
+            min_required_candles=clamp_int(
+                tool_input.get("min_required_candles"),
+                default=60,
+                min_value=30,
+                max_value=300,
+            ),
+            adjust_type=tool_input.get("adjust_type", "none"),
+            source=tool_input.get("source"),
+            include_excluded=bool(tool_input.get("include_excluded", False)),
+            include_score_breakdown=bool(
+                tool_input.get("include_score_breakdown", True)
+            ),
+            include_ai_explanation=bool(
+                tool_input.get("include_ai_explanation", False)
+            ),
+            explanation_style=tool_input.get("explanation_style", "balanced"),
+            max_candidates_to_explain=clamp_int(
+                tool_input.get("max_candidates_to_explain"),
+                default=3,
+                min_value=1,
+                max_value=10,
+            ),
+            enforce_data_quality=bool(
+                tool_input.get("enforce_data_quality", True)
+            ),
+            data_quality_stale_after_days=tool_input.get(
+                "data_quality_stale_after_days"
+            ),
+        )
 
     raise ValueError(f"unsupported react tool: {tool_name}")
 

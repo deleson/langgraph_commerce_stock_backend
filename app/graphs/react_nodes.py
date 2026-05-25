@@ -184,12 +184,17 @@ def _build_agent_reason_messages(
 4. 如果缺少原始分析记录，优先调用 get_analysis_record。
 5. 如果用户问当前行情、价格、K线、数据来源，优先考虑 get_market_overview。
 6. 如果用户问 MA、RSI、MACD、波动率、动量、成交量，优先考虑 get_technical_indicators。
-7. 如果用户问数据是否可靠、数据是否足够、是否过旧，优先考虑 get_data_quality。
+7. 如果用户问数据是否可靠、数据是否足够、是否过时，优先考虑 get_data_quality。
 8. 如果用户问历史回测、策略历史表现、最大回撤、胜率、夏普比率、是否跑赢买入持有，优先考虑 get_backtest_result。
 9. 调用 get_backtest_result 必须提供 start_date 和 end_date；如果用户没有给明确回测区间，应先选择 final_answer 追问用户回测时间范围，不要自己猜。
 10. 如果用户问是否适合自己、风险偏好、提醒设置，优先考虑 get_user_preference。
-11. 如果用户问自选股、关注列表、列表内比较，优先考虑 get_watchlist。
-12. 如果已有 observations 足够回答，就选择 final_answer。
+11. 如果用户只是想查看自选股、关注列表内容，优先考虑 get_watchlist。
+12. 如果用户问“自选股里哪些更值得研究”“自选股候选排名”“关注列表里谁评分更高”，优先考虑 get_stock_candidates，并使用 universe_source=watchlist。
+13. 如果用户明确给出多个股票代码，并问“谁更值得研究”“帮我对比候选评分”“这些里面谁更好”，优先考虑 get_stock_candidates，并使用 universe_source=manual，同时传入 symbols。
+14. 如果用户要求“推荐股票”“帮我找几只股票”，但没有提供股票池，也没有明确使用自选股，应选择 final_answer 追问用户：使用自选股还是手动提供股票列表。不要自己编造股票，不要做全市场扫描。
+15. get_stock_candidates 只能输出研究线索和候选评分，不是买卖建议；如果用户要求直接告诉他买哪只，应选择 final_answer 做风险边界说明，并引导为候选研究。
+16. 如果已有 get_stock_candidates 的 observation 且足够回答用户问题，就选择 final_answer，不要重复调用同一个候选工具。
+17. 如果已有 observations 足够回答，就选择 final_answer。
 """.strip()
 
     human_prompt = f"""
@@ -218,6 +223,41 @@ market={state.get("referenced_market")}
     "tool_name": "get_analysis_record",
     "tool_input": {{}},
     "reason": "为什么需要调用这个工具"
+  }}
+}}
+
+候选工具示例一：用户问“我的自选股里哪些更值得研究”
+{{
+  "next_action": "tool_call",
+  "tool_call": {{
+    "tool_name": "get_stock_candidates",
+    "tool_input": {{
+      "universe_source": "watchlist",
+      "top_n": 5,
+      "include_score_breakdown": true,
+      "include_excluded": false
+    }},
+    "reason": "用户想从自己的自选股中筛选更值得研究的候选股票，需要调用候选评分工具。"
+  }}
+}}
+
+候选工具示例二：用户问“AAPL、MSFT、NVDA 谁更值得研究”
+{{
+  "next_action": "tool_call",
+  "tool_call": {{
+    "tool_name": "get_stock_candidates",
+    "tool_input": {{
+      "universe_source": "manual",
+      "symbols": [
+        {{"symbol": "AAPL", "market": "US"}},
+        {{"symbol": "MSFT", "market": "US"}},
+        {{"symbol": "NVDA", "market": "US"}}
+      ],
+      "top_n": 5,
+      "include_score_breakdown": true,
+      "include_excluded": false
+    }},
+    "reason": "用户给出了明确股票池并要求比较候选评分，需要调用候选评分工具。"
   }}
 }}
 

@@ -14,8 +14,8 @@ ReactToolName = Literal[
     "get_user_preference",
     "get_watchlist",
     "get_backtest_result",
+    "get_stock_candidates",
 ]
-
 ReactActionType = Literal[
     "tool_call",
     "final_answer",

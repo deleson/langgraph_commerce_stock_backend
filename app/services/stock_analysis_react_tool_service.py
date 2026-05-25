@@ -35,6 +35,13 @@ class StockAnalysisReactToolService:
     It does not let the LLM access database objects directly.
     """
 
+    MAX_STOCK_CANDIDATE_OBSERVATION_ITEMS = 10
+    MAX_STOCK_CANDIDATE_EXCLUDED_ITEMS = 5
+    MAX_STOCK_CANDIDATE_REASONS = 3
+    MAX_STOCK_CANDIDATE_RISKS = 3
+    MAX_STOCK_CANDIDATE_WARNINGS = 5
+    MAX_STOCK_CANDIDATE_DATA_QUALITY_MESSAGES = 3
+
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self.analysis_record_repo = AsyncAnalysisRecordRepository(db)
@@ -526,7 +533,7 @@ class StockAnalysisReactToolService:
                     "to the ReAct observation to keep the LLM context concise."
                 ),
             },
-            "warnings": warnings[:5],
+            "warnings": warnings[: self.MAX_STOCK_CANDIDATE_WARNINGS],
             "calculated_at": payload.get("calculated_at"),
             "disclaimer": payload.get("disclaimer"),
         }
@@ -534,6 +541,10 @@ class StockAnalysisReactToolService:
     def _serialize_stock_candidate_item(
         self,
         item: dict[str, Any],
+        *,
+        include_score_breakdown: bool = True,
+        include_strategy_signal: bool = True,
+        include_data_quality: bool = True,
     ) -> dict[str, Any]:
         reasons = item.get("reasons") or []
         risks = item.get("risks") or []
@@ -547,16 +558,28 @@ class StockAnalysisReactToolService:
             "rank": item.get("rank"),
             "score": item.get("score"),
             "grade": item.get("grade"),
-            "reasons": reasons[:3],
-            "risks": risks[:3],
-            "score_breakdown": self._build_stock_candidate_score_breakdown_observation(
-                item.get("score_breakdown")
+            "reasons": reasons[: self.MAX_STOCK_CANDIDATE_REASONS],
+            "risks": risks[: self.MAX_STOCK_CANDIDATE_RISKS],
+            "score_breakdown": (
+                self._build_stock_candidate_score_breakdown_observation(
+                    item.get("score_breakdown")
+                )
+                if include_score_breakdown
+                else None
             ),
-            "strategy_signal": self._build_stock_candidate_strategy_signal_observation(
-                item.get("strategy_signal")
+            "strategy_signal": (
+                self._build_stock_candidate_strategy_signal_observation(
+                    item.get("strategy_signal")
+                )
+                if include_strategy_signal
+                else None
             ),
-            "data_quality": self._build_stock_candidate_data_quality_observation(
-                item.get("data_quality")
+            "data_quality": (
+                self._build_stock_candidate_data_quality_observation(
+                    item.get("data_quality")
+                )
+                if include_data_quality
+                else None
             ),
         }
 
@@ -572,8 +595,12 @@ class StockAnalysisReactToolService:
         warnings = payload.get("warnings") or []
         input_snapshot = payload.get("input_snapshot") or {}
 
-        returned_candidates = candidates[:10]
-        returned_excluded = excluded[:5]
+        returned_candidates = candidates[
+            : self.MAX_STOCK_CANDIDATE_OBSERVATION_ITEMS
+        ]
+        returned_excluded = excluded[
+            : self.MAX_STOCK_CANDIDATE_EXCLUDED_ITEMS
+        ]
 
         return {
             "status": payload.get("status"),
@@ -593,12 +620,23 @@ class StockAnalysisReactToolService:
                 "source_provider": input_snapshot.get("source"),
                 "enforce_data_quality": input_snapshot.get("enforce_data_quality"),
             },
+            "score_summary": self._build_stock_candidate_score_summary(candidates),
             "candidates": [
-                self._serialize_stock_candidate_item(item)
+                self._serialize_stock_candidate_item(
+                    item,
+                    include_score_breakdown=True,
+                    include_strategy_signal=True,
+                    include_data_quality=True,
+                )
                 for item in returned_candidates
             ],
             "excluded": [
-                self._serialize_stock_candidate_item(item)
+                self._serialize_stock_candidate_item(
+                    item,
+                    include_score_breakdown=False,
+                    include_strategy_signal=False,
+                    include_data_quality=True,
+                )
                 for item in returned_excluded
             ],
             "ai_explanation": self._build_stock_candidate_ai_explanation_placeholder(
@@ -610,12 +648,25 @@ class StockAnalysisReactToolService:
             "output_limits": {
                 "candidates_returned": len(returned_candidates),
                 "candidates_total": len(candidates),
+                "max_candidates_returned": self.MAX_STOCK_CANDIDATE_OBSERVATION_ITEMS,
                 "excluded_returned": len(returned_excluded),
                 "excluded_total": len(excluded),
-                "warnings_returned": min(len(warnings), 5),
+                "max_excluded_returned": self.MAX_STOCK_CANDIDATE_EXCLUDED_ITEMS,
+                "warnings_returned": min(
+                    len(warnings),
+                    self.MAX_STOCK_CANDIDATE_WARNINGS,
+                ),
                 "warnings_total": len(warnings),
-                "reasons_per_candidate": 3,
-                "risks_per_candidate": 3,
+                "reasons_per_candidate": self.MAX_STOCK_CANDIDATE_REASONS,
+                "risks_per_candidate": self.MAX_STOCK_CANDIDATE_RISKS,
+                "candidate_fields_policy": {
+                    "candidates_include_score_breakdown": True,
+                    "candidates_include_strategy_signal": True,
+                    "candidates_include_data_quality": True,
+                    "excluded_include_score_breakdown": False,
+                    "excluded_include_strategy_signal": False,
+                    "excluded_include_data_quality": True,
+                },
                 "full_source_candidate_result_included": False,
                 "full_rule_results_included": False,
                 "full_technical_indicators_included": False,
@@ -626,6 +677,31 @@ class StockAnalysisReactToolService:
                     "technical indicator objects, and K-line data are not included."
                 ),
             },
+        }
+
+    def _build_stock_candidate_score_summary(
+        self,
+        candidates: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        scores = [
+            item.get("score")
+            for item in candidates
+            if isinstance(item.get("score"), int | float)
+        ]
+
+        if not scores:
+            return {
+                "available": False,
+                "highest_score": None,
+                "lowest_score": None,
+                "average_score": None,
+            }
+
+        return {
+            "available": True,
+            "highest_score": max(scores),
+            "lowest_score": min(scores),
+            "average_score": round(sum(scores) / len(scores), 2),
         }
 
     def _normalize_stock_candidate_universe_source(
@@ -817,8 +893,8 @@ class StockAnalysisReactToolService:
             "is_empty": data_quality.get("is_empty"),
             "is_enough": data_quality.get("is_enough"),
             "is_stale": data_quality.get("is_stale"),
-            "warnings": warnings[:3],
-            "errors": errors[:3],
+            "warnings": warnings[: self.MAX_STOCK_CANDIDATE_DATA_QUALITY_MESSAGES],
+            "errors": errors[: self.MAX_STOCK_CANDIDATE_DATA_QUALITY_MESSAGES],
         }
 
     def _build_stock_candidate_ai_explanation_placeholder(

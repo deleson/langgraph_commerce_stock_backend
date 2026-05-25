@@ -10,6 +10,7 @@ from app.models.analysis_record import AnalysisRecord
 from app.repositories.analysis_record_repo import AsyncAnalysisRecordRepository
 from app.repositories.user_preference_repo import AsyncUserPreferenceRepository
 from app.repositories.watchlist_repo import AsyncWatchlistRepository
+from app.repositories.user_repo import AsyncUserRepository
 from app.schemas.market import CandleTimeframe, MarketCode, MarketOverviewResponse
 from app.schemas.market_data import AdjustType, MarketDataSource
 from app.schemas.market_data_sync import MarketDataQualityReport
@@ -20,6 +21,12 @@ from app.services.market_service import MarketService
 from app.services.technical_indicator_query_service import TechnicalIndicatorQueryService
 from app.schemas.backtest import BacktestRequest, BacktestResponse
 from app.services.backtest_query_service import BacktestQueryService
+from app.schemas.stock_candidate import (
+    StockCandidateRequest,
+    StockCandidateResponse,
+    StockCandidateSymbol,
+)
+from app.services.stock_candidate_query_service import StockCandidateQueryService
 
 class StockAnalysisReactToolService:
     """Business tool executor used by the stock analysis ReAct graph.
@@ -31,12 +38,15 @@ class StockAnalysisReactToolService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self.analysis_record_repo = AsyncAnalysisRecordRepository(db)
+        self.user_repo = AsyncUserRepository(db)
         self.user_preference_repo = AsyncUserPreferenceRepository(db)
         self.watchlist_repo = AsyncWatchlistRepository(db)
         self.market_service = MarketService(db)
         self.technical_indicator_query_service = TechnicalIndicatorQueryService(db)
         self.market_data_quality_report_service = MarketDataQualityReportService(db)
         self.backtest_query_service = BacktestQueryService(db)
+        self.stock_candidate_query_service = StockCandidateQueryService(db)
+
     async def get_analysis_record(
         self,
         *,
@@ -305,6 +315,108 @@ class StockAnalysisReactToolService:
             created_at=datetime.now(UTC),
         )
 
+    async def get_stock_candidates(
+        self,
+        *,
+        user_id: int,
+        universe_source: str = "watchlist",
+        symbols: list[dict[str, Any]] | None = None,
+        top_n: int = 5,
+        market: MarketCode | None = None,
+        timeframe: CandleTimeframe = "1d",
+        limit: int = 120,
+        min_required_candles: int = 60,
+        adjust_type: AdjustType = "none",
+        source: MarketDataSource | None = None,
+        include_excluded: bool = False,
+        include_score_breakdown: bool = True,
+        include_ai_explanation: bool = False,
+        explanation_style: str = "balanced",
+        max_candidates_to_explain: int = 3,
+        enforce_data_quality: bool = True,
+        data_quality_stale_after_days: int | None = None,
+    ) -> ReactObservation:
+        user = await self.user_repo.get_by_id(user_id)
+        if user is None:
+            raise NotFoundException(
+                message="current user does not exist",
+                details=[
+                    {
+                        "field": "user_id",
+                        "reason": "user not found",
+                    }
+                ],
+            )
+
+        normalized_universe_source = self._normalize_stock_candidate_universe_source(
+            universe_source
+        )
+        safe_top_n = max(1, min(int(top_n), 10))
+        safe_limit = max(30, min(int(limit), 300))
+        safe_min_required_candles = max(
+            30,
+            min(int(min_required_candles), safe_limit),
+        )
+
+        candidate_symbols = self._build_stock_candidate_symbols(
+            symbols=symbols or [],
+            default_market=market,
+        )
+
+        request = StockCandidateRequest(
+            universe_source=normalized_universe_source,
+            symbols=candidate_symbols,
+            top_n=safe_top_n,
+            timeframe=timeframe,
+            limit=safe_limit,
+            min_required_candles=safe_min_required_candles,
+            adjust_type=adjust_type,
+            source=source,
+            enforce_data_quality=enforce_data_quality,
+            data_quality_stale_after_days=data_quality_stale_after_days,
+            include_excluded=include_excluded,
+            include_score_breakdown=include_score_breakdown,
+            include_strategy_signal=True,
+            include_data_quality=True,
+        )
+
+        response = await self.stock_candidate_query_service.run_stock_candidates(
+            request=request,
+            user=user,
+        )
+
+        return ReactObservation(
+            tool_name="get_stock_candidates",
+            tool_input={
+                "user_id": user_id,
+                "universe_source": request.universe_source,
+                "symbols": [
+                    item.model_dump(mode="json")
+                    for item in request.symbols
+                ],
+                "top_n": request.top_n,
+                "market": market,
+                "timeframe": request.timeframe,
+                "limit": request.limit,
+                "min_required_candles": request.min_required_candles,
+                "adjust_type": request.adjust_type,
+                "source": request.source,
+                "include_excluded": request.include_excluded,
+                "include_score_breakdown": request.include_score_breakdown,
+                "include_ai_explanation": include_ai_explanation,
+                "explanation_style": explanation_style,
+                "max_candidates_to_explain": max_candidates_to_explain,
+                "enforce_data_quality": request.enforce_data_quality,
+                "data_quality_stale_after_days": request.data_quality_stale_after_days,
+            },
+            tool_output=self._serialize_stock_candidate_response(
+                response,
+                include_ai_explanation=include_ai_explanation,
+            ),
+            success=True,
+            created_at=datetime.now(UTC),
+        )
+
 
     def _serialize_analysis_record(
         self,
@@ -419,6 +531,141 @@ class StockAnalysisReactToolService:
             "disclaimer": payload.get("disclaimer"),
         }
 
+    def _serialize_stock_candidate_item(
+        self,
+        item: dict[str, Any],
+    ) -> dict[str, Any]:
+        reasons = item.get("reasons") or []
+        risks = item.get("risks") or []
+
+        return {
+            "symbol": item.get("symbol"),
+            "market": item.get("market"),
+            "name": item.get("name"),
+            "decision": item.get("decision"),
+            "excluded_reason": item.get("excluded_reason"),
+            "rank": item.get("rank"),
+            "score": item.get("score"),
+            "grade": item.get("grade"),
+            "reasons": reasons[:3],
+            "risks": risks[:3],
+            "score_breakdown": self._build_stock_candidate_score_breakdown_observation(
+                item.get("score_breakdown")
+            ),
+            "strategy_signal": self._build_stock_candidate_strategy_signal_observation(
+                item.get("strategy_signal")
+            ),
+            "data_quality": self._build_stock_candidate_data_quality_observation(
+                item.get("data_quality")
+            ),
+        }
+
+    def _serialize_stock_candidate_response(
+        self,
+        response: StockCandidateResponse,
+        *,
+        include_ai_explanation: bool = False,
+    ) -> dict[str, Any]:
+        payload = response.model_dump(mode="json")
+        candidates = payload.get("candidates") or []
+        excluded = payload.get("excluded") or []
+        warnings = payload.get("warnings") or []
+        input_snapshot = payload.get("input_snapshot") or {}
+
+        returned_candidates = candidates[:10]
+        returned_excluded = excluded[:5]
+
+        return {
+            "status": payload.get("status"),
+            "unavailable_reason": payload.get("unavailable_reason"),
+            "summary": payload.get("summary"),
+            "universe": {
+                "source": input_snapshot.get("universe_source"),
+                "requested_symbol_count": input_snapshot.get("requested_symbol_count"),
+                "evaluated_symbol_count": input_snapshot.get("evaluated_symbol_count"),
+                "candidate_count": input_snapshot.get("candidate_count"),
+                "excluded_count": input_snapshot.get("excluded_count"),
+                "top_n": input_snapshot.get("top_n"),
+                "timeframe": input_snapshot.get("timeframe"),
+                "limit": input_snapshot.get("limit"),
+                "min_required_candles": input_snapshot.get("min_required_candles"),
+                "adjust_type": input_snapshot.get("adjust_type"),
+                "source_provider": input_snapshot.get("source"),
+                "enforce_data_quality": input_snapshot.get("enforce_data_quality"),
+            },
+            "candidates": [
+                self._serialize_stock_candidate_item(item)
+                for item in returned_candidates
+            ],
+            "excluded": [
+                self._serialize_stock_candidate_item(item)
+                for item in returned_excluded
+            ],
+            "ai_explanation": self._build_stock_candidate_ai_explanation_placeholder(
+                include_ai_explanation=include_ai_explanation,
+            ),
+            "warnings": warnings[:5],
+            "calculated_at": payload.get("calculated_at"),
+            "disclaimer": payload.get("disclaimer"),
+            "output_limits": {
+                "candidates_returned": len(returned_candidates),
+                "candidates_total": len(candidates),
+                "excluded_returned": len(returned_excluded),
+                "excluded_total": len(excluded),
+                "warnings_returned": min(len(warnings), 5),
+                "warnings_total": len(warnings),
+                "reasons_per_candidate": 3,
+                "risks_per_candidate": 3,
+                "full_source_candidate_result_included": False,
+                "full_rule_results_included": False,
+                "full_technical_indicators_included": False,
+                "full_candles_included": False,
+                "detail_policy": (
+                    "Only trimmed candidate summaries are returned to the ReAct "
+                    "observation. Full candidate response, full rule_results, "
+                    "technical indicator objects, and K-line data are not included."
+                ),
+            },
+        }
+
+    def _normalize_stock_candidate_universe_source(
+        self,
+        universe_source: str,
+    ) -> str:
+        normalized = str(universe_source or "watchlist").strip().lower()
+
+        if normalized in {"manual", "watchlist"}:
+            return normalized
+
+        return "watchlist"
+
+    def _build_stock_candidate_symbols(
+        self,
+        *,
+        symbols: list[dict[str, Any]],
+        default_market: MarketCode | None,
+    ) -> list[StockCandidateSymbol]:
+        candidate_symbols: list[StockCandidateSymbol] = []
+
+        for item in symbols:
+            if not isinstance(item, dict):
+                continue
+
+            raw_symbol = item.get("symbol")
+            raw_market = item.get("market") or default_market
+
+            if not raw_symbol or not raw_market:
+                continue
+
+            candidate_symbols.append(
+                StockCandidateSymbol(
+                    symbol=str(raw_symbol).strip().upper(),
+                    market=raw_market,
+                )
+            )
+
+        return candidate_symbols
+
     def _build_backtest_metrics_observation(
         self,
         metrics: dict[str, Any] | None,
@@ -472,6 +719,21 @@ class StockAnalysisReactToolService:
             },
         }
 
+    def _build_stock_candidate_strategy_signal_observation(
+        self,
+        strategy_signal: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if not strategy_signal:
+            return None
+
+        return {
+            "status": strategy_signal.get("status"),
+            "signal": strategy_signal.get("signal"),
+            "strength": strategy_signal.get("strength"),
+            "score": strategy_signal.get("score"),
+            "summary": strategy_signal.get("summary"),
+        }
+
     def _build_backtest_data_context(
         self,
         payload: dict[str, Any],
@@ -509,6 +771,70 @@ class StockAnalysisReactToolService:
                 "daily_equity_count": len(payload.get("daily_equity") or []),
                 "signal_snapshots_count": len(payload.get("signal_snapshots") or []),
             },
+        }
+
+    def _build_stock_candidate_score_breakdown_observation(
+        self,
+        score_breakdown: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if not score_breakdown:
+            return None
+
+        return {
+            "formula_version": score_breakdown.get("formula_version"),
+            "base_score": score_breakdown.get("base_score"),
+            "raw_score": score_breakdown.get("raw_score"),
+            "final_score": score_breakdown.get("final_score"),
+            "data_quality_score": score_breakdown.get("data_quality_score"),
+            "trend_score": score_breakdown.get("trend_score"),
+            "momentum_score": score_breakdown.get("momentum_score"),
+            "rsi_score": score_breakdown.get("rsi_score"),
+            "macd_score": score_breakdown.get("macd_score"),
+            "volatility_score": score_breakdown.get("volatility_score"),
+            "volume_score": score_breakdown.get("volume_score"),
+            "strategy_signal_score": score_breakdown.get("strategy_signal_score"),
+            "user_preference_score": score_breakdown.get("user_preference_score"),
+            "risk_score": score_breakdown.get("risk_score"),
+            "liquidity_score": score_breakdown.get("liquidity_score"),
+            "backtest_performance_score": score_breakdown.get(
+                "backtest_performance_score"
+            ),
+        }
+
+    def _build_stock_candidate_data_quality_observation(
+        self,
+        data_quality: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if not data_quality:
+            return None
+
+        warnings = data_quality.get("warnings") or []
+        errors = data_quality.get("errors") or []
+
+        return {
+            "status": data_quality.get("status"),
+            "candle_count": data_quality.get("candle_count"),
+            "is_empty": data_quality.get("is_empty"),
+            "is_enough": data_quality.get("is_enough"),
+            "is_stale": data_quality.get("is_stale"),
+            "warnings": warnings[:3],
+            "errors": errors[:3],
+        }
+
+    def _build_stock_candidate_ai_explanation_placeholder(
+        self,
+        *,
+        include_ai_explanation: bool,
+    ) -> dict[str, Any] | None:
+        if not include_ai_explanation:
+            return None
+
+        return {
+            "included": False,
+            "reason": (
+                "include_ai_explanation is reserved in this step. "
+                "AI candidate explanation will be connected in stage 6.5-C step 9."
+            ),
         }
 
     def _serialize_user_preference(

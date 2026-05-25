@@ -88,6 +88,37 @@ REACT_TOOL_DEFINITIONS: dict[ReactToolName, ReactToolDefinition] = {
             "data_quality_stale_after_days",
         ),
     ),
+    "get_stock_candidates": ReactToolDefinition(
+        name="get_stock_candidates",
+        description=(
+            "Get deterministic stock candidate scoring results from a manual symbol "
+            "list or the current user's watchlist, then return a trimmed candidate "
+            "summary with rank, score, grade, reasons, risks, score breakdown, "
+            "strategy signal, and data quality. Use this when the user asks which "
+            "stocks in a given pool or watchlist are more worth researching, asks "
+            "to compare candidate scores, or asks why candidates are ranked. It "
+            "does not freely recommend stocks, scan the whole market, place trades, "
+            "predict future returns, or provide investment advice."
+        ),
+        optional_inputs=(
+            "universe_source",
+            "symbols",
+            "top_n",
+            "market",
+            "timeframe",
+            "limit",
+            "min_required_candles",
+            "adjust_type",
+            "source",
+            "include_excluded",
+            "include_score_breakdown",
+            "include_ai_explanation",
+            "explanation_style",
+            "max_candidates_to_explain",
+            "enforce_data_quality",
+            "data_quality_stale_after_days",
+        ),
+    ),
 }
 
 DEFAULT_REACT_TOOLS: tuple[ReactToolName, ...] = (
@@ -98,8 +129,8 @@ DEFAULT_REACT_TOOLS: tuple[ReactToolName, ...] = (
     "get_user_preference",
     "get_watchlist",
     "get_backtest_result",
+    "get_stock_candidates",
 )
-
 
 def get_default_react_tools() -> list[ReactToolName]:
     return list(DEFAULT_REACT_TOOLS)

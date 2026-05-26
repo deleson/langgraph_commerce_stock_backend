@@ -51,6 +51,11 @@ class StockAnalysisState(TypedDict, total=False):
     notification_id: int
     context_snapshot: StockAnalysisContextSnapshot
 
+    # AI usage and quota.
+    ai_quota_allowed: bool
+    ai_quota_reason: str
+    ai_usage_log_id: int
+
     # Error and extension fields.
     error_message: str
     metadata: dict[str, Any]

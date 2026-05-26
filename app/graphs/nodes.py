@@ -1,5 +1,8 @@
 import json
 import logging
+from datetime import UTC, datetime
+from decimal import Decimal
+from typing import Any
 
 from app.core.exceptions import BadRequestException
 from app.core.llm import get_chat_model
@@ -12,8 +15,22 @@ from app.schemas.stock_analysis import (
 from app.services.indicator_service import IndicatorService
 from app.services.market_data_service import MockMarketDataService
 from langchain_core.messages import HumanMessage, SystemMessage
+from app.core.config import get_settings
+from app.core.database import AsyncSessionLocal
+from app.repositories.ai_usage_repo import AsyncAIUsageRepository
+from app.schemas.ai_usage import AIQuotaCheckRequest
+from app.services.ai_quota_service import AIQuotaService
+from app.services.ai_usage_service import AIUsageService
+from app.services.ai_usage_token_service import (
+    AIUsageCostEstimate,
+    AIUsageTokenEstimate,
+    AIUsageTokenService,
+)
+
 
 logger = logging.getLogger(__name__)
+STOCK_ANALYSIS_AI_FEATURE = "stock_analysis"
+STOCK_ANALYSIS_ESTIMATED_COMPLETION_TOKENS = 1000
 
 
 def load_market_data_node(state: StockAnalysisState) -> StockAnalysisState:
@@ -460,6 +477,13 @@ async def analyze_with_llm_node_async(state: StockAnalysisState) -> StockAnalysi
             reason="market_snapshot and indicators are required before LLM analysis",
         )
 
+    user_id = state.get("user_id")
+    if user_id is None:
+        return _build_llm_error_result_state(
+            state=state,
+            reason="user_id is required before LLM quota check",
+        )
+
     risk_preference = state.get("risk_preference", "balanced")
 
     messages = _build_stock_analysis_messages(
@@ -470,19 +494,252 @@ async def analyze_with_llm_node_async(state: StockAnalysisState) -> StockAnalysi
         indicators=indicators.model_dump(mode="json"),
     )
 
+    quota_allowed, quota_reason, estimated_tokens, estimated_cost = await _check_stock_analysis_ai_quota(
+        user_id=user_id,
+        messages=messages,
+    )
+
+    if not quota_allowed:
+        await _record_stock_analysis_ai_blocked(
+            user_id=user_id,
+            state=state,
+            reason=quota_reason or "AI quota is not enough",
+            estimated_tokens=estimated_tokens,
+            estimated_cost=estimated_cost,
+        )
+        return _build_ai_quota_blocked_result_state(
+            state=state,
+            reason=quota_reason or "AI quota is not enough",
+            estimated_tokens=estimated_tokens,
+            estimated_cost=estimated_cost,
+        )
+
+    started_at = datetime.now(UTC)
+    response = None
+
     try:
         llm = get_chat_model()
         response = await llm.ainvoke(messages)
         result = _parse_stock_analysis_result(response.content)
     except Exception as exc:
         logger.exception("stock analysis async llm node failed")
+        await _record_stock_analysis_ai_failed(
+            user_id=user_id,
+            state=state,
+            response=response,
+            messages=messages,
+            error_message=_safe_exception_message(exc),
+            started_at=started_at,
+        )
         return _build_llm_error_result_state(
             state=state,
             reason=_safe_exception_message(exc),
         )
 
+    usage_log = await _record_stock_analysis_ai_success(
+        user_id=user_id,
+        state=state,
+        response=response,
+        messages=messages,
+        completion_text=str(response.content),
+        started_at=started_at,
+    )
+
+    metadata = {
+        **state.get("metadata", {}),
+        "ai_usage": {
+            "feature": STOCK_ANALYSIS_AI_FEATURE,
+            "status": "success",
+            "usage_log_id": getattr(usage_log, "id", None),
+            "model_name": get_settings().llm_model,
+        },
+    }
+
     return {
         "result": result,
+        "metadata": metadata,
+        "ai_quota_allowed": True,
+        "ai_usage_log_id": getattr(usage_log, "id", None),
+    }
+
+async def _check_stock_analysis_ai_quota(
+    *,
+    user_id: int,
+    messages: list[SystemMessage | HumanMessage],
+) -> tuple[bool, str | None, AIUsageTokenEstimate, AIUsageCostEstimate]:
+    token_service = AIUsageTokenService()
+    settings = get_settings()
+
+    prompt_estimate = token_service.estimate_prompt_tokens_from_messages(messages)
+    estimated_tokens = AIUsageTokenEstimate(
+        prompt_tokens=prompt_estimate.prompt_tokens,
+        completion_tokens=STOCK_ANALYSIS_ESTIMATED_COMPLETION_TOKENS,
+        total_tokens=prompt_estimate.prompt_tokens + STOCK_ANALYSIS_ESTIMATED_COMPLETION_TOKENS,
+        token_source="estimated",
+    )
+    estimated_cost = token_service.estimate_cost(
+        model_name=settings.llm_model,
+        prompt_tokens=estimated_tokens.prompt_tokens,
+        completion_tokens=estimated_tokens.completion_tokens,
+    )
+
+    async with AsyncSessionLocal() as db:
+        repo = AsyncAIUsageRepository(db)
+        quota_service = AIQuotaService(repo)
+
+        result = await quota_service.check_quota(
+            AIQuotaCheckRequest(
+                user_id=user_id,
+                feature=STOCK_ANALYSIS_AI_FEATURE,
+                provider="deepseek",
+                model_name=settings.llm_model,
+                estimated_prompt_tokens=estimated_tokens.prompt_tokens,
+                estimated_completion_tokens=estimated_tokens.completion_tokens,
+                estimated_total_tokens=estimated_tokens.total_tokens,
+                estimated_cost=estimated_cost.estimated_cost,
+                currency=estimated_cost.currency,
+            )
+        )
+
+    return result.allowed, result.reason, estimated_tokens, estimated_cost
+
+
+async def _record_stock_analysis_ai_success(
+    *,
+    user_id: int,
+    state: StockAnalysisState,
+    response: Any,
+    messages: list[SystemMessage | HumanMessage],
+    completion_text: str,
+    started_at: datetime,
+):
+    try:
+        async with AsyncSessionLocal() as db:
+            repo = AsyncAIUsageRepository(db)
+            usage_service = AIUsageService(repo)
+
+            return await usage_service.record_success(
+                user_id=user_id,
+                feature=STOCK_ANALYSIS_AI_FEATURE,
+                model_name=get_settings().llm_model,
+                response=response,
+                prompt_messages=messages,
+                completion_text=completion_text,
+                analysis_thread_id=state.get("thread_id"),
+                started_at=started_at,
+                finished_at=datetime.now(UTC),
+                extra={
+                    "symbol": state.get("symbol"),
+                    "market": state.get("market"),
+                    "graph_route": state.get("graph_route"),
+                    "source": "stock_analysis_graph",
+                },
+            )
+    except Exception:
+        logger.exception("record stock analysis ai success usage failed")
+        return None
+
+
+async def _record_stock_analysis_ai_failed(
+    *,
+    user_id: int,
+    state: StockAnalysisState,
+    response: Any | None,
+    messages: list[SystemMessage | HumanMessage],
+    error_message: str,
+    started_at: datetime,
+) -> None:
+    try:
+        async with AsyncSessionLocal() as db:
+            repo = AsyncAIUsageRepository(db)
+            usage_service = AIUsageService(repo)
+
+            await usage_service.record_failed(
+                user_id=user_id,
+                feature=STOCK_ANALYSIS_AI_FEATURE,
+                model_name=get_settings().llm_model,
+                error_message=error_message,
+                response=response,
+                prompt_messages=messages,
+                completion_text=str(getattr(response, "content", "") or ""),
+                analysis_thread_id=state.get("thread_id"),
+                started_at=started_at,
+                finished_at=datetime.now(UTC),
+                extra={
+                    "symbol": state.get("symbol"),
+                    "market": state.get("market"),
+                    "graph_route": state.get("graph_route"),
+                    "source": "stock_analysis_graph",
+                },
+            )
+    except Exception:
+        logger.exception("record stock analysis ai failed usage failed")
+
+
+async def _record_stock_analysis_ai_blocked(
+    *,
+    user_id: int,
+    state: StockAnalysisState,
+    reason: str,
+    estimated_tokens: AIUsageTokenEstimate,
+    estimated_cost: AIUsageCostEstimate,
+) -> None:
+    try:
+        async with AsyncSessionLocal() as db:
+            repo = AsyncAIUsageRepository(db)
+            usage_service = AIUsageService(repo)
+
+            await usage_service.record_blocked(
+                user_id=user_id,
+                feature=STOCK_ANALYSIS_AI_FEATURE,
+                model_name=get_settings().llm_model,
+                reason=reason,
+                estimated_prompt_tokens=estimated_tokens.prompt_tokens,
+                estimated_completion_tokens=estimated_tokens.completion_tokens,
+                estimated_cost=estimated_cost.estimated_cost,
+                analysis_thread_id=state.get("thread_id"),
+                extra={
+                    "symbol": state.get("symbol"),
+                    "market": state.get("market"),
+                    "graph_route": state.get("graph_route"),
+                    "source": "stock_analysis_graph",
+                },
+            )
+    except Exception:
+        logger.exception("record stock analysis ai blocked usage failed")
+
+
+def _build_ai_quota_blocked_result_state(
+    *,
+    state: StockAnalysisState,
+    reason: str,
+    estimated_tokens: AIUsageTokenEstimate,
+    estimated_cost: AIUsageCostEstimate,
+) -> StockAnalysisState:
+    result_state = _build_llm_error_result_state(
+        state=state,
+        reason=reason,
+    )
+
+    metadata = {
+        **result_state.get("metadata", {}),
+        "ai_quota": {
+            "allowed": False,
+            "reason": reason,
+            "feature": STOCK_ANALYSIS_AI_FEATURE,
+            "estimated_prompt_tokens": estimated_tokens.prompt_tokens,
+            "estimated_completion_tokens": estimated_tokens.completion_tokens,
+            "estimated_total_tokens": estimated_tokens.total_tokens,
+            "estimated_cost": str(estimated_cost.estimated_cost),
+            "currency": estimated_cost.currency,
+        },
+    }
+
+    return {
+        **result_state,
+        "metadata": metadata,
+        "ai_quota_allowed": False,
+        "ai_quota_reason": reason,
     }
 
 

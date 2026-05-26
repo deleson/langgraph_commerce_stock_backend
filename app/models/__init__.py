@@ -13,6 +13,9 @@ from app.models.market_data_sync_status import MarketDataSyncStatus
 from app.models.market_data_sync_log import MarketDataSyncLog
 from app.models.analysis_conversation_message import AnalysisConversationMessage
 from app.models.analysis_react_trace import AnalysisReactTrace
+from app.models.ai_usage_log import AIUsageLog
+from app.models.ai_quota_account import AIQuotaAccount
+from app.models.ai_usage_summary import AIUsageSummary
 
 __all__ = [
     "AnalysisRecord",
@@ -30,4 +33,7 @@ __all__ = [
     "MarketDataSyncLog",
     "AnalysisConversationMessage",
     "AnalysisReactTrace",
+    "AIUsageLog",
+    "AIQuotaAccount",
+    "AIUsageSummary",
 ]

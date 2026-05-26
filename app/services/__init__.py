@@ -57,6 +57,7 @@ from app.services.ai_usage_token_service import (
     AIUsageTokenService,
 )
 from app.services.ai_usage_service import AIUsageService
+from app.services.ai_quota_service import AIQuotaService
 # from app.services.stock_analysis_service import StockAnalysisService
 
 
@@ -109,5 +110,6 @@ __all__ = [
     "AIUsageTokenEstimate",
     "AIUsageTokenService",
     "AIUsageService",
+    "AIQuotaService",
     # "StockAnalysisService",
 ]

@@ -50,6 +50,7 @@ class MarketDataSyncTaskPayload(BaseModel):
     symbol: str = Field(..., min_length=1, max_length=32)
     market: MarketCode = "US"
     timeframe: CandleTimeframe = "1d"
+    limit: int | None = Field(default=None, ge=1, le=1000)
     adjust_type: AdjustType = "none"
     source: MarketDataSource = "mock"
     start_date: str | None = Field(default=None, max_length=32)

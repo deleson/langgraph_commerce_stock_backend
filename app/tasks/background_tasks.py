@@ -24,6 +24,7 @@ def smoke_test() -> dict[str, str]:
         "message": "celery worker is running",
     }
 
+BACKGROUND_TASK_RETRY_DELAY_SECONDS = 10
 
 _worker_event_loop: asyncio.AbstractEventLoop | None = None
 
@@ -137,6 +138,9 @@ async def _dispatch_background_task_async(task_id: int) -> dict[str, object]:
                 "status": "failed",
                 "reason": "handler_not_implemented",
                 "task_type": running_task.task_type,
+                "will_retry": False,
+                "retry_count": running_task.retry_count,
+                "max_retries": running_task.max_retries,
             },
         )
 
@@ -169,6 +173,9 @@ async def _run_stock_analysis_async_reserved_task(
                 "但当前步骤只做预留，不调用 DeepSeek，不执行主分析图，"
                 "后续步骤会接入 AI 额度检查、失败重试和真实后台分析执行。"
             ),
+            "will_retry": False,
+            "retry_count": task.retry_count,
+            "max_retries": task.max_retries,
         }
 
         failed_task = await repository.mark_failed(
@@ -195,6 +202,10 @@ async def _run_stock_analysis_async_reserved_task(
                 "status": "failed",
                 "reason": "invalid_stock_analysis_async_payload",
                 "task_type": task.task_type,
+                "will_retry": False,
+                "retry_count": task.retry_count,
+                "max_retries": task.max_retries,
+                "error_type": exc.__class__.__name__,
             },
         )
 
@@ -262,6 +273,10 @@ async def _run_market_data_sync_task(
                 "status": "failed",
                 "reason": "invalid_market_data_sync_payload",
                 "task_type": task.task_type,
+                "will_retry": False,
+                "retry_count": task.retry_count,
+                "max_retries": task.max_retries,
+                "error_type": exc.__class__.__name__,
             },
         )
 
@@ -274,23 +289,89 @@ async def _run_market_data_sync_task(
 
     except Exception as exc:
         message = _safe_error_message(exc)
-        failed_task = await repository.mark_failed(
+
+        error_result = {
+            "status": "failed",
+            "reason": "market_data_sync_failed",
+            "task_type": task.task_type,
+            "error_type": exc.__class__.__name__,
+            "error_message": message,
+        }
+
+        updated_task, retried = await _mark_failed_or_retry(
+            repository=repository,
             task=task,
             error_message=message,
-            result={
-                "status": "failed",
-                "reason": "market_data_sync_failed",
-                "task_type": task.task_type,
-            },
+            result=error_result,
+            retryable=True,
         )
 
         return {
-            "status": failed_task.status,
-            "reason": "market_data_sync_failed",
-            "task_id": failed_task.id,
-            "task_type": failed_task.task_type,
+            "status": updated_task.status,
+            "reason": "market_data_sync_retrying" if retried else "market_data_sync_failed",
+            "task_id": updated_task.id,
+            "task_type": updated_task.task_type,
+            "retry_count": updated_task.retry_count,
+            "max_retries": updated_task.max_retries,
+            "will_retry": retried,
         }
 
+
+def _can_retry_task(task) -> bool:
+    return task.retry_count < task.max_retries
+
+async def _mark_failed_or_retry(
+    *,
+    repository: AsyncBackgroundTaskRepository,
+    task,
+    error_message: str,
+    result: dict[str, Any],
+    retryable: bool,
+) -> tuple[object, bool]:
+    if retryable and _can_retry_task(task):
+        retrying_task = await repository.mark_retrying(
+            task=task,
+            error_message=error_message,
+        )
+
+        async_result = celery_app.send_task(
+            "background_tasks.dispatch_background_task",
+            args=[retrying_task.id],
+            countdown=BACKGROUND_TASK_RETRY_DELAY_SECONDS,
+        )
+
+        queued_task = await repository.mark_queued(
+            task=retrying_task,
+            celery_task_id=async_result.id,
+        )
+
+        queued_task.result = {
+            **result,
+            "status": "retrying",
+            "will_retry": True,
+            "retry_count": queued_task.retry_count,
+            "max_retries": queued_task.max_retries,
+            "next_retry_delay_seconds": BACKGROUND_TASK_RETRY_DELAY_SECONDS,
+        }
+        repository.db.add(queued_task)
+        await repository.db.commit()
+        await repository.db.refresh(queued_task)
+
+        return queued_task, True
+
+    failed_task = await repository.mark_failed(
+        task=task,
+        error_message=error_message,
+        result={
+            **result,
+            "status": "failed",
+            "will_retry": False,
+            "retry_count": task.retry_count,
+            "max_retries": task.max_retries,
+        },
+    )
+
+    return failed_task, False
 
 def _safe_error_message(exc: Exception) -> str:
     message = str(exc).strip()

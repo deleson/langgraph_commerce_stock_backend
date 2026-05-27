@@ -11,7 +11,7 @@ MarketCode = Literal["US", "CN", "HK"]
 AnalysisType = Literal["stock_basic"]
 TrendDirection = Literal["bullish", "bearish", "neutral"]
 RiskLevel = Literal["low", "medium", "high"]
-GraphRoute = Literal["normal", "degraded", "unavailable", "error"]
+GraphRoute = Literal["normal", "degraded", "unavailable", "error", "quota_blocked"]
 
 
 class StockAnalysisRequest(BaseModel):

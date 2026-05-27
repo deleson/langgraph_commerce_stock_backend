@@ -26,7 +26,7 @@ from app.services.ai_usage_token_service import (
     AIUsageTokenEstimate,
     AIUsageTokenService,
 )
-
+from app.services.ai_quota_message_service import AIQuotaMessageService
 
 logger = logging.getLogger(__name__)
 STOCK_ANALYSIS_AI_FEATURE = "stock_analysis"
@@ -716,13 +716,10 @@ def _build_ai_quota_blocked_result_state(
     estimated_tokens: AIUsageTokenEstimate,
     estimated_cost: AIUsageCostEstimate,
 ) -> StockAnalysisState:
-    result_state = _build_llm_error_result_state(
-        state=state,
-        reason=reason,
-    )
+    message_service = AIQuotaMessageService()
 
     metadata = {
-        **result_state.get("metadata", {}),
+        **state.get("metadata", {}),
         "ai_quota": {
             "allowed": False,
             "reason": reason,
@@ -735,8 +732,43 @@ def _build_ai_quota_blocked_result_state(
         },
     }
 
+    quality_context = state.get("quality_context")
+    if quality_context is not None:
+        quality_context = quality_context.model_copy(
+            update={
+                "graph_route": "quota_blocked",
+                "route_reason": reason,
+                "warnings": _deduplicate_messages(
+                    [
+                        *quality_context.warnings,
+                        "AI 调用额度不足，本次没有继续调用 DeepSeek。",
+                    ]
+                ),
+                "errors": _deduplicate_messages(
+                    [
+                        *quality_context.errors,
+                        reason,
+                    ]
+                ),
+            },
+            deep=True,
+        )
+
+    result = StockAnalysisResult(
+        summary=message_service.build_stock_analysis_blocked_summary(reason),
+        risk_level="medium",
+        trend="neutral",
+        key_points=message_service.build_stock_analysis_blocked_key_points(reason),
+        suggestion=message_service.build_stock_analysis_blocked_suggestion(),
+        warnings=message_service.build_stock_analysis_blocked_warnings(),
+    )
+
     return {
-        **result_state,
+        "graph_route": "quota_blocked",
+        "quality_context": quality_context,
+        "route_reason": reason,
+        "error_message": reason,
+        "result": result,
         "metadata": metadata,
         "ai_quota_allowed": False,
         "ai_quota_reason": reason,

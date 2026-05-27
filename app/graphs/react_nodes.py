@@ -44,7 +44,7 @@ from app.services.ai_usage_token_service import (
     AIUsageTokenEstimate,
     AIUsageTokenService,
 )
-
+from app.services.ai_quota_message_service import AIQuotaMessageService
 
 if TYPE_CHECKING:
     from app.services.stock_analysis_react_tool_service import (
@@ -115,7 +115,8 @@ async def agent_reason_node(
             "allowed_tools": allowed_tools,
             "next_action": "final_answer",
             "final_answer": _build_react_quota_blocked_answer(
-                quota_reason or "AI quota is not enough"
+                quota_reason or "AI quota is not enough",
+                feature=REACT_REASON_AI_FEATURE,
             ),
             "ai_quota_allowed": False,
             "ai_quota_reason": quota_reason,
@@ -892,7 +893,8 @@ async def final_answer_node(
         return {
             "next_action": "final_answer",
             "final_answer": _build_react_quota_blocked_answer(
-                quota_reason or "AI quota is not enough"
+                quota_reason or "AI quota is not enough",
+                feature=REACT_FINAL_ANSWER_AI_FEATURE,
             ),
             "ai_quota_allowed": False,
             "ai_quota_reason": quota_reason,
@@ -1128,12 +1130,14 @@ async def _record_react_ai_blocked(
     except Exception:
         logger.exception("record react ai blocked usage failed")
 
-def _build_react_quota_blocked_answer(reason: str) -> str:
-    return (
-        "当前 AI 调用额度不足，本次 ReAct 追问没有继续调用大模型生成新的分析内容。"
-        f"系统记录到的原因是：{reason}。"
-        "你可以稍后再试，或先查看已有分析记录、行情数据、技术指标、回测结果和候选评分等确定性信息。"
-        "以上内容仅供研究参考，不构成投资建议。"
+def _build_react_quota_blocked_answer(
+    reason: str,
+    *,
+    feature: AIUsageFeature,
+) -> str:
+    return AIQuotaMessageService().build_react_blocked_answer(
+        feature=feature,
+        reason=reason,
     )
 
 

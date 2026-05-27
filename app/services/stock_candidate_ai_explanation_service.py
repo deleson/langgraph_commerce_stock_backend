@@ -35,7 +35,7 @@ from app.services.ai_usage_token_service import (
     AIUsageTokenEstimate,
     AIUsageTokenService,
 )
-
+from app.services.ai_quota_message_service import AIQuotaMessageService
 
 
 logger = logging.getLogger(__name__)
@@ -1196,8 +1196,9 @@ class StockCandidateAIExplanationService:
         quota_reason: str,
     ) -> StockCandidateAIExplanationResponse:
         fallback_reason = (
-            "当前 AI 候选解释额度不足，系统没有继续调用 DeepSeek。"
-            f"额度原因：{quota_reason}。"
+            AIQuotaMessageService().build_candidate_ai_blocked_fallback_reason(
+                quota_reason
+            )
         )
 
         if request.allow_fallback:

@@ -59,6 +59,7 @@ from app.services.ai_usage_token_service import (
 from app.services.ai_usage_service import AIUsageService
 from app.services.ai_quota_service import AIQuotaService
 from app.services.ai_usage_query_service import AIUsageQueryService
+from app.services.ai_quota_message_service import AIQuotaMessageService
 # from app.services.stock_analysis_service import StockAnalysisService
 
 
@@ -113,5 +114,6 @@ __all__ = [
     "AIUsageService",
     "AIQuotaService",
     "AIUsageQueryService",
+    "AIQuotaMessageService",
     # "StockAnalysisService",
 ]

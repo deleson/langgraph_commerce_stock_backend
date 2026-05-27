@@ -202,6 +202,18 @@ from app.schemas.ai_usage import (
     AIUsageSummaryResponse,
     AIUsageTokenSource,
 )
+from app.schemas.background_task import (
+    BackgroundTaskCreateRequest,
+    BackgroundTaskListQuery,
+    BackgroundTaskListResponse,
+    BackgroundTaskPriority,
+    BackgroundTaskResponse,
+    BackgroundTaskSource,
+    BackgroundTaskStatus,
+    BackgroundTaskSubmitResponse,
+    BackgroundTaskType,
+    MarketDataSyncTaskPayload,
+)
 
 __all__ = [
     "ApiResponse",
@@ -384,4 +396,15 @@ __all__ = [
     "AIUsageSummaryPeriod",
     "AIUsageSummaryResponse",
     "AIUsageTokenSource",
+
+    "BackgroundTaskCreateRequest",
+    "BackgroundTaskListQuery",
+    "BackgroundTaskListResponse",
+    "BackgroundTaskPriority",
+    "BackgroundTaskResponse",
+    "BackgroundTaskSource",
+    "BackgroundTaskStatus",
+    "BackgroundTaskSubmitResponse",
+    "BackgroundTaskType",
+    "MarketDataSyncTaskPayload",
 ]

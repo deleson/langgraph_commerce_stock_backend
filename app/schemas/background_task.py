@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.schemas.market import (
+from app.schemas.market_data import (
     AdjustType,
     CandleTimeframe,
     MarketCode,
@@ -48,10 +48,10 @@ BackgroundTaskSource = Literal[
 
 class MarketDataSyncTaskPayload(BaseModel):
     symbol: str = Field(..., min_length=1, max_length=32)
-    market: MarketCode = MarketCode.US
-    timeframe: CandleTimeframe = CandleTimeframe.DAY
-    adjust_type: AdjustType = AdjustType.NONE
-    source: MarketDataSource = MarketDataSource.AUTO
+    market: MarketCode = "US"
+    timeframe: CandleTimeframe = "1d"
+    adjust_type: AdjustType = "none"
+    source: MarketDataSource = "mock"
     start_date: str | None = Field(default=None, max_length=32)
     end_date: str | None = Field(default=None, max_length=32)
     force_refresh: bool = False

@@ -33,6 +33,18 @@ from app.graphs.react_safety import (
     sanitize_tool_output,
     truncate_text,
 )
+from app.core.config import get_settings
+from app.core.database import AsyncSessionLocal
+from app.repositories.ai_usage_repo import AsyncAIUsageRepository
+from app.schemas.ai_usage import AIQuotaCheckRequest, AIUsageFeature
+from app.services.ai_quota_service import AIQuotaService
+from app.services.ai_usage_service import AIUsageService
+from app.services.ai_usage_token_service import (
+    AIUsageCostEstimate,
+    AIUsageTokenEstimate,
+    AIUsageTokenService,
+)
+
 
 if TYPE_CHECKING:
     from app.services.stock_analysis_react_tool_service import (
@@ -41,6 +53,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+REACT_REASON_AI_FEATURE: AIUsageFeature = "react_reason"
+REACT_FINAL_ANSWER_AI_FEATURE: AIUsageFeature = "react_final_answer"
+
+REACT_REASON_ESTIMATED_COMPLETION_TOKENS = 500
+REACT_FINAL_ANSWER_ESTIMATED_COMPLETION_TOKENS = 1200
 
 async def agent_reason_node(
     state: StockAnalysisReactState,
@@ -75,12 +92,76 @@ async def agent_reason_node(
         allowed_tools=allowed_tools,
     )
 
+    user_id = _get_required_int(state, "user_id")
+
+    quota_allowed, quota_reason, estimated_tokens, estimated_cost = await _check_react_ai_quota(
+        user_id=user_id,
+        feature=REACT_REASON_AI_FEATURE,
+        messages=messages,
+        estimated_completion_tokens=REACT_REASON_ESTIMATED_COMPLETION_TOKENS,
+    )
+
+    if not quota_allowed:
+        await _record_react_ai_blocked(
+            user_id=user_id,
+            state=state,
+            feature=REACT_REASON_AI_FEATURE,
+            reason=quota_reason or "AI quota is not enough",
+            estimated_tokens=estimated_tokens,
+            estimated_cost=estimated_cost,
+        )
+
+        return {
+            "allowed_tools": allowed_tools,
+            "next_action": "final_answer",
+            "final_answer": _build_react_quota_blocked_answer(
+                quota_reason or "AI quota is not enough"
+            ),
+            "ai_quota_allowed": False,
+            "ai_quota_reason": quota_reason,
+            "metadata": {
+                **state.get("metadata", {}),
+                "react_reason_ai_quota": {
+                    "allowed": False,
+                    "reason": quota_reason,
+                    "feature": REACT_REASON_AI_FEATURE,
+                    "estimated_prompt_tokens": estimated_tokens.prompt_tokens,
+                    "estimated_completion_tokens": estimated_tokens.completion_tokens,
+                    "estimated_total_tokens": estimated_tokens.total_tokens,
+                    "estimated_cost": str(estimated_cost.estimated_cost),
+                    "currency": estimated_cost.currency,
+                },
+            },
+        }
+
+    started_at = datetime.now(UTC)
+    response = None
+    usage_log = None
+
     try:
         llm = get_chat_model()
         response = await llm.ainvoke(messages)
         decision = _parse_agent_reason_decision(str(response.content))
+        usage_log = await _record_react_ai_success(
+            user_id=user_id,
+            state=state,
+            feature=REACT_REASON_AI_FEATURE,
+            response=response,
+            messages=messages,
+            completion_text=str(response.content),
+            started_at=started_at,
+        )
     except Exception as exc:
         logger.exception("react agent reason node failed")
+        await _record_react_ai_failed(
+            user_id=user_id,
+            state=state,
+            feature=REACT_REASON_AI_FEATURE,
+            response=response,
+            messages=messages,
+            error_message=_safe_exception_message(exc),
+            started_at=started_at,
+        )
         return _build_agent_reason_error_state(exc)
 
     next_action = decision.get("next_action")
@@ -111,8 +192,12 @@ async def agent_reason_node(
                     "selected_tool": tool_call.tool_name,
                     "reason": tool_call.reason,
                     "observation_count": len(observations),
+                    "usage_log_id": getattr(usage_log, "id", None),
                 },
             },
+            "ai_quota_allowed": True,
+            "ai_usage_log_ids": [getattr(usage_log, "id")] if usage_log is not None else [],
+
         }
 
     if next_action == "final_answer":
@@ -131,7 +216,11 @@ async def agent_reason_node(
                     "selected_action": "final_answer",
                     "observation_count": len(observations),
                 },
+                "usage_log_id": getattr(usage_log, "id", None),
             },
+            "ai_quota_allowed": True,
+            "ai_usage_log_ids": [getattr(usage_log, "id")] if usage_log is not None else [],
+
         }
 
     if next_action == "error":
@@ -148,7 +237,10 @@ async def agent_reason_node(
                     "selected_action": "error",
                     "observation_count": len(observations),
                 },
+                "usage_log_id": getattr(usage_log, "id", None),
             },
+            "ai_quota_allowed": True,
+            "ai_usage_log_ids": [getattr(usage_log, "id")] if usage_log is not None else [],
         }
 
     return {
@@ -778,12 +870,77 @@ async def final_answer_node(
     messages = _build_final_answer_messages(state)
     answer_source = "llm"
 
+    user_id = _get_required_int(state, "user_id")
+
+    quota_allowed, quota_reason, estimated_tokens, estimated_cost = await _check_react_ai_quota(
+        user_id=user_id,
+        feature=REACT_FINAL_ANSWER_AI_FEATURE,
+        messages=messages,
+        estimated_completion_tokens=REACT_FINAL_ANSWER_ESTIMATED_COMPLETION_TOKENS,
+    )
+
+    if not quota_allowed:
+        await _record_react_ai_blocked(
+            user_id=user_id,
+            state=state,
+            feature=REACT_FINAL_ANSWER_AI_FEATURE,
+            reason=quota_reason or "AI quota is not enough",
+            estimated_tokens=estimated_tokens,
+            estimated_cost=estimated_cost,
+        )
+
+        return {
+            "next_action": "final_answer",
+            "final_answer": _build_react_quota_blocked_answer(
+                quota_reason or "AI quota is not enough"
+            ),
+            "ai_quota_allowed": False,
+            "ai_quota_reason": quota_reason,
+            "metadata": {
+                **state.get("metadata", {}),
+                "react_final_answer_ai_quota": {
+                    "allowed": False,
+                    "reason": quota_reason,
+                    "feature": REACT_FINAL_ANSWER_AI_FEATURE,
+                    "estimated_prompt_tokens": estimated_tokens.prompt_tokens,
+                    "estimated_completion_tokens": estimated_tokens.completion_tokens,
+                    "estimated_total_tokens": estimated_tokens.total_tokens,
+                    "estimated_cost": str(estimated_cost.estimated_cost),
+                    "currency": estimated_cost.currency,
+                    "observation_count": len(state.get("observations", [])),
+                    "trace_count": len(state.get("trace", [])),
+                },
+            },
+        }
+
+    started_at = datetime.now(UTC)
+    response = None
+    usage_log = None
+
     try:
         llm = get_chat_model()
         response = await llm.ainvoke(messages)
         answer = _normalize_final_answer(str(response.content))
+        usage_log = await _record_react_ai_success(
+            user_id=user_id,
+            state=state,
+            feature=REACT_FINAL_ANSWER_AI_FEATURE,
+            response=response,
+            messages=messages,
+            completion_text=str(response.content),
+            started_at=started_at,
+        )
     except Exception as exc:
         logger.exception("react final answer node failed")
+        await _record_react_ai_failed(
+            user_id=user_id,
+            state=state,
+            feature=REACT_FINAL_ANSWER_AI_FEATURE,
+            response=response,
+            messages=messages,
+            error_message=_safe_exception_message(exc),
+            started_at=started_at,
+        )
         answer_source = "fallback"
         answer = _build_final_answer_fallback(
             state=state,
@@ -793,10 +950,13 @@ async def final_answer_node(
     return {
         "next_action": "final_answer",
         "final_answer": answer,
+        "ai_quota_allowed": True,
+        "ai_usage_log_ids": [getattr(usage_log, "id")] if usage_log is not None else [],
         "metadata": {
             **state.get("metadata", {}),
             "react_final_answer": {
                 "source": answer_source,
+                "usage_log_id": getattr(usage_log, "id", None),
                 "observation_count": len(state.get("observations", [])),
                 "trace_count": len(state.get("trace", [])),
                 "successful_observation_count": _count_observations(
@@ -810,6 +970,171 @@ async def final_answer_node(
             },
         },
     }
+
+async def _check_react_ai_quota(
+    *,
+    user_id: int,
+    feature: AIUsageFeature,
+    messages: list[SystemMessage | HumanMessage],
+    estimated_completion_tokens: int,
+) -> tuple[bool, str | None, AIUsageTokenEstimate, AIUsageCostEstimate]:
+    token_service = AIUsageTokenService()
+    settings = get_settings()
+
+    prompt_estimate = token_service.estimate_prompt_tokens_from_messages(messages)
+    estimated_tokens = AIUsageTokenEstimate(
+        prompt_tokens=prompt_estimate.prompt_tokens,
+        completion_tokens=estimated_completion_tokens,
+        total_tokens=prompt_estimate.prompt_tokens + estimated_completion_tokens,
+        token_source="estimated",
+    )
+    estimated_cost = token_service.estimate_cost(
+        model_name=settings.llm_model,
+        prompt_tokens=estimated_tokens.prompt_tokens,
+        completion_tokens=estimated_tokens.completion_tokens,
+    )
+
+    async with AsyncSessionLocal() as db:
+        repo = AsyncAIUsageRepository(db)
+        quota_service = AIQuotaService(repo)
+
+        result = await quota_service.check_quota(
+            AIQuotaCheckRequest(
+                user_id=user_id,
+                feature=feature,
+                provider="deepseek",
+                model_name=settings.llm_model,
+                estimated_prompt_tokens=estimated_tokens.prompt_tokens,
+                estimated_completion_tokens=estimated_tokens.completion_tokens,
+                estimated_total_tokens=estimated_tokens.total_tokens,
+                estimated_cost=estimated_cost.estimated_cost,
+                currency=estimated_cost.currency,
+            )
+        )
+
+    return result.allowed, result.reason, estimated_tokens, estimated_cost
+
+async def _record_react_ai_success(
+    *,
+    user_id: int,
+    state: StockAnalysisReactState,
+    feature: AIUsageFeature,
+    response: Any,
+    messages: list[SystemMessage | HumanMessage],
+    completion_text: str,
+    started_at: datetime,
+):
+    try:
+        async with AsyncSessionLocal() as db:
+            repo = AsyncAIUsageRepository(db)
+            usage_service = AIUsageService(repo)
+
+            return await usage_service.record_success(
+                user_id=user_id,
+                feature=feature,
+                model_name=get_settings().llm_model,
+                response=response,
+                prompt_messages=messages,
+                completion_text=completion_text,
+                analysis_thread_id=state.get("analysis_thread_id"),
+                trace_id=state.get("react_graph_checkpoint_id"),
+                started_at=started_at,
+                finished_at=datetime.now(UTC),
+                extra={
+                    "source": "stock_analysis_react_graph",
+                    "referenced_symbol": state.get("referenced_symbol"),
+                    "referenced_market": state.get("referenced_market"),
+                    "referenced_analysis_record_id": state.get("referenced_analysis_record_id"),
+                    "iteration_count": state.get("iteration_count", 0),
+                    "observation_count": len(state.get("observations", [])),
+                },
+            )
+    except Exception:
+        logger.exception("record react ai success usage failed")
+        return None
+
+async def _record_react_ai_failed(
+    *,
+    user_id: int,
+    state: StockAnalysisReactState,
+    feature: AIUsageFeature,
+    response: Any | None,
+    messages: list[SystemMessage | HumanMessage],
+    error_message: str,
+    started_at: datetime,
+) -> None:
+    try:
+        async with AsyncSessionLocal() as db:
+            repo = AsyncAIUsageRepository(db)
+            usage_service = AIUsageService(repo)
+
+            await usage_service.record_failed(
+                user_id=user_id,
+                feature=feature,
+                model_name=get_settings().llm_model,
+                error_message=error_message,
+                response=response,
+                prompt_messages=messages,
+                completion_text=str(getattr(response, "content", "") or ""),
+                analysis_thread_id=state.get("analysis_thread_id"),
+                trace_id=state.get("react_graph_checkpoint_id"),
+                started_at=started_at,
+                finished_at=datetime.now(UTC),
+                extra={
+                    "source": "stock_analysis_react_graph",
+                    "referenced_symbol": state.get("referenced_symbol"),
+                    "referenced_market": state.get("referenced_market"),
+                    "referenced_analysis_record_id": state.get("referenced_analysis_record_id"),
+                    "iteration_count": state.get("iteration_count", 0),
+                    "observation_count": len(state.get("observations", [])),
+                },
+            )
+    except Exception:
+        logger.exception("record react ai failed usage failed")
+
+async def _record_react_ai_blocked(
+    *,
+    user_id: int,
+    state: StockAnalysisReactState,
+    feature: AIUsageFeature,
+    reason: str,
+    estimated_tokens: AIUsageTokenEstimate,
+    estimated_cost: AIUsageCostEstimate,
+) -> None:
+    try:
+        async with AsyncSessionLocal() as db:
+            repo = AsyncAIUsageRepository(db)
+            usage_service = AIUsageService(repo)
+
+            await usage_service.record_blocked(
+                user_id=user_id,
+                feature=feature,
+                model_name=get_settings().llm_model,
+                reason=reason,
+                estimated_prompt_tokens=estimated_tokens.prompt_tokens,
+                estimated_completion_tokens=estimated_tokens.completion_tokens,
+                estimated_cost=estimated_cost.estimated_cost,
+                analysis_thread_id=state.get("analysis_thread_id"),
+                trace_id=state.get("react_graph_checkpoint_id"),
+                extra={
+                    "source": "stock_analysis_react_graph",
+                    "referenced_symbol": state.get("referenced_symbol"),
+                    "referenced_market": state.get("referenced_market"),
+                    "referenced_analysis_record_id": state.get("referenced_analysis_record_id"),
+                    "iteration_count": state.get("iteration_count", 0),
+                    "observation_count": len(state.get("observations", [])),
+                },
+            )
+    except Exception:
+        logger.exception("record react ai blocked usage failed")
+
+def _build_react_quota_blocked_answer(reason: str) -> str:
+    return (
+        "当前 AI 调用额度不足，本次 ReAct 追问没有继续调用大模型生成新的分析内容。"
+        f"系统记录到的原因是：{reason}。"
+        "你可以稍后再试，或先查看已有分析记录、行情数据、技术指标、回测结果和候选评分等确定性信息。"
+        "以上内容仅供研究参考，不构成投资建议。"
+    )
 
 
 def _build_final_answer_messages(

@@ -50,6 +50,11 @@ class StockAnalysisReactState(TypedDict, total=False):
     # Final output.
     final_answer: str
 
+    # AI usage and quota.
+    ai_quota_allowed: bool
+    ai_quota_reason: str
+    ai_usage_log_ids: Annotated[list[int], operator.add]
+
     # Error and trace.
     error_message: str
     trace: Annotated[list[ReactToolTrace], operator.add]

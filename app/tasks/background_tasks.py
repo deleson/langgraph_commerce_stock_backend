@@ -6,9 +6,11 @@ from typing import Any
 from pydantic import ValidationError
 
 from app.core.celery_app import celery_app
+from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal
 from app.repositories.background_task_repo import AsyncBackgroundTaskRepository
 from app.schemas.background_task import (
+    BackgroundTaskCreateRequest,
     MarketDataSyncTaskPayload,
     StockAnalysisAsyncTaskPayload,
 )
@@ -39,6 +41,61 @@ def _get_worker_event_loop() -> asyncio.AbstractEventLoop:
 def dispatch_background_task(task_id: int) -> dict[str, object]:
     loop = _get_worker_event_loop()
     return loop.run_until_complete(_dispatch_background_task_async(task_id))
+
+@celery_app.task(name="background_tasks.submit_scheduled_market_data_sync")
+def submit_scheduled_market_data_sync() -> dict[str, object]:
+    loop = _get_worker_event_loop()
+    return loop.run_until_complete(_submit_scheduled_market_data_sync_async())
+
+
+async def _submit_scheduled_market_data_sync_async() -> dict[str, object]:
+    settings = get_settings()
+
+    payload = MarketDataSyncTaskPayload(
+        symbol=settings.celery_beat_market_data_sync_symbol,
+        market=settings.celery_beat_market_data_sync_market,
+        timeframe=settings.celery_beat_market_data_sync_timeframe,
+        limit=settings.celery_beat_market_data_sync_limit,
+        adjust_type=settings.celery_beat_market_data_sync_adjust_type,
+        source=settings.celery_beat_market_data_sync_source,
+    )
+
+    request = BackgroundTaskCreateRequest(
+        task_type="market_data_sync",
+        payload=payload.model_dump(),
+        priority="normal",
+        source="scheduler",
+        max_retries=3,
+    )
+
+    async with AsyncSessionLocal() as db:
+        repository = AsyncBackgroundTaskRepository(db)
+        task = await repository.create_task(
+            payload=request,
+            user_id=None,
+        )
+
+        async_result = celery_app.send_task(
+            "background_tasks.dispatch_background_task",
+            args=[task.id],
+        )
+
+        queued_task = await repository.mark_queued(
+            task=task,
+            celery_task_id=async_result.id,
+        )
+
+        return {
+            "status": "queued",
+            "reason": "scheduled_market_data_sync_submitted",
+            "task_id": queued_task.id,
+            "task_type": queued_task.task_type,
+            "celery_task_id": queued_task.celery_task_id,
+            "symbol": payload.symbol,
+            "market": payload.market,
+            "timeframe": payload.timeframe,
+            "limit": payload.limit,
+        }
 
 
 async def _dispatch_background_task_async(task_id: int) -> dict[str, object]:

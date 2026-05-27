@@ -8,7 +8,10 @@ from pydantic import ValidationError
 from app.core.celery_app import celery_app
 from app.core.database import AsyncSessionLocal
 from app.repositories.background_task_repo import AsyncBackgroundTaskRepository
-from app.schemas.background_task import MarketDataSyncTaskPayload
+from app.schemas.background_task import (
+    MarketDataSyncTaskPayload,
+    StockAnalysisAsyncTaskPayload,
+)
 from app.services.market_data_sync_service import MarketDataSyncService
 
 
@@ -59,6 +62,12 @@ async def _dispatch_background_task_async(task_id: int) -> dict[str, object]:
                 db=db,
             )
 
+        if running_task.task_type == "stock_analysis_async":
+            return await _run_stock_analysis_async_reserved_task(
+                repository=repository,
+                task=running_task,
+            )
+
         message = (
             f"后台任务类型 {running_task.task_type} 的执行逻辑尚未接入，"
             "将在后续步骤实现具体任务处理器"
@@ -81,6 +90,63 @@ async def _dispatch_background_task_async(task_id: int) -> dict[str, object]:
             "task_type": failed_task.task_type,
         }
 
+async def _run_stock_analysis_async_reserved_task(
+    *,
+    repository: AsyncBackgroundTaskRepository,
+    task,
+) -> dict[str, Any]:
+    try:
+        payload = StockAnalysisAsyncTaskPayload.model_validate(task.payload)
+
+        result = {
+            "status": "failed",
+            "reason": "stock_analysis_async_reserved",
+            "task_type": task.task_type,
+            "symbol": payload.symbol,
+            "market": payload.market,
+            "analysis_type": payload.analysis_type,
+            "thread_id": payload.thread_id,
+            "notify_when_done": payload.notify_when_done,
+            "note": (
+                "stock_analysis_async 后台 AI 分析任务已完成任务类型识别和 payload 校验，"
+                "但当前步骤只做预留，不调用 DeepSeek，不执行主分析图，"
+                "后续步骤会接入 AI 额度检查、失败重试和真实后台分析执行。"
+            ),
+        }
+
+        failed_task = await repository.mark_failed(
+            task=task,
+            error_message="stock_analysis_async task is reserved but not implemented yet",
+            result=result,
+        )
+
+        return {
+            "status": failed_task.status,
+            "reason": "stock_analysis_async_reserved",
+            "task_id": failed_task.id,
+            "task_type": failed_task.task_type,
+            "symbol": payload.symbol,
+            "market": payload.market,
+        }
+
+    except ValidationError as exc:
+        message = _safe_error_message(exc)
+        failed_task = await repository.mark_failed(
+            task=task,
+            error_message=message,
+            result={
+                "status": "failed",
+                "reason": "invalid_stock_analysis_async_payload",
+                "task_type": task.task_type,
+            },
+        )
+
+        return {
+            "status": failed_task.status,
+            "reason": "invalid_stock_analysis_async_payload",
+            "task_id": failed_task.id,
+            "task_type": failed_task.task_type,
+        }
 
 async def _run_market_data_sync_task(
     *,

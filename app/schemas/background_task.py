@@ -62,6 +62,26 @@ class MarketDataSyncTaskPayload(BaseModel):
     def normalize_symbol(cls, value: str) -> str:
         return value.strip().upper()
 
+class StockAnalysisAsyncTaskPayload(BaseModel):
+    symbol: str = Field(..., min_length=1, max_length=20)
+    market: MarketCode = "US"
+    analysis_type: Literal["stock_basic"] = "stock_basic"
+    thread_id: str | None = Field(default=None, min_length=1, max_length=100)
+    notify_when_done: bool = True
+
+    @field_validator("symbol")
+    @classmethod
+    def normalize_symbol(cls, value: str) -> str:
+        return value.strip().upper()
+
+    @field_validator("thread_id", mode="before")
+    @classmethod
+    def normalize_thread_id(cls, value: str | None) -> str | None:
+        if isinstance(value, str):
+            normalized = value.strip()
+            return normalized or None
+        return value
+
 
 class BackgroundTaskCreateRequest(BaseModel):
     task_type: BackgroundTaskType

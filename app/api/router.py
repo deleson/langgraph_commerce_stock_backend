@@ -22,6 +22,9 @@ from app.api.routers.stock_candidate_ai_explanations import (
     router as stock_candidate_ai_explanations_router,
 )
 from app.api.routers.ai_usage import router as ai_usage_router
+from app.api.routers.background_tasks import router as background_tasks_router
+
+
 from app.core.config import get_settings
 
 settings = get_settings()
@@ -47,3 +50,4 @@ api_router.include_router(portfolio_backtests_router)
 api_router.include_router(stock_candidates_router)
 api_router.include_router(stock_candidate_ai_explanations_router)
 api_router.include_router(ai_usage_router)
+api_router.include_router(background_tasks_router)

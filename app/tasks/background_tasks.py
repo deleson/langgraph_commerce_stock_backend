@@ -14,6 +14,15 @@ from app.schemas.background_task import (
     MarketDataSyncTaskPayload,
     StockAnalysisAsyncTaskPayload,
 )
+from app.repositories.ai_usage_repo import AsyncAIUsageRepository
+from app.schemas.ai_usage import AIQuotaCheckRequest, AIUsageFeature
+from app.services.ai_quota_service import AIQuotaService
+from app.services.ai_usage_service import AIUsageService
+from app.services.ai_usage_token_service import (
+    AIUsageCostEstimate,
+    AIUsageTokenEstimate,
+    AIUsageTokenService,
+)
 from app.services.market_data_sync_service import MarketDataSyncService
 
 
@@ -25,6 +34,8 @@ def smoke_test() -> dict[str, str]:
     }
 
 BACKGROUND_TASK_RETRY_DELAY_SECONDS = 10
+STOCK_ANALYSIS_ASYNC_AI_FEATURE: AIUsageFeature = "stock_analysis"
+STOCK_ANALYSIS_ASYNC_ESTIMATED_COMPLETION_TOKENS = 1200
 
 _worker_event_loop: asyncio.AbstractEventLoop | None = None
 
@@ -159,6 +170,91 @@ async def _run_stock_analysis_async_reserved_task(
     try:
         payload = StockAnalysisAsyncTaskPayload.model_validate(task.payload)
 
+        if task.user_id is None:
+            failed_task = await repository.mark_failed(
+                task=task,
+                error_message="stock_analysis_async requires user_id for AI quota check",
+                result={
+                    "status": "failed",
+                    "reason": "missing_user_id_for_ai_quota",
+                    "task_type": task.task_type,
+                    "symbol": payload.symbol,
+                    "market": payload.market,
+                    "will_retry": False,
+                    "retry_count": task.retry_count,
+                    "max_retries": task.max_retries,
+                },
+            )
+
+            return {
+                "status": failed_task.status,
+                "reason": "missing_user_id_for_ai_quota",
+                "task_id": failed_task.id,
+                "task_type": failed_task.task_type,
+                "symbol": payload.symbol,
+                "market": payload.market,
+            }
+
+        quota_allowed, quota_reason, estimated_tokens, estimated_cost = (
+            await _check_stock_analysis_async_ai_quota(
+                repository=repository,
+                user_id=task.user_id,
+                payload=payload,
+            )
+        )
+
+        if not quota_allowed:
+            usage_log = await _record_stock_analysis_async_ai_blocked(
+                repository=repository,
+                task=task,
+                payload=payload,
+                reason=quota_reason or "AI quota exceeded",
+                estimated_tokens=estimated_tokens,
+                estimated_cost=estimated_cost,
+            )
+
+            failed_task = await repository.mark_failed(
+                task=task,
+                error_message=quota_reason or "AI quota exceeded",
+                result={
+                    "status": "failed",
+                    "reason": "ai_quota_exceeded",
+                    "task_type": task.task_type,
+                    "symbol": payload.symbol,
+                    "market": payload.market,
+                    "analysis_type": payload.analysis_type,
+                    "thread_id": payload.thread_id,
+                    "notify_when_done": payload.notify_when_done,
+                    "ai_quota": {
+                        "allowed": False,
+                        "reason": quota_reason,
+                        "feature": STOCK_ANALYSIS_ASYNC_AI_FEATURE,
+                        "estimated_prompt_tokens": estimated_tokens.prompt_tokens,
+                        "estimated_completion_tokens": estimated_tokens.completion_tokens,
+                        "estimated_total_tokens": estimated_tokens.total_tokens,
+                        "estimated_cost": str(estimated_cost.estimated_cost),
+                        "currency": estimated_cost.currency,
+                    },
+                    "ai_usage": {
+                        "status": "blocked",
+                        "usage_log_id": getattr(usage_log, "id", None),
+                    },
+                    "will_retry": False,
+                    "retry_count": task.retry_count,
+                    "max_retries": task.max_retries,
+                },
+            )
+
+            return {
+                "status": failed_task.status,
+                "reason": "ai_quota_exceeded",
+                "task_id": failed_task.id,
+                "task_type": failed_task.task_type,
+                "symbol": payload.symbol,
+                "market": payload.market,
+                "ai_usage_log_id": getattr(usage_log, "id", None),
+            }
+
         result = {
             "status": "failed",
             "reason": "stock_analysis_async_reserved",
@@ -168,10 +264,20 @@ async def _run_stock_analysis_async_reserved_task(
             "analysis_type": payload.analysis_type,
             "thread_id": payload.thread_id,
             "notify_when_done": payload.notify_when_done,
+            "ai_quota": {
+                "allowed": True,
+                "reason": None,
+                "feature": STOCK_ANALYSIS_ASYNC_AI_FEATURE,
+                "estimated_prompt_tokens": estimated_tokens.prompt_tokens,
+                "estimated_completion_tokens": estimated_tokens.completion_tokens,
+                "estimated_total_tokens": estimated_tokens.total_tokens,
+                "estimated_cost": str(estimated_cost.estimated_cost),
+                "currency": estimated_cost.currency,
+            },
             "note": (
-                "stock_analysis_async 后台 AI 分析任务已完成任务类型识别和 payload 校验，"
-                "但当前步骤只做预留，不调用 DeepSeek，不执行主分析图，"
-                "后续步骤会接入 AI 额度检查、失败重试和真实后台分析执行。"
+                "stock_analysis_async 后台 AI 分析任务已完成任务类型识别、payload 校验和 AI 额度检查，"
+                "但当前步骤仍然只做预留，不调用 DeepSeek，不执行主分析图。"
+                "后续步骤会在额度检查、失败重试和真实执行链路稳定后接入后台分析。"
             ),
             "will_retry": False,
             "retry_count": task.retry_count,
@@ -215,6 +321,102 @@ async def _run_stock_analysis_async_reserved_task(
             "task_id": failed_task.id,
             "task_type": failed_task.task_type,
         }
+
+async def _check_stock_analysis_async_ai_quota(
+    *,
+    repository: AsyncBackgroundTaskRepository,
+    user_id: int,
+    payload: StockAnalysisAsyncTaskPayload,
+) -> tuple[bool, str | None, AIUsageTokenEstimate, AIUsageCostEstimate]:
+    token_service = AIUsageTokenService()
+    settings = get_settings()
+
+    prompt_text = _build_stock_analysis_async_quota_prompt(payload)
+    prompt_tokens = token_service.estimate_tokens_from_text(prompt_text)
+
+    estimated_tokens = AIUsageTokenEstimate(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=STOCK_ANALYSIS_ASYNC_ESTIMATED_COMPLETION_TOKENS,
+        total_tokens=prompt_tokens + STOCK_ANALYSIS_ASYNC_ESTIMATED_COMPLETION_TOKENS,
+        token_source="estimated",
+    )
+    estimated_cost = token_service.estimate_cost(
+        model_name=settings.llm_model,
+        prompt_tokens=estimated_tokens.prompt_tokens,
+        completion_tokens=estimated_tokens.completion_tokens,
+    )
+
+    ai_usage_repo = AsyncAIUsageRepository(repository.db)
+    quota_service = AIQuotaService(ai_usage_repo)
+
+    quota_result = await quota_service.check_quota(
+        AIQuotaCheckRequest(
+            user_id=user_id,
+            feature=STOCK_ANALYSIS_ASYNC_AI_FEATURE,
+            provider="deepseek",
+            model_name=settings.llm_model,
+            estimated_prompt_tokens=estimated_tokens.prompt_tokens,
+            estimated_completion_tokens=estimated_tokens.completion_tokens,
+            estimated_total_tokens=estimated_tokens.total_tokens,
+            estimated_cost=estimated_cost.estimated_cost,
+            currency=estimated_cost.currency,
+        )
+    )
+
+    return (
+        quota_result.allowed,
+        quota_result.reason,
+        estimated_tokens,
+        estimated_cost,
+    )
+
+async def _record_stock_analysis_async_ai_blocked(
+    *,
+    repository: AsyncBackgroundTaskRepository,
+    task,
+    payload: StockAnalysisAsyncTaskPayload,
+    reason: str,
+    estimated_tokens: AIUsageTokenEstimate,
+    estimated_cost: AIUsageCostEstimate,
+):
+    if task.user_id is None:
+        return None
+
+    ai_usage_repo = AsyncAIUsageRepository(repository.db)
+    usage_service = AIUsageService(ai_usage_repo)
+
+    return await usage_service.record_blocked(
+        user_id=task.user_id,
+        feature=STOCK_ANALYSIS_ASYNC_AI_FEATURE,
+        model_name=get_settings().llm_model,
+        reason=reason,
+        estimated_prompt_tokens=estimated_tokens.prompt_tokens,
+        estimated_completion_tokens=estimated_tokens.completion_tokens,
+        estimated_cost=estimated_cost.estimated_cost,
+        analysis_thread_id=payload.thread_id,
+        extra={
+            "source": "background_task",
+            "background_task_id": task.id,
+            "background_task_type": task.task_type,
+            "symbol": payload.symbol,
+            "market": payload.market,
+            "analysis_type": payload.analysis_type,
+        },
+    )
+
+def _build_stock_analysis_async_quota_prompt(
+    payload: StockAnalysisAsyncTaskPayload,
+) -> str:
+    return "\n".join(
+        [
+            "Background stock analysis task quota estimate.",
+            f"symbol: {payload.symbol}",
+            f"market: {payload.market}",
+            f"analysis_type: {payload.analysis_type}",
+            f"thread_id: {payload.thread_id or ''}",
+            f"notify_when_done: {payload.notify_when_done}",
+        ]
+    )
 
 async def _run_market_data_sync_task(
     *,

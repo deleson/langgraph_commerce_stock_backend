@@ -27,6 +27,16 @@ class Settings(BaseSettings):
 
     redis_url: str=Field(default="redis://127.0.0.1:6379/0")
 
+    celery_broker_url: str = Field(default="redis://127.0.0.1:6379/1")
+    celery_result_backend: str = Field(default="redis://127.0.0.1:6379/2")
+    celery_task_default_queue: str = Field(default="default")
+    celery_timezone: str = Field(default="Asia/Shanghai")
+    celery_enable_utc: bool = Field(default=True)
+    celery_task_track_started: bool = Field(default=True)
+    celery_task_time_limit_seconds: int = Field(default=1800)
+    celery_task_soft_time_limit_seconds: int = Field(default=1500)
+    celery_result_expires_seconds: int = Field(default=3600)
+
     jwt_secret_key: str = Field(default="change-this-in-production")
     jwt_algorithm: str = Field(default="HS256")
     jwt_access_token_expire_minutes: int = Field(default=60)

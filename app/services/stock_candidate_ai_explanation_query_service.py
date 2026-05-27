@@ -53,6 +53,7 @@ class StockCandidateAIExplanationQueryService:
         return await self.ai_explanation_service.explain_candidates(
             request=request,
             candidate_result=candidate_result,
+            user_id=user.id,
         )
 
     def _build_candidate_request_for_ai(

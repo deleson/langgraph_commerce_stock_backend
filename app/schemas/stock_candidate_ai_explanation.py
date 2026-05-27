@@ -24,6 +24,7 @@ StockCandidateAIExplanationUnavailableReason = Literal[
     "llm_unavailable",
     "llm_error",
     "llm_parse_error",
+    "ai_quota_exceeded",
 ]
 
 StockCandidateAIExplanationStyle = Literal[

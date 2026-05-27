@@ -1,5 +1,6 @@
 import json
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -23,11 +24,24 @@ from app.schemas.stock_candidate_ai_explanation import (
     StockCandidateAIRiskSummary,
     StockCandidateAIExplanationUnavailableReason,
 )
+from app.core.config import get_settings
+from app.core.database import AsyncSessionLocal
+from app.repositories.ai_usage_repo import AsyncAIUsageRepository
+from app.schemas.ai_usage import AIQuotaCheckRequest, AIUsageFeature
+from app.services.ai_quota_service import AIQuotaService
+from app.services.ai_usage_service import AIUsageService
+from app.services.ai_usage_token_service import (
+    AIUsageCostEstimate,
+    AIUsageTokenEstimate,
+    AIUsageTokenService,
+)
 
 
 
 logger = logging.getLogger(__name__)
+CANDIDATE_AI_EXPLANATION_FEATURE: AIUsageFeature = "candidate_ai_explanation"
 
+CANDIDATE_AI_EXPLANATION_ESTIMATED_COMPLETION_TOKENS = 1800
 
 class StockCandidateAIExplanationService:
     """Generate AI explanations for deterministic stock candidate results.
@@ -87,6 +101,7 @@ class StockCandidateAIExplanationService:
         *,
         request: StockCandidateAIExplanationRequest,
         candidate_result: StockCandidateResponse,
+        user_id: int,
     ) -> StockCandidateAIExplanationResponse:
         """Generate an AI explanation from an existing candidate scoring result."""
 
@@ -120,13 +135,53 @@ class StockCandidateAIExplanationService:
             candidates=candidates,
         )
 
+        messages = self._build_messages(ai_context)
+
+        quota_allowed, quota_reason, estimated_tokens, estimated_cost = (
+            await self._check_candidate_ai_quota(
+                user_id=user_id,
+                messages=messages,
+            )
+        )
+
+        if not quota_allowed:
+            await self._record_candidate_ai_blocked(
+                user_id=user_id,
+                request=request,
+                candidate_result=candidate_result,
+                reason=quota_reason or "AI quota is not enough",
+                estimated_tokens=estimated_tokens,
+                estimated_cost=estimated_cost,
+            )
+
+            return self._build_quota_blocked_response(
+                request=request,
+                candidate_result=candidate_result,
+                candidates=candidates,
+                input_snapshot=input_snapshot,
+                quota_reason=quota_reason or "AI quota is not enough",
+            )
+
+        started_at = datetime.now(UTC)
+        llm_response = None
+        raw_content = ""
+
         try:
-            messages = self._build_messages(ai_context)
             llm = get_chat_model()
             llm_response = await llm.ainvoke(messages)
             raw_content = str(llm_response.content).strip()
         except Exception as exc:
             logger.exception("stock candidate ai explanation llm call failed")
+            await self._record_candidate_ai_failed(
+                user_id=user_id,
+                request=request,
+                candidate_result=candidate_result,
+                response=llm_response,
+                messages=messages,
+                completion_text=raw_content,
+                error_message=self._safe_exception_message(exc),
+                started_at=started_at,
+            )
             return self._build_exception_response(
                 request=request,
                 candidate_result=candidate_result,
@@ -137,7 +192,7 @@ class StockCandidateAIExplanationService:
             )
 
         try:
-            return self._parse_ai_response(
+            response = self._parse_ai_response(
                 raw_content=raw_content,
                 request=request,
                 candidate_result=candidate_result,
@@ -145,6 +200,16 @@ class StockCandidateAIExplanationService:
             )
         except Exception as exc:
             logger.exception("stock candidate ai explanation parse failed")
+            await self._record_candidate_ai_failed(
+                user_id=user_id,
+                request=request,
+                candidate_result=candidate_result,
+                response=llm_response,
+                messages=messages,
+                completion_text=raw_content,
+                error_message=self._safe_exception_message(exc),
+                started_at=started_at,
+            )
             return self._build_exception_response(
                 request=request,
                 candidate_result=candidate_result,
@@ -153,6 +218,18 @@ class StockCandidateAIExplanationService:
                 unavailable_reason="llm_parse_error",
                 exc=exc,
             )
+
+        await self._record_candidate_ai_success(
+            user_id=user_id,
+            request=request,
+            candidate_result=candidate_result,
+            response=llm_response,
+            messages=messages,
+            completion_text=raw_content,
+            started_at=started_at,
+        )
+
+        return response
 
     def _build_messages(
         self,
@@ -943,6 +1020,202 @@ class StockCandidateAIExplanationService:
             include_risk_summary=request.include_risk_summary,
             score_formula_versions=formula_versions,
             ai_context_truncated=True,
+        )
+
+    async def _check_candidate_ai_quota(
+        self,
+        *,
+        user_id: int,
+        messages: list[SystemMessage | HumanMessage],
+    ) -> tuple[bool, str | None, AIUsageTokenEstimate, AIUsageCostEstimate]:
+        token_service = AIUsageTokenService()
+        settings = get_settings()
+
+        prompt_estimate = token_service.estimate_prompt_tokens_from_messages(messages)
+        estimated_tokens = AIUsageTokenEstimate(
+            prompt_tokens=prompt_estimate.prompt_tokens,
+            completion_tokens=CANDIDATE_AI_EXPLANATION_ESTIMATED_COMPLETION_TOKENS,
+            total_tokens=(
+                prompt_estimate.prompt_tokens
+                + CANDIDATE_AI_EXPLANATION_ESTIMATED_COMPLETION_TOKENS
+            ),
+            token_source="estimated",
+        )
+        estimated_cost = token_service.estimate_cost(
+            model_name=settings.llm_model,
+            prompt_tokens=estimated_tokens.prompt_tokens,
+            completion_tokens=estimated_tokens.completion_tokens,
+        )
+
+        async with AsyncSessionLocal() as db:
+            repo = AsyncAIUsageRepository(db)
+            quota_service = AIQuotaService(repo)
+
+            result = await quota_service.check_quota(
+                AIQuotaCheckRequest(
+                    user_id=user_id,
+                    feature=CANDIDATE_AI_EXPLANATION_FEATURE,
+                    provider="deepseek",
+                    model_name=settings.llm_model,
+                    estimated_prompt_tokens=estimated_tokens.prompt_tokens,
+                    estimated_completion_tokens=estimated_tokens.completion_tokens,
+                    estimated_total_tokens=estimated_tokens.total_tokens,
+                    estimated_cost=estimated_cost.estimated_cost,
+                    currency=estimated_cost.currency,
+                )
+            )
+
+        return result.allowed, result.reason, estimated_tokens, estimated_cost
+
+    async def _record_candidate_ai_success(
+        self,
+        *,
+        user_id: int,
+        request: StockCandidateAIExplanationRequest,
+        candidate_result: StockCandidateResponse,
+        response: Any,
+        messages: list[SystemMessage | HumanMessage],
+        completion_text: str,
+        started_at: datetime,
+    ):
+        try:
+            async with AsyncSessionLocal() as db:
+                repo = AsyncAIUsageRepository(db)
+                usage_service = AIUsageService(repo)
+
+                return await usage_service.record_success(
+                    user_id=user_id,
+                    feature=CANDIDATE_AI_EXPLANATION_FEATURE,
+                    model_name=get_settings().llm_model,
+                    response=response,
+                    prompt_messages=messages,
+                    completion_text=completion_text,
+                    started_at=started_at,
+                    finished_at=datetime.now(UTC),
+                    extra=self._build_ai_usage_extra(
+                        request=request,
+                        candidate_result=candidate_result,
+                    ),
+                )
+        except Exception:
+            logger.exception("record stock candidate ai explanation success usage failed")
+            return None
+
+    async def _record_candidate_ai_failed(
+        self,
+        *,
+        user_id: int,
+        request: StockCandidateAIExplanationRequest,
+        candidate_result: StockCandidateResponse,
+        response: Any | None,
+        messages: list[SystemMessage | HumanMessage],
+        completion_text: str,
+        error_message: str,
+        started_at: datetime,
+    ) -> None:
+        try:
+            async with AsyncSessionLocal() as db:
+                repo = AsyncAIUsageRepository(db)
+                usage_service = AIUsageService(repo)
+
+                await usage_service.record_failed(
+                    user_id=user_id,
+                    feature=CANDIDATE_AI_EXPLANATION_FEATURE,
+                    model_name=get_settings().llm_model,
+                    error_message=error_message,
+                    response=response,
+                    prompt_messages=messages,
+                    completion_text=completion_text,
+                    started_at=started_at,
+                    finished_at=datetime.now(UTC),
+                    extra=self._build_ai_usage_extra(
+                        request=request,
+                        candidate_result=candidate_result,
+                    ),
+                )
+        except Exception:
+            logger.exception("record stock candidate ai explanation failed usage failed")
+
+    async def _record_candidate_ai_blocked(
+        self,
+        *,
+        user_id: int,
+        request: StockCandidateAIExplanationRequest,
+        candidate_result: StockCandidateResponse,
+        reason: str,
+        estimated_tokens: AIUsageTokenEstimate,
+        estimated_cost: AIUsageCostEstimate,
+    ) -> None:
+        try:
+            async with AsyncSessionLocal() as db:
+                repo = AsyncAIUsageRepository(db)
+                usage_service = AIUsageService(repo)
+
+                await usage_service.record_blocked(
+                    user_id=user_id,
+                    feature=CANDIDATE_AI_EXPLANATION_FEATURE,
+                    model_name=get_settings().llm_model,
+                    reason=reason,
+                    estimated_prompt_tokens=estimated_tokens.prompt_tokens,
+                    estimated_completion_tokens=estimated_tokens.completion_tokens,
+                    estimated_cost=estimated_cost.estimated_cost,
+                    extra=self._build_ai_usage_extra(
+                        request=request,
+                        candidate_result=candidate_result,
+                    ),
+                )
+        except Exception:
+            logger.exception("record stock candidate ai explanation blocked usage failed")
+
+    def _build_ai_usage_extra(
+        self,
+        *,
+        request: StockCandidateAIExplanationRequest,
+        candidate_result: StockCandidateResponse,
+    ) -> dict[str, Any]:
+        return {
+            "source": "stock_candidate_ai_explanation",
+            "universe_source": request.candidate_request.universe_source,
+            "requested_top_n": request.candidate_request.top_n,
+            "max_candidates_to_explain": request.max_candidates_to_explain,
+            "candidate_count": len(candidate_result.candidates),
+            "excluded_count": len(candidate_result.excluded),
+            "explanation_style": request.explanation_style,
+            "include_comparison": request.include_comparison,
+            "include_research_priority": request.include_research_priority,
+            "include_risk_summary": request.include_risk_summary,
+        }
+
+    def _build_quota_blocked_response(
+        self,
+        *,
+        request: StockCandidateAIExplanationRequest,
+        candidate_result: StockCandidateResponse,
+        candidates: list[StockCandidateItem],
+        input_snapshot: StockCandidateAIExplanationInputSnapshot,
+        quota_reason: str,
+    ) -> StockCandidateAIExplanationResponse:
+        fallback_reason = (
+            "当前 AI 候选解释额度不足，系统没有继续调用 DeepSeek。"
+            f"额度原因：{quota_reason}。"
+        )
+
+        if request.allow_fallback:
+            return self._build_fallback_response(
+                request=request,
+                candidate_result=candidate_result,
+                candidates=candidates,
+                input_snapshot=input_snapshot,
+                unavailable_reason="ai_quota_exceeded",
+                fallback_reason=fallback_reason,
+            )
+
+        return self._build_unavailable_response(
+            request=request,
+            candidate_result=candidate_result,
+            input_snapshot=input_snapshot,
+            unavailable_reason="ai_quota_exceeded",
+            fallback_reason=fallback_reason,
         )
 
     def _build_exception_response(

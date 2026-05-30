@@ -19,7 +19,7 @@ from app.models.ai_usage_summary import AIUsageSummary
 from app.models.background_task import BackgroundTask
 from app.models.user_memory import UserMemory
 from app.models.user_profile import UserProfile
-
+from app.models.user_memory_embedding import UserMemoryEmbedding
 
 __all__ = [
     "AnalysisRecord",
@@ -43,4 +43,5 @@ __all__ = [
     "BackgroundTask",
     "UserMemory",
     "UserProfile",
+    "UserMemoryEmbedding",
 ]

@@ -61,6 +61,7 @@ from app.services.ai_quota_service import AIQuotaService
 from app.services.ai_usage_query_service import AIUsageQueryService
 from app.services.ai_quota_message_service import AIQuotaMessageService
 from app.services.background_task_service import BackgroundTaskService
+from app.services.user_memory_service import UserMemoryService
 # from app.services.stock_analysis_service import StockAnalysisService
 
 
@@ -117,5 +118,6 @@ __all__ = [
     "AIUsageQueryService",
     "AIQuotaMessageService",
     "BackgroundTaskService",
+    "UserMemoryService",
     # "StockAnalysisService",
 ]

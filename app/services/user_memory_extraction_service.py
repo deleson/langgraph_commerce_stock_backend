@@ -225,6 +225,241 @@ class UserMemoryExtractionService:
 
         return candidates
 
+    async def extract_from_analysis_record(
+        self,
+        *,
+        user_id: int,
+        record_id: int,
+        analysis_thread_id: str | None,
+        symbol: str,
+        market: str,
+        analysis_type: str,
+        result_snapshot: dict[str, Any] | None,
+        summary: str | None = None,
+    ) -> list[UserMemoryResponse]:
+        normalized_symbol = symbol.strip().upper()
+        normalized_market = market.strip().upper()
+        snapshot = result_snapshot or {}
+
+        candidates = self._build_analysis_record_candidates(
+            symbol=normalized_symbol,
+            market=normalized_market,
+            analysis_type=analysis_type,
+            result_snapshot=snapshot,
+            summary=summary,
+        )
+        if not candidates:
+            return []
+
+        memories: list[UserMemoryResponse] = []
+        for candidate in candidates:
+            memory = await self._create_or_update_analysis_record_memory(
+                user_id=user_id,
+                record_id=record_id,
+                analysis_thread_id=analysis_thread_id,
+                symbol=normalized_symbol,
+                market=normalized_market,
+                analysis_type=analysis_type,
+                result_snapshot=snapshot,
+                candidate=candidate,
+            )
+            memories.append(memory)
+
+        return memories
+
+    def _build_analysis_record_candidates(
+        self,
+        *,
+        symbol: str,
+        market: str,
+        analysis_type: str,
+        result_snapshot: dict[str, Any],
+        summary: str | None,
+    ) -> list[ConversationMemoryCandidate]:
+        candidates: list[ConversationMemoryCandidate] = []
+
+        if symbol:
+            candidates.append(
+                ConversationMemoryCandidate(
+                    memory_type="symbol_interest",
+                    title=f"用户关注股票：{symbol}",
+                    content=f"用户完成过 {symbol} 的个股分析，说明该股票是用户的研究关注对象之一。",
+                    summary=f"关注股票：{symbol}",
+                    keywords=[symbol, market],
+                    confidence="medium",
+                    weight=40,
+                )
+            )
+
+        if market:
+            candidates.append(
+                ConversationMemoryCandidate(
+                    memory_type="market_interest",
+                    title=f"用户关注市场：{market}",
+                    content=f"用户完成过 {market} 市场股票的分析，说明该市场是用户的研究关注范围之一。",
+                    summary=f"关注市场：{market}",
+                    keywords=[market],
+                    confidence="medium",
+                    weight=35,
+                )
+            )
+
+        risk_preference = self._extract_risk_preference_from_result_snapshot(
+            result_snapshot
+        )
+        if risk_preference is not None:
+            candidates.append(
+                ConversationMemoryCandidate(
+                    memory_type="risk_preference",
+                    title=f"分析记录风险偏好：{risk_preference}",
+                    content=f"用户在本次个股分析上下文中使用了 {risk_preference} 风险偏好。",
+                    summary=f"分析风险偏好：{risk_preference}",
+                    keywords=["风险偏好", risk_preference],
+                    confidence="medium",
+                    weight=35,
+                )
+            )
+
+        context_keywords = self._extract_analysis_context_keywords(result_snapshot)
+        if context_keywords:
+            joined = "、".join(context_keywords)
+            candidates.append(
+                ConversationMemoryCandidate(
+                    memory_type="analysis_context_preference",
+                    title=f"分析上下文偏好：{joined}",
+                    content=f"本次分析上下文包含这些研究信息：{joined}。这可作为用户分析习惯的轻量线索。",
+                    summary=f"分析上下文：{joined}",
+                    keywords=context_keywords,
+                    confidence="low",
+                    weight=25,
+                )
+            )
+
+        return candidates
+
+    async def _create_or_update_analysis_record_memory(
+        self,
+        *,
+        user_id: int,
+        record_id: int,
+        analysis_thread_id: str | None,
+        symbol: str,
+        market: str,
+        analysis_type: str,
+        result_snapshot: dict[str, Any],
+        candidate: ConversationMemoryCandidate,
+    ) -> UserMemoryResponse:
+        existing = await self._find_similar_memory(
+            user_id=user_id,
+            candidate=candidate,
+        )
+
+        if existing is not None:
+            return await self.memory_service.update_memory(
+                user_id=user_id,
+                memory_id=existing.id,
+                request=UserMemoryUpdate(
+                    confidence=self._max_confidence(
+                        existing.confidence,
+                        candidate.confidence,
+                    ),
+                    content=self._truncate(candidate.content, self.MAX_CONTENT_LENGTH),
+                    summary=self._truncate_optional(
+                        candidate.summary,
+                        self.MAX_SUMMARY_LENGTH,
+                    ),
+                    keywords=self._normalize_keywords(
+                        list(existing.keywords) + candidate.keywords
+                    ),
+                    weight=max(existing.weight, candidate.weight),
+                ),
+            )
+
+        return await self.memory_service.create_memory(
+            user_id=user_id,
+            request=UserMemoryCreate(
+                user_id=user_id,
+                memory_type=candidate.memory_type,
+                status="active",
+                confidence=candidate.confidence,
+                title=self._truncate(candidate.title, self.MAX_TITLE_LENGTH),
+                content=self._truncate(candidate.content, self.MAX_CONTENT_LENGTH),
+                summary=self._truncate_optional(
+                    candidate.summary,
+                    self.MAX_SUMMARY_LENGTH,
+                ),
+                source_type="analysis_record",
+                source_id=record_id,
+                source_ref=analysis_thread_id,
+                source_metadata={
+                    "analysis_thread_id": analysis_thread_id,
+                    "symbol": symbol,
+                    "market": market,
+                    "analysis_type": analysis_type,
+                    "result_snapshot_keys": sorted(result_snapshot.keys()),
+                    "extraction_version": "stage_7_6_step_9_v1",
+                },
+                keywords=self._normalize_keywords(candidate.keywords),
+                weight=candidate.weight,
+            ),
+        )
+
+    def _extract_risk_preference_from_result_snapshot(
+        self,
+        result_snapshot: dict[str, Any],
+    ) -> str | None:
+        context_snapshot = result_snapshot.get("context_snapshot")
+        if not isinstance(context_snapshot, dict):
+            return None
+
+        value = context_snapshot.get("risk_preference")
+        if not isinstance(value, str):
+            return None
+
+        return self._normalize_risk_preference_value(value)
+
+    def _normalize_risk_preference_value(
+        self,
+        value: str,
+    ) -> str | None:
+        normalized = value.strip().lower()
+        if normalized in {"conservative", "balanced", "aggressive"}:
+            return normalized
+
+        if "保守" in normalized or "稳健" in normalized:
+            return "conservative"
+
+        if "激进" in normalized or "进取" in normalized:
+            return "aggressive"
+
+        if "均衡" in normalized or "平衡" in normalized:
+            return "balanced"
+
+        return None
+
+    def _extract_analysis_context_keywords(
+        self,
+        result_snapshot: dict[str, Any],
+    ) -> list[str]:
+        keywords: list[str] = []
+
+        if result_snapshot.get("quality_context") is not None:
+            keywords.append("数据质量")
+
+        if result_snapshot.get("technical_indicators") is not None:
+            keywords.append("技术指标")
+
+        if result_snapshot.get("strategy_signal") is not None:
+            keywords.append("策略信号")
+
+        if result_snapshot.get("market_snapshot") is not None:
+            keywords.append("行情快照")
+
+        if result_snapshot.get("result") is not None:
+            keywords.append("AI分析结果")
+
+        return self._normalize_keywords(keywords)
+
     async def _create_or_update_memory(
         self,
         *,

@@ -41,6 +41,7 @@ from app.services.user_preference_service import (
     UserPreferenceService,
 )
 from app.services.analysis_conversation_service import AnalysisConversationService
+from app.services.user_memory_extraction_service import UserMemoryExtractionService
 from app.schemas.strategy_signal import StrategySignalResponse
 from app.services.strategy_signal_query_service import StrategySignalQueryService
 
@@ -170,6 +171,7 @@ class AsyncStockAnalysisService:
         self.technical_indicator_query_service = TechnicalIndicatorQueryService(db)
         self.strategy_signal_query_service = StrategySignalQueryService(db)
         self.conversation_service = AnalysisConversationService(db)
+        self.memory_extraction_service = UserMemoryExtractionService(db)
 
     async def analyze_stock(
         self,
@@ -257,6 +259,11 @@ class AsyncStockAnalysisService:
                 },
                 error_message=final_state.get("error_message"),
             ),
+        )
+
+        await self._extract_memory_from_analysis_record(
+            user=user,
+            record=record,
         )
 
         notification = await self.notification_service.create_notification(
@@ -452,6 +459,35 @@ class AsyncStockAnalysisService:
         payload: StockAnalysisRequest,
     ) -> str:
         return payload.thread_id or f"stock-analysis-{user_id}-{uuid4().hex}"
+
+    async def _extract_memory_from_analysis_record(
+        self,
+        *,
+        user: User,
+        record,
+    ) -> None:
+        try:
+            await self.memory_extraction_service.extract_from_analysis_record(
+                user_id=user.id,
+                record_id=record.id,
+                analysis_thread_id=record.analysis_thread_id,
+                symbol=record.symbol,
+                market=record.market,
+                analysis_type=record.analysis_type,
+                result_snapshot=record.result_snapshot,
+                summary=record.summary,
+            )
+        except Exception:
+            logger.exception(
+                "failed to extract user memory from analysis record",
+                extra={
+                    "user_id": user.id,
+                    "record_id": record.id,
+                    "analysis_thread_id": record.analysis_thread_id,
+                    "symbol": record.symbol,
+                    "market": record.market,
+                },
+            )
 
     def _build_metadata(
             self,

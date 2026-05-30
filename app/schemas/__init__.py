@@ -214,6 +214,25 @@ from app.schemas.background_task import (
     BackgroundTaskType,
     MarketDataSyncTaskPayload,
 )
+from app.schemas.user_memory import (
+    UserMemoryConfidence,
+    UserMemoryCreate,
+    UserMemoryListQuery,
+    UserMemoryListResponse,
+    UserMemoryResponse,
+    UserMemorySourceSnapshot,
+    UserMemorySourceType,
+    UserMemoryStatus,
+    UserMemoryType,
+    UserMemoryUpdate,
+    UserProfileCreate,
+    UserProfileRefreshRequest,
+    UserProfileRefreshResponse,
+    UserProfileResponse,
+    UserProfileStatus,
+    UserProfileSummary,
+    UserProfileUpdate,
+)
 
 __all__ = [
     "ApiResponse",
@@ -407,4 +426,22 @@ __all__ = [
     "BackgroundTaskSubmitResponse",
     "BackgroundTaskType",
     "MarketDataSyncTaskPayload",
+
+    "UserMemoryConfidence",
+    "UserMemoryCreate",
+    "UserMemoryListQuery",
+    "UserMemoryListResponse",
+    "UserMemoryResponse",
+    "UserMemorySourceSnapshot",
+    "UserMemorySourceType",
+    "UserMemoryStatus",
+    "UserMemoryType",
+    "UserMemoryUpdate",
+    "UserProfileCreate",
+    "UserProfileRefreshRequest",
+    "UserProfileRefreshResponse",
+    "UserProfileResponse",
+    "UserProfileStatus",
+    "UserProfileSummary",
+    "UserProfileUpdate",
 ]

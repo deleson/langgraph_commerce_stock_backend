@@ -17,6 +17,9 @@ from app.models.ai_usage_log import AIUsageLog
 from app.models.ai_quota_account import AIQuotaAccount
 from app.models.ai_usage_summary import AIUsageSummary
 from app.models.background_task import BackgroundTask
+from app.models.user_memory import UserMemory
+from app.models.user_profile import UserProfile
+
 
 __all__ = [
     "AnalysisRecord",
@@ -38,4 +41,6 @@ __all__ = [
     "AIQuotaAccount",
     "AIUsageSummary",
     "BackgroundTask",
+    "UserMemory",
+    "UserProfile",
 ]

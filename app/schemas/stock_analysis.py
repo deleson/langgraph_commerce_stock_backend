@@ -93,6 +93,7 @@ class StockAnalysisContextSnapshot(BaseModel):
     technical_indicators: TechnicalIndicatorResponse | None = None
     strategy_signal: StrategySignalResponse | None = None
     user_profile_context: dict[str, Any] | None = None
+    relevant_memories_context: dict[str, Any] | None = None
     result: StockAnalysisResult | None = None
     record_id: int | None = None
     notification_id: int | None = None
@@ -166,6 +167,7 @@ class StockAnalysisGraphState(BaseModel):
     technical_indicators: TechnicalIndicatorResponse | None = None
     strategy_signal: StrategySignalResponse | None = None
     user_profile_context: dict[str, Any] | None = None
+    relevant_memories_context: dict[str, Any] | None = None
     result: StockAnalysisResult | None = None
     record_id: int | None = None
     notification_id: int | None = None

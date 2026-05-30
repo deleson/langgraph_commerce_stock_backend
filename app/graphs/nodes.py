@@ -450,6 +450,7 @@ def analyze_with_llm_node(state: StockAnalysisState) -> StockAnalysisState:
         market_data=market_snapshot.model_dump(mode="json"),
         indicators=indicators.model_dump(mode="json"),
         user_profile_context=state.get("user_profile_context"),
+        relevant_memories_context=state.get("relevant_memories_context"),
     )
 
     try:
@@ -494,6 +495,7 @@ async def analyze_with_llm_node_async(state: StockAnalysisState) -> StockAnalysi
         market_data=market_snapshot.model_dump(mode="json"),
         indicators=indicators.model_dump(mode="json"),
         user_profile_context=state.get("user_profile_context"),
+        relevant_memories_context=state.get("relevant_memories_context"),
     )
 
     quota_allowed, quota_reason, estimated_tokens, estimated_cost = await _check_stock_analysis_ai_quota(
@@ -852,6 +854,7 @@ def _build_stock_analysis_messages(
     market_data: dict,
     indicators: dict,
     user_profile_context: dict[str, Any] | None = None,
+    relevant_memories_context: dict[str, Any] | None = None,
 ) -> list[SystemMessage | HumanMessage]:
     system_prompt = """
     你是一名谨慎、客观的股票分析助手，服务对象是中文用户。
@@ -869,6 +872,9 @@ def _build_stock_analysis_messages(
     10. 如果提供了用户画像上下文，可以用它调整解释重点和表达风格，但不能把画像当成投资结论。
     11. 用户画像只能用于辅助说明风险偏好、关注点和表达方式，不得据此承诺收益或直接推荐买卖。
     12. 如果用户画像为空或证据不足，请按普通分析处理，不要编造用户偏好。
+    13. 如果提供了相似记忆上下文，可以参考它理解用户过去关注的风险点、研究习惯和表达偏好。
+    14. 相似记忆不是行情事实，不得把相似记忆当作新闻、财报、价格或技术指标依据。
+    15. 相似记忆只能帮助调整解释重点，不能作为买入、卖出或预测收益的依据。
     """.strip()
 
     human_prompt = f"""
@@ -893,6 +899,9 @@ def _build_stock_analysis_messages(
     
     用户画像上下文：
     {json.dumps(user_profile_context or {"available": False}, ensure_ascii=False)}
+    
+    相似记忆上下文：
+    {json.dumps(relevant_memories_context or {"available": False}, ensure_ascii=False)}
     
     行情数据：
     {json.dumps(market_data, ensure_ascii=False)}

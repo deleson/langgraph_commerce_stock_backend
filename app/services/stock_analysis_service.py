@@ -30,6 +30,7 @@ from app.services.analysis_record_service import (
     AnalysisRecordService,
     AsyncAnalysisRecordService,
 )
+from app.schemas.user_memory_embedding import UserMemoryRetrievalRequest
 from app.services.market_data_quality_report_service import MarketDataQualityReportService
 from app.services.notification_service import (
     AsyncNotificationService,
@@ -45,6 +46,7 @@ from app.services.user_memory_extraction_service import UserMemoryExtractionServ
 from app.schemas.strategy_signal import StrategySignalResponse
 from app.services.strategy_signal_query_service import StrategySignalQueryService
 from app.services.user_memory_query_service import UserMemoryQueryService
+from app.services.user_memory_retrieval_service import UserMemoryRetrievalService
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +176,7 @@ class AsyncStockAnalysisService:
         self.conversation_service = AnalysisConversationService(db)
         self.memory_extraction_service = UserMemoryExtractionService(db)
         self.user_memory_query_service = UserMemoryQueryService(db)
+        self.user_memory_retrieval_service = UserMemoryRetrievalService(db)
 
     async def analyze_stock(
         self,
@@ -203,6 +206,14 @@ class AsyncStockAnalysisService:
             user_id=user.id,
         )
 
+        relevant_memories_context = await self._load_relevant_memories_context(
+            user_id=user.id,
+            symbol=payload.symbol,
+            market=payload.market,
+            risk_preference=preference.risk_preference,
+            user_profile_context=user_profile_context,
+        )
+
         initial_state = {
             "thread_id": thread_id,
             "user_id": user.id,
@@ -214,6 +225,7 @@ class AsyncStockAnalysisService:
             "technical_indicators": technical_indicators,
             "strategy_signal": strategy_signal,
             "user_profile_context": user_profile_context,
+            "relevant_memories_context": relevant_memories_context,
             "metadata": {
                 "llm_provider": "deepseek",
                 "source": "async_stock_analysis_service",
@@ -475,6 +487,89 @@ class AsyncStockAnalysisService:
             )
             return None
 
+    async def _load_relevant_memories_context(
+        self,
+        *,
+        user_id: int,
+        symbol: str,
+        market: str,
+        risk_preference: str,
+        user_profile_context: dict | None,
+    ) -> dict | None:
+        try:
+            query = self._build_relevant_memory_query(
+                symbol=symbol,
+                market=market,
+                risk_preference=risk_preference,
+                user_profile_context=user_profile_context,
+            )
+
+            response = await self.user_memory_retrieval_service.search_similar_memories(
+                user_id=user_id,
+                request=UserMemoryRetrievalRequest(
+                    query=query,
+                    top_k=5,
+                    min_similarity_score=None,
+                    memory_types=[],
+                    include_inactive=False,
+                    include_content=False,
+                ),
+            )
+
+            return {
+                "available": response.status == "available",
+                "status": response.status,
+                "unavailable_reason": response.unavailable_reason,
+                "summary": response.summary,
+                "items": [
+                    {
+                        "memory_id": item.memory_id,
+                        "memory_type": item.memory_type,
+                        "confidence": item.confidence,
+                        "title": item.title,
+                        "summary": item.summary,
+                        "keywords": item.keywords[:8],
+                        "source_type": item.source_type,
+                        "source_ref": item.source_ref,
+                        "similarity_score": item.similarity_score,
+                    }
+                    for item in response.items[:5]
+                ],
+                "warnings": response.warnings[:3],
+                "disclaimer": response.disclaimer,
+            }
+        except Exception:
+            logger.exception(
+                "load relevant memories context failed",
+                extra={
+                    "user_id": user_id,
+                    "symbol": symbol,
+                    "market": market,
+                },
+            )
+            return None
+
+    def _build_relevant_memory_query(
+            self,
+            *,
+            symbol: str,
+            market: str,
+            risk_preference: str,
+            user_profile_context: dict | None,
+    ) -> str:
+        profile_summary = ""
+
+        if isinstance(user_profile_context, dict):
+            summary = user_profile_context.get("summary") or {}
+            profile_summary = str(summary)
+
+        return (
+            f"用户正在分析股票 {market}:{symbol}。"
+            f"当前风险偏好是 {risk_preference}。"
+            f"请检索和该股票分析、风险关注点、研究偏好、沟通偏好、市场关注点相关的用户长期记忆。"
+            f"用户画像摘要：{profile_summary}"
+        )
+
     def _resolve_thread_id(
         self,
         *,
@@ -519,6 +614,12 @@ class AsyncStockAnalysisService:
         technical_indicators = final_state.get("technical_indicators")
         strategy_signal = final_state.get("strategy_signal")
         user_profile_context = final_state.get("user_profile_context")
+        relevant_memories_context = final_state.get("relevant_memories_context")
+        relevant_memory_items = (
+            relevant_memories_context.get("items", [])
+            if isinstance(relevant_memories_context, dict)
+            else []
+        )
 
         return {
             **final_state.get("metadata", {}),
@@ -549,6 +650,18 @@ class AsyncStockAnalysisService:
                 "user_profile_version": user_profile_context.get("profile_version")
                 if isinstance(user_profile_context, dict)
                 else None,
+
+                "relevant_memories_available": (
+                    relevant_memories_context.get("available")
+                    if isinstance(relevant_memories_context, dict)
+                    else False
+                ),
+                "relevant_memories_count": len(relevant_memory_items),
+                "relevant_memories_status": (
+                    relevant_memories_context.get("status")
+                    if isinstance(relevant_memories_context, dict)
+                    else None
+                ),
             },
         }
 
@@ -575,6 +688,7 @@ class AsyncStockAnalysisService:
             technical_indicators=final_state.get("technical_indicators"),
             strategy_signal=final_state.get("strategy_signal"),
             user_profile_context=final_state.get("user_profile_context"),
+            relevant_memories_context=final_state.get("relevant_memories_context"),
             result=final_state.get("result"),
             metadata=metadata,
             created_at=datetime.now(UTC),

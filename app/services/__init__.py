@@ -64,6 +64,7 @@ from app.services.background_task_service import BackgroundTaskService
 from app.services.user_memory_service import UserMemoryService
 from app.services.user_profile_service import UserProfileService
 from app.services.user_memory_extraction_service import UserMemoryExtractionService
+from app.services.user_memory_query_service import UserMemoryQueryService
 # from app.services.stock_analysis_service import StockAnalysisService
 
 
@@ -123,5 +124,6 @@ __all__ = [
     "UserMemoryService",
     "UserProfileService",
     "UserMemoryExtractionService",
+    "UserMemoryQueryService",
     # "StockAnalysisService",
 ]

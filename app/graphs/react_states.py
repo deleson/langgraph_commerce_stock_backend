@@ -36,6 +36,7 @@ class StockAnalysisReactState(TypedDict, total=False):
     context_snapshot: dict[str, Any]
     result_snapshot: dict[str, Any]
     conversation_context: dict[str, Any]
+    user_profile_context: dict[str, Any]
 
     # Tool control.
     allowed_tools: list[ReactToolName]

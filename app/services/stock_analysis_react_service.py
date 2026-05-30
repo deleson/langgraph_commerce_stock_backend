@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime
 from typing import Any
 
@@ -18,7 +19,9 @@ from app.schemas.stock_analysis_react import (
 from app.services.stock_analysis_react_tool_service import StockAnalysisReactToolService
 from app.graphs.react_safety import sanitize_tool_output, truncate_text
 from app.services.analysis_conversation_service import AnalysisConversationService
+from app.services.user_memory_query_service import UserMemoryQueryService
 
+logger = logging.getLogger(__name__)
 
 class StockAnalysisReactService:
     """Coordinate ReAct follow-up analysis for an existing stock analysis record.
@@ -32,6 +35,7 @@ class StockAnalysisReactService:
         self.analysis_record_repo = AsyncAnalysisRecordRepository(db)
         self.tool_service = StockAnalysisReactToolService(db)
         self.conversation_service = AnalysisConversationService(db)
+        self.user_memory_query_service = UserMemoryQueryService(db)
 
     async def follow_up_stock_analysis(
         self,
@@ -60,6 +64,9 @@ class StockAnalysisReactService:
             analysis_thread_id=payload.analysis_thread_id,
             limit=10,
         )
+        user_profile_context = await self._load_user_profile_context(
+            user_id=user.id,
+        )
 
         await self.conversation_service.save_user_message(
             user_id=user.id,
@@ -80,6 +87,7 @@ class StockAnalysisReactService:
             payload=payload,
             record=record,
             conversation_context=conversation_context.model_dump(mode="json"),
+            user_profile_context=user_profile_context,
         )
 
         final_state = await arun_stock_analysis_react_graph(
@@ -115,6 +123,7 @@ class StockAnalysisReactService:
                 "trace_count": len(response.trace),
                 "referenced_symbol": record.symbol,
                 "referenced_market": record.market,
+                "user_profile_context_available": user_profile_context is not None,
             },
         )
 
@@ -135,6 +144,7 @@ class StockAnalysisReactService:
         payload: StockAnalysisReactFollowUpRequest,
         record: AnalysisRecord,
         conversation_context: dict[str, Any],
+        user_profile_context: dict[str, Any] | None,
     ) -> dict[str, Any]:
         result_snapshot = record.result_snapshot or {}
         context_snapshot = result_snapshot.get("context_snapshot") or {}
@@ -153,6 +163,7 @@ class StockAnalysisReactService:
             "iteration_count": 0,
             "max_iterations": payload.max_iterations,
             "conversation_context": conversation_context,
+            "user_profile_context": user_profile_context,
             "metadata": {
                 "source": "stock_analysis_react_service",
                 "analysis_record_id": record.id,
@@ -253,3 +264,20 @@ class StockAnalysisReactService:
                 used_tools.append(tool_name)
 
         return used_tools
+
+    async def _load_user_profile_context(
+        self,
+        *,
+        user_id: int,
+    ) -> dict[str, Any] | None:
+        try:
+            return await self.user_memory_query_service.get_profile_context(
+                user_id=user_id,
+                create_if_missing=True,
+            )
+        except Exception:
+            logger.exception(
+                "load user profile context for react failed",
+                extra={"user_id": user_id},
+            )
+            return None

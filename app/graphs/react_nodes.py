@@ -288,6 +288,10 @@ def _build_agent_reason_messages(
 15. get_stock_candidates 只能输出研究线索和候选评分，不是买卖建议；如果用户要求直接告诉他买哪只，应选择 final_answer 做风险边界说明，并引导为候选研究。
 16. 如果已有 get_stock_candidates 的 observation 且足够回答用户问题，就选择 final_answer，不要重复调用同一个候选工具。
 17. 如果已有 observations 足够回答，就选择 final_answer。
+18. 如果 user_profile_context 存在，可以用它理解用户长期关注点、风险偏好、表达偏好和研究习惯，但不能把用户画像当成投资结论。
+19. 如果用户问“适合我吗”“按我的偏好怎么看”“我应该重点关注什么”，可以结合 user_profile_context 回答；如果画像信息不足，应明确说明画像线索有限。
+20. 用户画像不能替代工具结果；涉及行情、指标、回测、候选评分时，仍应优先调用对应工具获取事实数据。
+21. 不要编造用户画像中不存在的偏好、持仓、资产规模或投资目标。
 """.strip()
 
     human_prompt = f"""
@@ -393,6 +397,7 @@ def _build_compact_reason_context(
         "max_iterations": state.get("max_iterations", 3),
         "observations": observations[-5:],
         "conversation_context": state.get("conversation_context") or {},
+        "user_profile_context": state.get("user_profile_context") or {},
     }
 
 
@@ -1159,6 +1164,9 @@ def _build_final_answer_messages(
 5. 使用简体中文回答。
 6. 回答要适合普通用户理解，必要时可以分点说明。
 7. 结尾要提醒：内容仅供研究参考，不构成投资建议。
+8. 如果上下文中包含 user_profile_context，可以结合用户风险偏好、关注点和表达偏好调整解释重点。
+9. 用户画像只能用于个性化解释，不得作为买卖依据，不得承诺收益。
+10. 如果画像信息为空或证据不足，不要编造用户偏好，按普通分析回答即可。
 """.strip()
 
     human_prompt = f"""
@@ -1216,6 +1224,7 @@ def _build_final_answer_context(
         "iteration_count": state.get("iteration_count", 0),
         "max_iterations": state.get("max_iterations", 3),
         "conversation_context": state.get("conversation_context") or {},
+        "user_profile_context": state.get("user_profile_context") or {},
     }
 
 

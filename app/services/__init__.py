@@ -67,7 +67,7 @@ from app.services.user_memory_extraction_service import UserMemoryExtractionServ
 from app.services.user_memory_query_service import UserMemoryQueryService
 from app.services.embedding_service import EmbeddingResult, EmbeddingService
 from app.services.user_memory_embedding_service import UserMemoryEmbeddingService
-
+from app.services.user_memory_retrieval_service import UserMemoryRetrievalService
 
 # from app.services.stock_analysis_service import StockAnalysisService
 
@@ -132,5 +132,6 @@ __all__ = [
     "EmbeddingResult",
     "EmbeddingService",
     "UserMemoryEmbeddingService",
+    "UserMemoryRetrievalService",
     # "StockAnalysisService",
 ]

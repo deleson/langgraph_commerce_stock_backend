@@ -38,6 +38,7 @@ class StockAnalysisState(TypedDict, total=False):
     indicators: IndicatorSnapshot
     technical_indicators: TechnicalIndicatorResponse
     strategy_signal: StrategySignalResponse
+    user_profile_context: dict[str, Any]
 
     # Analysis output.
     result: StockAnalysisResult

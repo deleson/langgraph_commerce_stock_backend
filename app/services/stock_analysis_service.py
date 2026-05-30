@@ -44,6 +44,7 @@ from app.services.analysis_conversation_service import AnalysisConversationServi
 from app.services.user_memory_extraction_service import UserMemoryExtractionService
 from app.schemas.strategy_signal import StrategySignalResponse
 from app.services.strategy_signal_query_service import StrategySignalQueryService
+from app.services.user_memory_query_service import UserMemoryQueryService
 
 logger = logging.getLogger(__name__)
 
@@ -172,6 +173,7 @@ class AsyncStockAnalysisService:
         self.strategy_signal_query_service = StrategySignalQueryService(db)
         self.conversation_service = AnalysisConversationService(db)
         self.memory_extraction_service = UserMemoryExtractionService(db)
+        self.user_memory_query_service = UserMemoryQueryService(db)
 
     async def analyze_stock(
         self,
@@ -197,6 +199,9 @@ class AsyncStockAnalysisService:
             symbol=payload.symbol,
             market=payload.market,
         )
+        user_profile_context = await self._load_user_profile_context(
+            user_id=user.id,
+        )
 
         initial_state = {
             "thread_id": thread_id,
@@ -208,6 +213,7 @@ class AsyncStockAnalysisService:
             "quality_context": quality_context,
             "technical_indicators": technical_indicators,
             "strategy_signal": strategy_signal,
+            "user_profile_context": user_profile_context,
             "metadata": {
                 "llm_provider": "deepseek",
                 "source": "async_stock_analysis_service",
@@ -452,6 +458,23 @@ class AsyncStockAnalysisService:
             logger.exception("load strategy signal context failed")
             return None
 
+    async def _load_user_profile_context(
+        self,
+        *,
+        user_id: int,
+    ) -> dict | None:
+        try:
+            return await self.user_memory_query_service.get_profile_context(
+                user_id=user_id,
+                create_if_missing=True,
+            )
+        except Exception:
+            logger.exception(
+                "load user profile context failed",
+                extra={"user_id": user_id},
+            )
+            return None
+
     def _resolve_thread_id(
         self,
         *,
@@ -495,6 +518,7 @@ class AsyncStockAnalysisService:
     ) -> dict:
         technical_indicators = final_state.get("technical_indicators")
         strategy_signal = final_state.get("strategy_signal")
+        user_profile_context = final_state.get("user_profile_context")
 
         return {
             **final_state.get("metadata", {}),
@@ -518,6 +542,13 @@ class AsyncStockAnalysisService:
                 if strategy_signal is not None
                 else None,
                 "quality_context_available": final_state.get("quality_context") is not None,
+                "user_profile_context_available": user_profile_context is not None,
+                "user_profile_status": user_profile_context.get("status")
+                if isinstance(user_profile_context, dict)
+                else None,
+                "user_profile_version": user_profile_context.get("profile_version")
+                if isinstance(user_profile_context, dict)
+                else None,
             },
         }
 
@@ -543,6 +574,7 @@ class AsyncStockAnalysisService:
             indicators=final_state.get("indicators"),
             technical_indicators=final_state.get("technical_indicators"),
             strategy_signal=final_state.get("strategy_signal"),
+            user_profile_context=final_state.get("user_profile_context"),
             result=final_state.get("result"),
             metadata=metadata,
             created_at=datetime.now(UTC),

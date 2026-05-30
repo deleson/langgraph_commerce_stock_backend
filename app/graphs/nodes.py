@@ -449,6 +449,7 @@ def analyze_with_llm_node(state: StockAnalysisState) -> StockAnalysisState:
         risk_preference=risk_preference,
         market_data=market_snapshot.model_dump(mode="json"),
         indicators=indicators.model_dump(mode="json"),
+        user_profile_context=state.get("user_profile_context"),
     )
 
     try:
@@ -492,6 +493,7 @@ async def analyze_with_llm_node_async(state: StockAnalysisState) -> StockAnalysi
         risk_preference=risk_preference,
         market_data=market_snapshot.model_dump(mode="json"),
         indicators=indicators.model_dump(mode="json"),
+        user_profile_context=state.get("user_profile_context"),
     )
 
     quota_allowed, quota_reason, estimated_tokens, estimated_cost = await _check_stock_analysis_ai_quota(
@@ -849,6 +851,7 @@ def _build_stock_analysis_messages(
     risk_preference: str,
     market_data: dict,
     indicators: dict,
+    user_profile_context: dict[str, Any] | None = None,
 ) -> list[SystemMessage | HumanMessage]:
     system_prompt = """
     你是一名谨慎、客观的股票分析助手，服务对象是中文用户。
@@ -863,6 +866,9 @@ def _build_stock_analysis_messages(
     7. risk_level 只能是 "low"、"medium"、"high"。
     8. trend 只能是 "bullish"、"bearish"、"neutral"。
     9. 所有 JSON 字段都必须出现，无法明确判断时 trend 使用 "neutral"，risk_level 使用 "medium"，列表字段使用 []。
+    10. 如果提供了用户画像上下文，可以用它调整解释重点和表达风格，但不能把画像当成投资结论。
+    11. 用户画像只能用于辅助说明风险偏好、关注点和表达方式，不得据此承诺收益或直接推荐买卖。
+    12. 如果用户画像为空或证据不足，请按普通分析处理，不要编造用户偏好。
     """.strip()
 
     human_prompt = f"""
@@ -884,6 +890,9 @@ def _build_stock_analysis_messages(
     
     用户风险偏好：
     {risk_preference}
+    
+    用户画像上下文：
+    {json.dumps(user_profile_context or {"available": False}, ensure_ascii=False)}
     
     行情数据：
     {json.dumps(market_data, ensure_ascii=False)}

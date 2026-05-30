@@ -20,6 +20,8 @@ from app.services.stock_analysis_react_tool_service import StockAnalysisReactToo
 from app.graphs.react_safety import sanitize_tool_output, truncate_text
 from app.services.analysis_conversation_service import AnalysisConversationService
 from app.services.user_memory_query_service import UserMemoryQueryService
+from app.services.user_memory_retrieval_service import UserMemoryRetrievalService
+from app.schemas.user_memory_embedding import UserMemoryRetrievalRequest
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +38,7 @@ class StockAnalysisReactService:
         self.tool_service = StockAnalysisReactToolService(db)
         self.conversation_service = AnalysisConversationService(db)
         self.user_memory_query_service = UserMemoryQueryService(db)
+        self.user_memory_retrieval_service = UserMemoryRetrievalService(db)
 
     async def follow_up_stock_analysis(
         self,
@@ -67,6 +70,13 @@ class StockAnalysisReactService:
         user_profile_context = await self._load_user_profile_context(
             user_id=user.id,
         )
+        relevant_memories_context = await self._load_relevant_memories_context(
+            user_id=user.id,
+            message=payload.message,
+            symbol=record.symbol,
+            market=record.market,
+            user_profile_context=user_profile_context,
+        )
 
         await self.conversation_service.save_user_message(
             user_id=user.id,
@@ -88,6 +98,7 @@ class StockAnalysisReactService:
             record=record,
             conversation_context=conversation_context.model_dump(mode="json"),
             user_profile_context=user_profile_context,
+            relevant_memories_context=relevant_memories_context,
         )
 
         final_state = await arun_stock_analysis_react_graph(
@@ -124,6 +135,7 @@ class StockAnalysisReactService:
                 "referenced_symbol": record.symbol,
                 "referenced_market": record.market,
                 "user_profile_context_available": user_profile_context is not None,
+                "relevant_memories_context_available": relevant_memories_context is not None,
             },
         )
 
@@ -145,6 +157,7 @@ class StockAnalysisReactService:
         record: AnalysisRecord,
         conversation_context: dict[str, Any],
         user_profile_context: dict[str, Any] | None,
+        relevant_memories_context: dict[str, Any] | None,
     ) -> dict[str, Any]:
         result_snapshot = record.result_snapshot or {}
         context_snapshot = result_snapshot.get("context_snapshot") or {}
@@ -164,6 +177,7 @@ class StockAnalysisReactService:
             "max_iterations": payload.max_iterations,
             "conversation_context": conversation_context,
             "user_profile_context": user_profile_context,
+            "relevant_memories_context": relevant_memories_context,
             "metadata": {
                 "source": "stock_analysis_react_service",
                 "analysis_record_id": record.id,
@@ -281,3 +295,87 @@ class StockAnalysisReactService:
                 extra={"user_id": user_id},
             )
             return None
+
+    async def _load_relevant_memories_context(
+        self,
+        *,
+        user_id: int,
+        message: str,
+        symbol: str,
+        market: str,
+        user_profile_context: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        try:
+            query = self._build_relevant_memory_query(
+                message=message,
+                symbol=symbol,
+                market=market,
+                user_profile_context=user_profile_context,
+            )
+
+            response = await self.user_memory_retrieval_service.search_similar_memories(
+                user_id=user_id,
+                request=UserMemoryRetrievalRequest(
+                    query=query,
+                    top_k=5,
+                    min_similarity_score=None,
+                    memory_types=[],
+                    include_inactive=False,
+                    include_content=False,
+                ),
+            )
+
+            return {
+                "available": response.status == "available",
+                "status": response.status,
+                "unavailable_reason": response.unavailable_reason,
+                "summary": response.summary,
+                "items": [
+                    {
+                        "memory_id": item.memory_id,
+                        "memory_type": item.memory_type,
+                        "confidence": item.confidence,
+                        "title": item.title,
+                        "summary": item.summary,
+                        "keywords": item.keywords[:8],
+                        "source_type": item.source_type,
+                        "source_ref": item.source_ref,
+                        "similarity_score": item.similarity_score,
+                    }
+                    for item in response.items[:5]
+                ],
+                "warnings": response.warnings[:3],
+                "disclaimer": response.disclaimer,
+            }
+        except Exception:
+            logger.exception(
+                "load react relevant memories context failed",
+                extra={
+                    "user_id": user_id,
+                    "symbol": symbol,
+                    "market": market,
+                },
+            )
+            return None
+
+    def _build_relevant_memory_query(
+        self,
+        *,
+        message: str,
+        symbol: str,
+        market: str,
+        user_profile_context: dict[str, Any] | None,
+    ) -> str:
+        profile_summary = ""
+
+        if isinstance(user_profile_context, dict):
+            summary = user_profile_context.get("summary") or {}
+            profile_summary = str(summary)
+
+        return (
+            f"用户正在围绕股票 {market}:{symbol} 进行追问。"
+            f"用户追问内容：{message}。"
+            f"请检索和该追问相关的用户长期记忆，包括风险关注点、研究偏好、沟通偏好、"
+            f"分析上下文偏好、市场关注点和股票关注点。"
+            f"用户画像摘要：{profile_summary}"
+        )

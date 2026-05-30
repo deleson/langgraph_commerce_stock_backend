@@ -101,6 +101,7 @@ class StockAnalysisReactGraphState(BaseModel):
     context_snapshot: dict[str, Any] = Field(default_factory=dict)
     result_snapshot: dict[str, Any] = Field(default_factory=dict)
     user_profile_context: dict[str, Any] | None = None
+    relevant_memories_context: dict[str, Any] | None = None
     allowed_tools: list[ReactToolName] = Field(default_factory=list)
     next_action: ReactActionType | None = None
     tool_call: ReactToolCall | None = None

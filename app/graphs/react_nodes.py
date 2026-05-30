@@ -292,6 +292,10 @@ def _build_agent_reason_messages(
 19. 如果用户问“适合我吗”“按我的偏好怎么看”“我应该重点关注什么”，可以结合 user_profile_context 回答；如果画像信息不足，应明确说明画像线索有限。
 20. 用户画像不能替代工具结果；涉及行情、指标、回测、候选评分时，仍应优先调用对应工具获取事实数据。
 21. 不要编造用户画像中不存在的偏好、持仓、资产规模或投资目标。
+22. 如果 relevant_memories_context 存在，可以用它理解用户过去相似问题、风险关注点和研究习惯。
+23. 相似记忆不能替代工具结果；涉及行情、指标、回测、候选评分时，仍应调用对应工具获取事实数据。
+24. 不要把相似记忆当成当前行情、新闻、财报或技术指标。
+25. 不要根据相似记忆直接生成买卖建议，相似记忆只用于辅助理解用户问题和调整解释重点。
 """.strip()
 
     human_prompt = f"""
@@ -398,6 +402,7 @@ def _build_compact_reason_context(
         "observations": observations[-5:],
         "conversation_context": state.get("conversation_context") or {},
         "user_profile_context": state.get("user_profile_context") or {},
+        "relevant_memories_context": state.get("relevant_memories_context") or {},
     }
 
 
@@ -1167,6 +1172,9 @@ def _build_final_answer_messages(
 8. 如果上下文中包含 user_profile_context，可以结合用户风险偏好、关注点和表达偏好调整解释重点。
 9. 用户画像只能用于个性化解释，不得作为买卖依据，不得承诺收益。
 10. 如果画像信息为空或证据不足，不要编造用户偏好，按普通分析回答即可。
+11. 如果上下文中包含 relevant_memories_context，可以参考用户历史相似记忆调整解释重点。
+12. 相似记忆不是行情事实，不能作为价格、技术指标、新闻或财报依据。
+13. 相似记忆只能用于个性化表达和解释重点，不能作为买卖建议依据。
 """.strip()
 
     human_prompt = f"""
@@ -1225,6 +1233,7 @@ def _build_final_answer_context(
         "max_iterations": state.get("max_iterations", 3),
         "conversation_context": state.get("conversation_context") or {},
         "user_profile_context": state.get("user_profile_context") or {},
+        "relevant_memories_context": state.get("relevant_memories_context") or {},
     }
 
 

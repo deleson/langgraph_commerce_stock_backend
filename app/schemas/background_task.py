@@ -11,13 +11,14 @@ from app.schemas.market_data import (
     MarketCode,
     MarketDataSource,
 )
-
+from app.schemas.user_memory import UserProfileRefreshRequest
 
 BackgroundTaskType = Literal[
     "market_data_sync",
     "stock_analysis_async",
     "candidate_scoring_async",
     "candidate_ai_explanation_async",
+    "user_profile_refresh",
     "daily_report",
     "alert_scan",
     "paper_trading_tick",
@@ -82,6 +83,10 @@ class StockAnalysisAsyncTaskPayload(BaseModel):
             return normalized or None
         return value
 
+class UserProfileRefreshTaskPayload(UserProfileRefreshRequest):
+    """Payload for refreshing current user's profile in a background task."""
+
+    pass
 
 class BackgroundTaskCreateRequest(BaseModel):
     task_type: BackgroundTaskType

@@ -17,6 +17,7 @@ class BackgroundTask(Base):
             "'stock_analysis_async',"
             "'candidate_scoring_async',"
             "'candidate_ai_explanation_async',"
+            "'user_profile_refresh',"
             "'daily_report',"
             "'alert_scan',"
             "'paper_trading_tick'"

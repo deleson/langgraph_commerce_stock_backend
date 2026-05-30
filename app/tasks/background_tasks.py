@@ -13,6 +13,7 @@ from app.schemas.background_task import (
     BackgroundTaskCreateRequest,
     MarketDataSyncTaskPayload,
     StockAnalysisAsyncTaskPayload,
+    UserProfileRefreshTaskPayload,
 )
 from app.repositories.ai_usage_repo import AsyncAIUsageRepository
 from app.schemas.ai_usage import AIQuotaCheckRequest, AIUsageFeature
@@ -24,7 +25,7 @@ from app.services.ai_usage_token_service import (
     AIUsageTokenService,
 )
 from app.services.market_data_sync_service import MarketDataSyncService
-
+from app.services.user_profile_service import UserProfileService
 
 @celery_app.task(name="background_tasks.smoke_test")
 def smoke_test() -> dict[str, str]:
@@ -135,6 +136,12 @@ async def _dispatch_background_task_async(task_id: int) -> dict[str, object]:
             return await _run_stock_analysis_async_reserved_task(
                 repository=repository,
                 task=running_task,
+            )
+        if running_task.task_type == "user_profile_refresh":
+            return await _run_user_profile_refresh_task(
+                repository=repository,
+                task=running_task,
+                db=db,
             )
 
         message = (
@@ -320,6 +327,120 @@ async def _run_stock_analysis_async_reserved_task(
             "reason": "invalid_stock_analysis_async_payload",
             "task_id": failed_task.id,
             "task_type": failed_task.task_type,
+        }
+
+async def _run_user_profile_refresh_task(
+    *,
+    repository: AsyncBackgroundTaskRepository,
+    task,
+    db,
+) -> dict[str, Any]:
+    try:
+        payload = UserProfileRefreshTaskPayload.model_validate(task.payload)
+
+        if task.user_id is None:
+            failed_task = await repository.mark_failed(
+                task=task,
+                error_message="user_profile_refresh requires user_id",
+                result={
+                    "status": "failed",
+                    "reason": "missing_user_id_for_profile_refresh",
+                    "task_type": task.task_type,
+                    "will_retry": False,
+                    "retry_count": task.retry_count,
+                    "max_retries": task.max_retries,
+                },
+            )
+
+            return {
+                "status": failed_task.status,
+                "reason": "missing_user_id_for_profile_refresh",
+                "task_id": failed_task.id,
+                "task_type": failed_task.task_type,
+            }
+
+        refresh_result = await UserProfileService(db).refresh_profile(
+            user_id=task.user_id,
+            request=payload,
+        )
+
+        success_task = await repository.mark_success(
+            task=task,
+            result={
+                "status": "success",
+                "reason": "user_profile_refresh_completed",
+                "task_type": task.task_type,
+                "user_id": task.user_id,
+                "profile_status": refresh_result.profile.status,
+                "profile_version": refresh_result.profile.profile_version,
+                "memory_count": refresh_result.memory_count,
+                "refreshed": refresh_result.refreshed,
+                "message": refresh_result.message,
+            },
+        )
+
+        return {
+            "status": success_task.status,
+            "reason": "user_profile_refresh_completed",
+            "task_id": success_task.id,
+            "task_type": success_task.task_type,
+            "profile_version": refresh_result.profile.profile_version,
+            "memory_count": refresh_result.memory_count,
+        }
+
+    except ValidationError as exc:
+        message = _safe_error_message(exc)
+
+        failed_task = await repository.mark_failed(
+            task=task,
+            error_message=message,
+            result={
+                "status": "failed",
+                "reason": "invalid_user_profile_refresh_payload",
+                "task_type": task.task_type,
+                "will_retry": False,
+                "retry_count": task.retry_count,
+                "max_retries": task.max_retries,
+                "error_type": exc.__class__.__name__,
+            },
+        )
+
+        return {
+            "status": failed_task.status,
+            "reason": "invalid_user_profile_refresh_payload",
+            "task_id": failed_task.id,
+            "task_type": failed_task.task_type,
+        }
+
+    except Exception as exc:
+        message = _safe_error_message(exc)
+
+        error_result = {
+            "status": "failed",
+            "reason": "user_profile_refresh_failed",
+            "task_type": task.task_type,
+            "error_type": exc.__class__.__name__,
+            "error_message": message,
+        }
+
+        updated_task, retried = await _mark_failed_or_retry(
+            repository=repository,
+            task=task,
+            error_message=message,
+            result=error_result,
+            retryable=True,
+        )
+
+        return {
+            "status": updated_task.status,
+            "reason": "user_profile_refresh_retrying"
+            if retried
+            else "user_profile_refresh_failed",
+            "task_id": updated_task.id,
+            "task_type": updated_task.task_type,
+            "retry_count": updated_task.retry_count,
+            "max_retries": updated_task.max_retries,
+            "will_retry": retried,
         }
 
 async def _check_stock_analysis_async_ai_quota(

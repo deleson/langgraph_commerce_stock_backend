@@ -233,6 +233,24 @@ from app.schemas.user_memory import (
     UserProfileSummary,
     UserProfileUpdate,
 )
+from app.schemas.user_memory_embedding import (
+    UserMemoryEmbeddingBuildSource,
+    UserMemoryEmbeddingCreate,
+    UserMemoryEmbeddingListQuery,
+    UserMemoryEmbeddingListResponse,
+    UserMemoryEmbeddingProvider,
+    UserMemoryEmbeddingRebuildRequest,
+    UserMemoryEmbeddingResponse,
+    UserMemoryEmbeddingStatsResponse,
+    UserMemoryEmbeddingStatus,
+    UserMemoryEmbeddingUpdate,
+    UserMemoryRetrievalInputSnapshot,
+    UserMemoryRetrievalItem,
+    UserMemoryRetrievalRequest,
+    UserMemoryRetrievalResponse,
+    UserMemoryRetrievalStatus,
+    UserMemoryRetrievalUnavailableReason,
+)
 
 __all__ = [
     "ApiResponse",
@@ -444,4 +462,21 @@ __all__ = [
     "UserProfileStatus",
     "UserProfileSummary",
     "UserProfileUpdate",
+
+    "UserMemoryEmbeddingBuildSource",
+    "UserMemoryEmbeddingCreate",
+    "UserMemoryEmbeddingListQuery",
+    "UserMemoryEmbeddingListResponse",
+    "UserMemoryEmbeddingProvider",
+    "UserMemoryEmbeddingRebuildRequest",
+    "UserMemoryEmbeddingResponse",
+    "UserMemoryEmbeddingStatsResponse",
+    "UserMemoryEmbeddingStatus",
+    "UserMemoryEmbeddingUpdate",
+    "UserMemoryRetrievalInputSnapshot",
+    "UserMemoryRetrievalItem",
+    "UserMemoryRetrievalRequest",
+    "UserMemoryRetrievalResponse",
+    "UserMemoryRetrievalStatus",
+    "UserMemoryRetrievalUnavailableReason",
 ]

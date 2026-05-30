@@ -1,3 +1,4 @@
+import logging
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,11 +32,14 @@ from app.schemas.analysis_conversation import (
     ConversationSource,
 )
 from app.schemas.stock_analysis_react import ReactObservation, ReactToolTrace
+from app.services.user_memory_extraction_service import UserMemoryExtractionService
 
+logger = logging.getLogger(__name__)
 
 class AnalysisConversationService:
     def __init__(self, db: AsyncSession) -> None:
         self.repo = AsyncAnalysisConversationRepository(db)
+        self.memory_extraction_service = UserMemoryExtractionService(db)
 
     async def save_user_message(
         self,
@@ -48,7 +52,7 @@ class AnalysisConversationService:
         message_type: ConversationMessageType = "react_follow_up",
         payload: dict[str, Any] | None = None,
     ) -> AnalysisConversationMessageResponse:
-        return await self._create_message(
+        message = await self._create_message(
             user_id=user_id,
             analysis_thread_id=analysis_thread_id,
             analysis_record_id=analysis_record_id,
@@ -58,6 +62,10 @@ class AnalysisConversationService:
             payload=payload,
             source=source,
         )
+
+        await self._extract_memory_from_user_message(message)
+
+        return message
 
     async def save_assistant_message(
         self,
@@ -228,6 +236,31 @@ class AnalysisConversationService:
             messages=context_messages,
             message_count=len(context_messages),
         )
+
+    async def _extract_memory_from_user_message(
+        self,
+        message: AnalysisConversationMessageResponse,
+    ) -> None:
+        try:
+            await self.memory_extraction_service.extract_from_conversation_message(
+                user_id=message.user_id,
+                message_id=message.id,
+                analysis_thread_id=message.analysis_thread_id,
+                analysis_record_id=message.analysis_record_id,
+                content=message.content,
+                message_type=message.message_type,
+                source=message.source,
+                payload=message.payload,
+            )
+        except Exception:
+            logger.exception(
+                "failed to extract user memory from conversation message",
+                extra={
+                    "user_id": message.user_id,
+                    "message_id": message.id,
+                    "analysis_thread_id": message.analysis_thread_id,
+                },
+            )
 
     async def _create_message(
         self,

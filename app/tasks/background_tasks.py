@@ -16,6 +16,7 @@ from app.schemas.background_task import (
     UserMemoryEmbeddingRebuildTaskPayload,
     UserProfileRefreshTaskPayload,
 )
+from app.schemas.daily_report import DailyReportSource, DailyReportTaskPayload
 from app.repositories.ai_usage_repo import AsyncAIUsageRepository
 from app.schemas.ai_usage import AIQuotaCheckRequest, AIUsageFeature
 from app.services.ai_quota_service import AIQuotaService
@@ -28,6 +29,8 @@ from app.services.ai_usage_token_service import (
 from app.services.market_data_sync_service import MarketDataSyncService
 from app.services.user_memory_embedding_service import UserMemoryEmbeddingService
 from app.services.user_profile_service import UserProfileService
+from app.repositories.user_repo import AsyncUserRepository
+from app.services.daily_report_query_service import DailyReportQueryService
 
 @celery_app.task(name="background_tasks.smoke_test")
 def smoke_test() -> dict[str, str]:
@@ -148,6 +151,13 @@ async def _dispatch_background_task_async(task_id: int) -> dict[str, object]:
 
         if running_task.task_type == "user_memory_embedding_rebuild":
             return await _run_user_memory_embedding_rebuild_task(
+                repository=repository,
+                task=running_task,
+                db=db,
+            )
+
+        if running_task.task_type == "daily_report":
+            return await _run_daily_report_task(
                 repository=repository,
                 task=running_task,
                 db=db,
@@ -600,6 +610,145 @@ async def _run_user_memory_embedding_rebuild_task(
             "max_retries": updated_task.max_retries,
             "will_retry": retried,
         }
+
+async def _run_daily_report_task(
+    *,
+    repository: AsyncBackgroundTaskRepository,
+    task,
+    db,
+) -> dict[str, Any]:
+    try:
+        payload = DailyReportTaskPayload.model_validate(task.payload)
+
+        if task.user_id is None and payload.target_user_id is None:
+            failed_task = await repository.mark_failed(
+                task=task,
+                error_message="daily_report requires user_id or target_user_id",
+                result={
+                    "status": "failed",
+                    "reason": "missing_user_id_for_daily_report",
+                    "task_type": task.task_type,
+                    "will_retry": False,
+                    "retry_count": task.retry_count,
+                    "max_retries": task.max_retries,
+                },
+            )
+
+            return {
+                "status": failed_task.status,
+                "reason": "missing_user_id_for_daily_report",
+                "task_id": failed_task.id,
+                "task_type": failed_task.task_type,
+            }
+
+        target_user_id = task.user_id or payload.target_user_id
+        user = await AsyncUserRepository(db).get_by_id(target_user_id)
+
+        if user is None:
+            failed_task = await repository.mark_failed(
+                task=task,
+                error_message="daily report target user not found",
+                result={
+                    "status": "failed",
+                    "reason": "daily_report_user_not_found",
+                    "task_type": task.task_type,
+                    "target_user_id": target_user_id,
+                    "will_retry": False,
+                    "retry_count": task.retry_count,
+                    "max_retries": task.max_retries,
+                },
+            )
+
+            return {
+                "status": failed_task.status,
+                "reason": "daily_report_user_not_found",
+                "task_id": failed_task.id,
+                "task_type": failed_task.task_type,
+                "target_user_id": target_user_id,
+            }
+
+        request = DailyReportTaskPayload(
+            report_date=payload.report_date,
+            use_ai=payload.use_ai,
+            force_rebuild=payload.force_rebuild,
+            notify=payload.notify,
+            include_candidates=payload.include_candidates,
+            include_user_profile=payload.include_user_profile,
+            include_relevant_memories=payload.include_relevant_memories,
+            max_watchlist_items=payload.max_watchlist_items,
+            max_candidate_items=payload.max_candidate_items,
+            target_user_id=target_user_id,
+        )
+
+        generation_result = await DailyReportQueryService(db).generate_daily_report(
+            user=user,
+            request=request,
+            source=(
+                DailyReportSource.SCHEDULER
+                if task.source == "scheduler"
+                else DailyReportSource.BACKGROUND_TASK
+            ),
+        )
+
+        success_task = await repository.mark_success(
+            task=task,
+            result={
+                "status": "success",
+                "reason": "daily_report_completed",
+                "task_type": task.task_type,
+                "target_user_id": target_user_id,
+                "report_id": generation_result.report.id,
+                "report_date": generation_result.report.report_date.isoformat(),
+                "report_status": generation_result.report.status,
+                "created": generation_result.created,
+                "ai_used": generation_result.ai_used,
+                "fallback_used": generation_result.fallback_used,
+                "notification_created": generation_result.notification_created,
+                "notification_id": generation_result.report.notification_id,
+            },
+        )
+
+        return {
+            "status": success_task.status,
+            "reason": "daily_report_completed",
+            "task_id": success_task.id,
+            "task_type": success_task.task_type,
+            "target_user_id": target_user_id,
+            "report_id": generation_result.report.id,
+            "report_status": generation_result.report.status,
+        }
+
+    except ValidationError as exc:
+        message = _safe_error_message(exc)
+
+        failed_task = await repository.mark_failed(
+            task=task,
+            error_message=message,
+            result={
+                "status": "failed",
+                "reason": "invalid_daily_report_payload",
+                "task_type": task.task_type,
+                "will_retry": False,
+                "retry_count": task.retry_count,
+                "max_retries": task.max_retries,
+                "error_type": exc.__class__.__name__,
+            },
+        )
+
+        return {
+            "status": failed_task.status,
+            "reason": "invalid_daily_report_payload",
+            "task_id": failed_task.id,
+            "task_type": task.task_type,
+        }
+
+    except Exception as exc:
+        return await _mark_failed_or_retry(
+            repository=repository,
+            task=task,
+            reason="daily_report_failed",
+            exc=exc,
+        )
 
 async def _check_stock_analysis_async_ai_quota(
     *,

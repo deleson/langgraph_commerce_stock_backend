@@ -73,7 +73,7 @@ from app.services.daily_report_data_service import (
     DailyReportDataService,
     DailyReportStockDataItem,
 )
-
+from app.services.daily_report_service import DailyReportService
 # from app.services.stock_analysis_service import StockAnalysisService
 
 
@@ -141,5 +141,6 @@ __all__ = [
     "DailyReportDataContext",
     "DailyReportDataService",
     "DailyReportStockDataItem",
+    "DailyReportService",
     # "StockAnalysisService",
 ]

@@ -12,6 +12,7 @@ from app.repositories.ai_usage_repo import AsyncAIUsageRepository
 from app.repositories.background_task_repo import AsyncBackgroundTaskRepository
 from app.repositories.user_memory_repo import AsyncUserMemoryRepository
 from app.repositories.user_memory_embedding_repo import AsyncUserMemoryEmbeddingRepository
+from app.repositories.daily_report_repo import AsyncDailyReportRepository
 
 __all__ = [
     "AnalysisRecordRepository",
@@ -27,5 +28,6 @@ __all__ = [
     "AsyncAIUsageRepository",
     "AsyncBackgroundTaskRepository",
     "AsyncUserMemoryRepository",
-    "AsyncUserMemoryEmbeddingRepository"
+    "AsyncUserMemoryEmbeddingRepository",
+    "AsyncDailyReportRepository",
 ]

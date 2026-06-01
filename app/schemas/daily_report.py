@@ -175,7 +175,9 @@ class DailyReportCreate(BaseModel):
 
 class DailyReportUpdate(BaseModel):
     status: DailyReportStatus | None = None
+    source: DailyReportSource | None = None
     summary: str | None = Field(default=None, max_length=4000)
+    input_snapshot: DailyReportInputSnapshot | None = None
     sections: list[DailyReportSection] | None = None
     stock_snapshots: list[DailyReportStockSnapshot] | None = None
     market_snapshot: dict[str, Any] | None = None

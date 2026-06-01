@@ -74,6 +74,10 @@ from app.services.daily_report_data_service import (
     DailyReportStockDataItem,
 )
 from app.services.daily_report_service import DailyReportService
+from app.services.daily_report_ai_service import (
+    DailyReportAIResult,
+    DailyReportAIService,
+)
 # from app.services.stock_analysis_service import StockAnalysisService
 
 
@@ -142,5 +146,7 @@ __all__ = [
     "DailyReportDataService",
     "DailyReportStockDataItem",
     "DailyReportService",
+    "DailyReportAIResult",
+    "DailyReportAIService",
     # "StockAnalysisService",
 ]

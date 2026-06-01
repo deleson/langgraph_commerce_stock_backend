@@ -26,6 +26,7 @@ from app.services.ai_usage_token_service import (
     AIUsageTokenService,
 )
 from app.services.market_data_sync_service import MarketDataSyncService
+from app.services.user_memory_embedding_service import UserMemoryEmbeddingService
 from app.services.user_profile_service import UserProfileService
 
 @celery_app.task(name="background_tasks.smoke_test")

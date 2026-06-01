@@ -13,7 +13,7 @@ class AIUsageLog(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "feature IN ('stock_analysis','react_reason','react_final_answer','candidate_ai_explanation')",
+            "feature IN ('stock_analysis','react_reason','react_final_answer','candidate_ai_explanation','daily_report')",
             name="ai_usage_log_feature_valid",
         ),
         CheckConstraint(

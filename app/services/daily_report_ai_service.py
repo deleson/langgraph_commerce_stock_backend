@@ -3,6 +3,20 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from typing import Any
+import logging
+from datetime import UTC, datetime
+
+from app.core.config import get_settings
+from app.core.database import AsyncSessionLocal
+from app.repositories.ai_usage_repo import AsyncAIUsageRepository
+from app.schemas.ai_usage import AIQuotaCheckRequest, AIUsageFeature
+from app.services.ai_quota_service import AIQuotaService
+from app.services.ai_usage_service import AIUsageService
+from app.services.ai_usage_token_service import (
+    AIUsageCostEstimate,
+    AIUsageTokenEstimate,
+    AIUsageTokenService,
+)
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
@@ -14,6 +28,10 @@ from app.schemas.daily_report import (
     DailyReportStatus,
 )
 
+logger = logging.getLogger(__name__)
+
+DAILY_REPORT_AI_FEATURE: AIUsageFeature = "daily_report"
+DAILY_REPORT_ESTIMATED_COMPLETION_TOKENS = 1800
 
 @dataclass(slots=True)
 class DailyReportAIResult:
@@ -28,8 +46,8 @@ class DailyReportAIResult:
 class DailyReportAIService:
     """Generate an AI-polished daily report from deterministic report data.
 
-    This service does not collect market data, does not check quota,
-    and does not write database rows. It only calls the LLM and returns
+This service does not collect market data and does not write daily report rows.
+It checks AI quota before calling the LLM and records AI usage logs. It only calls the LLM and returns
     an updated DailyReportCreate object.
     """
 
@@ -79,6 +97,8 @@ class DailyReportAIService:
     async def enhance_report(
         self,
         report: DailyReportCreate,
+        *,
+        user_id: int,
     ) -> DailyReportAIResult:
         if report.status == DailyReportStatus.FAILED:
             return DailyReportAIResult(
@@ -90,6 +110,30 @@ class DailyReportAIService:
 
         ai_context = self._build_ai_context(report)
         messages = self._build_messages(ai_context)
+
+        quota_allowed, quota_reason, estimated_tokens, estimated_cost = (
+            await self._check_daily_report_ai_quota(
+                user_id=user_id,
+                messages=messages,
+            )
+        )
+
+        if not quota_allowed:
+            await self._record_daily_report_ai_blocked(
+                user_id=user_id,
+                report=report,
+                reason=quota_reason or "AI quota is not enough",
+                estimated_tokens=estimated_tokens,
+                estimated_cost=estimated_cost,
+            )
+
+            return self._build_quota_blocked_result(
+                report=report,
+                messages=messages,
+                quota_reason=quota_reason or "AI quota is not enough",
+            )
+
+        started_at = datetime.now(UTC)
 
         try:
             llm = get_chat_model()
@@ -104,15 +148,25 @@ class DailyReportAIService:
                 payload=payload,
             )
 
-            return DailyReportAIResult(
+            result = DailyReportAIResult(
                 report=enhanced_report,
                 messages=messages,
                 raw_content=raw_content,
                 response=response,
                 ai_status=DailyReportAIStatus.SUCCESS,
             )
+
+            await self._record_daily_report_ai_success(
+                user_id=user_id,
+                report=enhanced_report,
+                result=result,
+                started_at=started_at,
+            )
+
+            return result
+
         except json.JSONDecodeError as exc:
-            return self._build_fallback_result(
+            result = self._build_fallback_result(
                 report=report,
                 messages=messages,
                 raw_content=locals().get("raw_content", ""),
@@ -120,8 +174,17 @@ class DailyReportAIService:
                 ai_status=DailyReportAIStatus.PARSE_ERROR,
                 error_message=self._safe_exception_message(exc),
             )
+            await self._record_daily_report_ai_failed(
+                user_id=user_id,
+                report=report,
+                result=result,
+                error_message=result.error_message or self._safe_exception_message(exc),
+                started_at=started_at,
+            )
+            return result
+
         except Exception as exc:
-            return self._build_fallback_result(
+            result = self._build_fallback_result(
                 report=report,
                 messages=messages,
                 raw_content=locals().get("raw_content", ""),
@@ -129,6 +192,15 @@ class DailyReportAIService:
                 ai_status=DailyReportAIStatus.LLM_ERROR,
                 error_message=self._safe_exception_message(exc),
             )
+
+            await self._record_daily_report_ai_failed(
+                user_id=user_id,
+                report=report,
+                result=result,
+                error_message=result.error_message or self._safe_exception_message(exc),
+                started_at=started_at,
+            )
+            return result
 
     def _build_ai_context(
         self,
@@ -316,6 +388,187 @@ class DailyReportAIService:
             response=response,
             ai_status=ai_status,
             error_message=error_message,
+        )
+
+    async def _check_daily_report_ai_quota(
+        self,
+        *,
+        user_id: int,
+        messages: list[BaseMessage],
+    ) -> tuple[bool, str | None, AIUsageTokenEstimate, AIUsageCostEstimate]:
+        token_service = AIUsageTokenService()
+        settings = get_settings()
+
+        prompt_estimate = token_service.estimate_prompt_tokens_from_messages(messages)
+        estimated_tokens = AIUsageTokenEstimate(
+            prompt_tokens=prompt_estimate.prompt_tokens,
+            completion_tokens=DAILY_REPORT_ESTIMATED_COMPLETION_TOKENS,
+            total_tokens=(
+                    prompt_estimate.prompt_tokens
+                    + DAILY_REPORT_ESTIMATED_COMPLETION_TOKENS
+            ),
+            token_source="estimated",
+        )
+        estimated_cost = token_service.estimate_cost(
+            model_name=settings.llm_model,
+            prompt_tokens=estimated_tokens.prompt_tokens,
+            completion_tokens=estimated_tokens.completion_tokens,
+        )
+
+        async with AsyncSessionLocal() as db:
+            repo = AsyncAIUsageRepository(db)
+            quota_service = AIQuotaService(repo)
+
+            result = await quota_service.check_quota(
+                AIQuotaCheckRequest(
+                    user_id=user_id,
+                    feature=DAILY_REPORT_AI_FEATURE,
+                    provider="deepseek",
+                    model_name=settings.llm_model,
+                    estimated_prompt_tokens=estimated_tokens.prompt_tokens,
+                    estimated_completion_tokens=estimated_tokens.completion_tokens,
+                    estimated_total_tokens=estimated_tokens.total_tokens,
+                    estimated_cost=estimated_cost.estimated_cost,
+                    currency=estimated_cost.currency,
+                )
+            )
+
+        return result.allowed, result.reason, estimated_tokens, estimated_cost
+
+    async def _record_daily_report_ai_success(
+        self,
+        *,
+        user_id: int,
+        report: DailyReportCreate,
+        result: DailyReportAIResult,
+        started_at: datetime,
+    ):
+        try:
+            async with AsyncSessionLocal() as db:
+                repo = AsyncAIUsageRepository(db)
+                usage_service = AIUsageService(repo)
+
+                return await usage_service.record_success(
+                    user_id=user_id,
+                    feature=DAILY_REPORT_AI_FEATURE,
+                    model_name=get_settings().llm_model,
+                    response=result.response,
+                    prompt_messages=result.messages,
+                    completion_text=result.raw_content,
+                    started_at=started_at,
+                    finished_at=datetime.now(UTC),
+                    extra=self._build_ai_usage_extra(report=report, result=result),
+                )
+        except Exception:
+            logger.exception("record daily report ai success usage failed")
+            return None
+
+    async def _record_daily_report_ai_failed(
+        self,
+        *,
+        user_id: int,
+        report: DailyReportCreate,
+        result: DailyReportAIResult,
+        error_message: str,
+        started_at: datetime,
+    ) -> None:
+        try:
+            async with AsyncSessionLocal() as db:
+                repo = AsyncAIUsageRepository(db)
+                usage_service = AIUsageService(repo)
+
+                await usage_service.record_failed(
+                    user_id=user_id,
+                    feature=DAILY_REPORT_AI_FEATURE,
+                    model_name=get_settings().llm_model,
+                    error_message=error_message,
+                    response=result.response,
+                    prompt_messages=result.messages,
+                    completion_text=result.raw_content,
+                    started_at=started_at,
+                    finished_at=datetime.now(UTC),
+                    extra=self._build_ai_usage_extra(report=report, result=result),
+                )
+        except Exception:
+            logger.exception("record daily report ai failed usage failed")
+
+    async def _record_daily_report_ai_blocked(
+        self,
+        *,
+        user_id: int,
+        report: DailyReportCreate,
+        reason: str,
+        estimated_tokens: AIUsageTokenEstimate,
+        estimated_cost: AIUsageCostEstimate,
+    ) -> None:
+        try:
+            async with AsyncSessionLocal() as db:
+                repo = AsyncAIUsageRepository(db)
+                usage_service = AIUsageService(repo)
+
+                await usage_service.record_blocked(
+                    user_id=user_id,
+                    feature=DAILY_REPORT_AI_FEATURE,
+                    model_name=get_settings().llm_model,
+                    reason=reason,
+                    estimated_prompt_tokens=estimated_tokens.prompt_tokens,
+                    estimated_completion_tokens=estimated_tokens.completion_tokens,
+                    estimated_cost=estimated_cost.estimated_cost,
+                    extra=self._build_ai_usage_extra(
+                        report=report,
+                        quota_reason=reason,
+                    ),
+                )
+        except Exception:
+            logger.exception("record daily report ai blocked usage failed")
+
+    def _build_ai_usage_extra(
+        self,
+        *,
+        report: DailyReportCreate,
+        result: DailyReportAIResult | None = None,
+        quota_reason: str | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "source": "daily_report_ai",
+            "report_date": report.report_date.isoformat(),
+            "report_status": report.status,
+            "section_count": len(report.sections),
+            "stock_snapshot_count": len(report.stock_snapshots),
+            "ai_status": result.ai_status if result is not None else None,
+            "quota_reason": quota_reason,
+        }
+
+    def _build_quota_blocked_result(
+        self,
+        *,
+        report: DailyReportCreate,
+        messages: list[BaseMessage],
+        quota_reason: str,
+    ) -> DailyReportAIResult:
+        fallback_report = report.model_copy(
+            update={
+                "status": (
+                    DailyReportStatus.FALLBACK
+                    if report.status == DailyReportStatus.GENERATED
+                    else report.status
+                ),
+                "ai_used": False,
+                "ai_status": DailyReportAIStatus.QUOTA_BLOCKED,
+                "warnings": self._merge_warnings(
+                    report.warnings,
+                    [
+                        f"AI 每日简报额度不足，已降级使用确定性简报：{quota_reason}"
+                    ],
+                ),
+            }
+        )
+
+        return DailyReportAIResult(
+            report=fallback_report,
+            messages=messages,
+            ai_status=DailyReportAIStatus.QUOTA_BLOCKED,
+            error_message=quota_reason,
         )
 
     def _trim_snapshot(

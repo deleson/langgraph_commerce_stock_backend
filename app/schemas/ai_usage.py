@@ -10,6 +10,7 @@ AIUsageFeature = Literal[
     "react_reason",
     "react_final_answer",
     "candidate_ai_explanation",
+    "daily_report",
 ]
 
 AIUsageProvider = Literal[

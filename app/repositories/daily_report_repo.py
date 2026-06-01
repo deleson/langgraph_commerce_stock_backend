@@ -17,7 +17,10 @@ class AsyncDailyReportRepository:
         self,
         payload: DailyReportCreate,
     ) -> DailyReport:
-        report = DailyReport(**payload.model_dump(mode="json"))
+        report_data = payload.model_dump(mode="json")
+        report_data["report_date"] = payload.report_date
+
+        report = DailyReport(**report_data)
         self.db.add(report)
         await self.db.commit()
         await self.db.refresh(report)

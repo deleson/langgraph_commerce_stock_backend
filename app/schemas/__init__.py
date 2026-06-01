@@ -251,6 +251,25 @@ from app.schemas.user_memory_embedding import (
     UserMemoryRetrievalStatus,
     UserMemoryRetrievalUnavailableReason,
 )
+from app.schemas.daily_report import (
+    DailyReportAIStatus,
+    DailyReportCreate,
+    DailyReportGenerateRequest,
+    DailyReportGenerationResponse,
+    DailyReportInputSnapshot,
+    DailyReportListQuery,
+    DailyReportListResponse,
+    DailyReportResponse,
+    DailyReportSection,
+    DailyReportSectionType,
+    DailyReportSource,
+    DailyReportStatus,
+    DailyReportStockSnapshot,
+    DailyReportTaskPayload,
+    DailyReportTodayResponse,
+    DailyReportUnavailableReason,
+    DailyReportUpdate,
+)
 
 __all__ = [
     "ApiResponse",
@@ -479,4 +498,22 @@ __all__ = [
     "UserMemoryRetrievalResponse",
     "UserMemoryRetrievalStatus",
     "UserMemoryRetrievalUnavailableReason",
+
+    "DailyReportAIStatus",
+    "DailyReportCreate",
+    "DailyReportGenerateRequest",
+    "DailyReportGenerationResponse",
+    "DailyReportInputSnapshot",
+    "DailyReportListQuery",
+    "DailyReportListResponse",
+    "DailyReportResponse",
+    "DailyReportSection",
+    "DailyReportSectionType",
+    "DailyReportSource",
+    "DailyReportStatus",
+    "DailyReportStockSnapshot",
+    "DailyReportTaskPayload",
+    "DailyReportTodayResponse",
+    "DailyReportUnavailableReason",
+    "DailyReportUpdate",
 ]

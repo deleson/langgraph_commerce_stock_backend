@@ -20,6 +20,8 @@ from app.models.background_task import BackgroundTask
 from app.models.user_memory import UserMemory
 from app.models.user_profile import UserProfile
 from app.models.user_memory_embedding import UserMemoryEmbedding
+from app.models.daily_report import DailyReport
+
 
 __all__ = [
     "AnalysisRecord",
@@ -44,4 +46,5 @@ __all__ = [
     "UserMemory",
     "UserProfile",
     "UserMemoryEmbedding",
+    "DailyReport",
 ]

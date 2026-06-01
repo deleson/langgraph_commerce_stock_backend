@@ -838,12 +838,33 @@ async def _run_daily_report_task(
         }
 
     except Exception as exc:
-        return await _mark_failed_or_retry(
+        message = _safe_error_message(exc)
+
+        error_result = {
+            "status": "failed",
+            "reason": "daily_report_failed",
+            "task_type": task.task_type,
+            "error_type": exc.__class__.__name__,
+            "error_message": message,
+        }
+
+        updated_task, retried = await _mark_failed_or_retry(
             repository=repository,
             task=task,
-            reason="daily_report_failed",
-            exc=exc,
+            error_message=message,
+            result=error_result,
+            retryable=True,
         )
+
+        return {
+            "status": updated_task.status,
+            "reason": "daily_report_retrying" if retried else "daily_report_failed",
+            "task_id": updated_task.id,
+            "task_type": updated_task.task_type,
+            "retry_count": updated_task.retry_count,
+            "max_retries": updated_task.max_retries,
+            "will_retry": retried,
+        }
 
 async def _check_stock_analysis_async_ai_quota(
     *,

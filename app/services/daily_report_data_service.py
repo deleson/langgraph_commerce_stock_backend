@@ -372,7 +372,7 @@ class DailyReportDataService:
             "symbol": item.symbol,
             "market": item.market,
             "name": item.name,
-            "note": item.note,
+            "notes": item.notes,
             "created_at": item.created_at.isoformat() if item.created_at else None,
         }
 

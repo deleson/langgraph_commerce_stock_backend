@@ -11,12 +11,12 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     op.drop_constraint(
-        "ck_ai_usage_logs_ai_usage_log_feature_valid",
+        op.f("ck_ai_usage_logs_ai_usage_log_feature_valid"),
         "ai_usage_logs",
         type_="check",
     )
     op.create_check_constraint(
-        "ck_ai_usage_logs_ai_usage_log_feature_valid",
+        op.f("ck_ai_usage_logs_ai_usage_log_feature_valid"),
         "ai_usage_logs",
         "feature IN ("
         "'stock_analysis',"
@@ -30,12 +30,12 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_constraint(
-        "ck_ai_usage_logs_ai_usage_log_feature_valid",
+        op.f("ck_ai_usage_logs_ai_usage_log_feature_valid"),
         "ai_usage_logs",
         type_="check",
     )
     op.create_check_constraint(
-        "ck_ai_usage_logs_ai_usage_log_feature_valid",
+        op.f("ck_ai_usage_logs_ai_usage_log_feature_valid"),
         "ai_usage_logs",
         "feature IN ("
         "'stock_analysis',"

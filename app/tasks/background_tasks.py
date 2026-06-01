@@ -65,6 +65,10 @@ def submit_scheduled_market_data_sync() -> dict[str, object]:
     loop = _get_worker_event_loop()
     return loop.run_until_complete(_submit_scheduled_market_data_sync_async())
 
+@celery_app.task(name="background_tasks.submit_scheduled_daily_reports")
+def submit_scheduled_daily_reports() -> dict[str, object]:
+    loop = _get_worker_event_loop()
+    return loop.run_until_complete(_submit_scheduled_daily_reports_async())
 
 async def _submit_scheduled_market_data_sync_async() -> dict[str, object]:
     settings = get_settings()
@@ -115,6 +119,97 @@ async def _submit_scheduled_market_data_sync_async() -> dict[str, object]:
             "limit": payload.limit,
         }
 
+async def _submit_scheduled_daily_reports_async() -> dict[str, object]:
+    settings = get_settings()
+
+    submitted_count = 0
+    failed_count = 0
+    skipped_count = 0
+    submitted_task_ids: list[int] = []
+    errors: list[dict[str, object]] = []
+
+    async with AsyncSessionLocal() as db:
+        user_repository = AsyncUserRepository(db)
+        task_repository = AsyncBackgroundTaskRepository(db)
+
+        offset = 0
+        batch_size = settings.celery_beat_daily_report_batch_size
+
+        while True:
+            users = await user_repository.list_active_users(
+                limit=batch_size,
+                offset=offset,
+            )
+
+            if not users:
+                break
+
+            for user in users:
+                payload = DailyReportTaskPayload(
+                    use_ai=settings.celery_beat_daily_report_use_ai,
+                    force_rebuild=settings.celery_beat_daily_report_force_rebuild,
+                    notify=settings.celery_beat_daily_report_notify,
+                    include_candidates=settings.celery_beat_daily_report_include_candidates,
+                    include_user_profile=settings.celery_beat_daily_report_include_user_profile,
+                    include_relevant_memories=settings.celery_beat_daily_report_include_relevant_memories,
+                    max_watchlist_items=settings.celery_beat_daily_report_max_watchlist_items,
+                    max_candidate_items=settings.celery_beat_daily_report_max_candidate_items,
+                    target_user_id=user.id,
+                )
+
+                request = BackgroundTaskCreateRequest(
+                    task_type="daily_report",
+                    payload=payload.model_dump(mode="json", exclude_none=True),
+                    priority="normal",
+                    source="scheduler",
+                    max_retries=settings.celery_beat_daily_report_max_retries,
+                )
+
+                try:
+                    task = await task_repository.create_task(
+                        payload=request,
+                        user_id=user.id,
+                    )
+                    async_result = celery_app.send_task(
+                        "background_tasks.dispatch_background_task",
+                        args=[task.id],
+                    )
+                    queued_task = await task_repository.mark_queued(
+                        task=task,
+                        celery_task_id=async_result.id,
+                    )
+                    submitted_count += 1
+                    submitted_task_ids.append(queued_task.id)
+                except Exception as exc:
+                    failed_count += 1
+                    errors.append(
+                        {
+                            "user_id": user.id,
+                            "error": _safe_error_message(exc),
+                        }
+                    )
+
+            offset += batch_size
+
+    if submitted_count == 0 and failed_count == 0:
+        return {
+            "status": "skipped",
+            "reason": "no_active_users_for_daily_report",
+            "submitted_count": submitted_count,
+            "failed_count": failed_count,
+            "skipped_count": skipped_count,
+        }
+
+    return {
+        "status": "success" if failed_count == 0 else "partial_success",
+        "reason": "scheduled_daily_reports_submitted",
+        "submitted_count": submitted_count,
+        "failed_count": failed_count,
+        "skipped_count": skipped_count,
+        "submitted_task_ids": submitted_task_ids[:50],
+        "submitted_task_count": len(submitted_task_ids),
+        "errors": errors[:20],
+    }
 
 async def _dispatch_background_task_async(task_id: int) -> dict[str, object]:
     async with AsyncSessionLocal() as db:

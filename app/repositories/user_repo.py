@@ -70,6 +70,22 @@ class AsyncUserRepository:
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def list_active_users(
+        self,
+        *,
+        limit: int = 200,
+        offset: int = 0,
+    ) -> list[User]:
+        stmt = (
+            select(User)
+            .where(User.is_active.is_(True), User.status == "active")
+            .order_by(User.id.asc())
+            .offset(offset)
+            .limit(limit)
+        )
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
     async def create(
         self,
         *,

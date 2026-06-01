@@ -1,5 +1,5 @@
 from celery import Celery
-from celery.schedules import schedule
+from celery.schedules import crontab, schedule
 
 from app.core.config import Settings, get_settings
 
@@ -16,6 +16,15 @@ def build_beat_schedule(settings: Settings) -> dict[str, dict]:
             "task": "background_tasks.submit_scheduled_market_data_sync",
             "schedule": schedule(
                 run_every=settings.celery_beat_market_data_sync_interval_seconds
+            ),
+        }
+
+    if settings.celery_beat_daily_report_enabled:
+        beat_schedule["scheduled-daily-reports"] = {
+            "task": "background_tasks.submit_scheduled_daily_reports",
+            "schedule": crontab(
+                hour=settings.celery_beat_daily_report_hour,
+                minute=settings.celery_beat_daily_report_minute,
             ),
         }
 

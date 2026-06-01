@@ -12,6 +12,7 @@ from app.schemas.market_data import (
     MarketDataSource,
 )
 from app.schemas.user_memory import UserProfileRefreshRequest
+from app.schemas.user_memory_embedding import UserMemoryEmbeddingRebuildRequest
 
 BackgroundTaskType = Literal[
     "market_data_sync",
@@ -19,6 +20,7 @@ BackgroundTaskType = Literal[
     "candidate_scoring_async",
     "candidate_ai_explanation_async",
     "user_profile_refresh",
+    "user_memory_embedding_rebuild",
     "daily_report",
     "alert_scan",
     "paper_trading_tick",
@@ -85,6 +87,11 @@ class StockAnalysisAsyncTaskPayload(BaseModel):
 
 class UserProfileRefreshTaskPayload(UserProfileRefreshRequest):
     """Payload for refreshing current user's profile in a background task."""
+
+    pass
+
+class UserMemoryEmbeddingRebuildTaskPayload(UserMemoryEmbeddingRebuildRequest):
+    """Payload for rebuilding current user's memory embeddings in background."""
 
     pass
 

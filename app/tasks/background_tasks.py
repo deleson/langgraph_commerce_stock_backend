@@ -13,6 +13,7 @@ from app.schemas.background_task import (
     BackgroundTaskCreateRequest,
     MarketDataSyncTaskPayload,
     StockAnalysisAsyncTaskPayload,
+    UserMemoryEmbeddingRebuildTaskPayload,
     UserProfileRefreshTaskPayload,
 )
 from app.repositories.ai_usage_repo import AsyncAIUsageRepository
@@ -139,6 +140,13 @@ async def _dispatch_background_task_async(task_id: int) -> dict[str, object]:
             )
         if running_task.task_type == "user_profile_refresh":
             return await _run_user_profile_refresh_task(
+                repository=repository,
+                task=running_task,
+                db=db,
+            )
+
+        if running_task.task_type == "user_memory_embedding_rebuild":
+            return await _run_user_memory_embedding_rebuild_task(
                 repository=repository,
                 task=running_task,
                 db=db,
@@ -436,6 +444,155 @@ async def _run_user_profile_refresh_task(
             "reason": "user_profile_refresh_retrying"
             if retried
             else "user_profile_refresh_failed",
+            "task_id": updated_task.id,
+            "task_type": updated_task.task_type,
+            "retry_count": updated_task.retry_count,
+            "max_retries": updated_task.max_retries,
+            "will_retry": retried,
+        }
+
+async def _run_user_memory_embedding_rebuild_task(
+    *,
+    repository: AsyncBackgroundTaskRepository,
+    task,
+    db,
+) -> dict[str, Any]:
+    try:
+        payload = UserMemoryEmbeddingRebuildTaskPayload.model_validate(task.payload)
+
+        if task.user_id is None:
+            failed_task = await repository.mark_failed(
+                task=task,
+                error_message="user_memory_embedding_rebuild requires user_id",
+                result={
+                    "status": "failed",
+                    "reason": "missing_user_id_for_memory_embedding_rebuild",
+                    "task_type": task.task_type,
+                    "will_retry": False,
+                    "retry_count": task.retry_count,
+                    "max_retries": task.max_retries,
+                },
+            )
+
+            return {
+                "status": failed_task.status,
+                "reason": "missing_user_id_for_memory_embedding_rebuild",
+                "task_id": failed_task.id,
+                "task_type": failed_task.task_type,
+            }
+
+        embedding_service = UserMemoryEmbeddingService(db)
+
+        rebuilt_embeddings = []
+
+        if payload.memory_ids:
+            for memory_id in payload.memory_ids:
+                rebuilt_embedding = await embedding_service.build_embedding_for_memory(
+                    user_id=task.user_id,
+                    memory_id=memory_id,
+                    build_source="manual_rebuild",
+                    force_rebuild=payload.force_rebuild,
+                )
+                rebuilt_embeddings.append(rebuilt_embedding)
+        else:
+            rebuilt_embeddings = await embedding_service.build_embeddings_for_user(
+                user_id=task.user_id,
+                build_source="manual_rebuild",
+                force_rebuild=payload.force_rebuild,
+            )
+
+        rebuilt_items = [
+            {
+                "embedding_id": item.id,
+                "memory_id": item.memory_id,
+                "status": item.status,
+                "embedding_provider": item.embedding_provider,
+                "embedding_model": item.embedding_model,
+                "embedding_dimension": item.embedding_dimension,
+                "last_embedded_at": item.last_embedded_at.isoformat()
+                if item.last_embedded_at
+                else None,
+            }
+            for item in rebuilt_embeddings
+        ]
+
+        success_task = await repository.mark_success(
+            task=task,
+            result={
+                "status": "success",
+                "reason": "user_memory_embedding_rebuild_completed",
+                "task_type": task.task_type,
+                "user_id": task.user_id,
+                "requested_memory_ids": payload.memory_ids,
+                "rebuilt_count": len(rebuilt_items),
+                "rebuilt_items": rebuilt_items[:50],
+                "force_rebuild": payload.force_rebuild,
+                "only_failed": payload.only_failed,
+                "only_stale": payload.only_stale,
+                "request_reason": payload.reason,
+                "note": (
+                    "第一版后台向量刷新复用 UserMemoryEmbeddingService。"
+                    "only_failed / only_stale 当前作为请求字段保留，后续可进一步细化筛选逻辑。"
+                ),
+            },
+        )
+
+        return {
+            "status": success_task.status,
+            "reason": "user_memory_embedding_rebuild_completed",
+            "task_id": success_task.id,
+            "task_type": success_task.task_type,
+            "rebuilt_count": len(rebuilt_items),
+        }
+
+    except ValidationError as exc:
+        message = _safe_error_message(exc)
+
+        failed_task = await repository.mark_failed(
+            task=task,
+            error_message=message,
+            result={
+                "status": "failed",
+                "reason": "invalid_user_memory_embedding_rebuild_payload",
+                "task_type": task.task_type,
+                "will_retry": False,
+                "retry_count": task.retry_count,
+                "max_retries": task.max_retries,
+                "error_type": exc.__class__.__name__,
+            },
+        )
+
+        return {
+            "status": failed_task.status,
+            "reason": "invalid_user_memory_embedding_rebuild_payload",
+            "task_id": failed_task.id,
+            "task_type": failed_task.task_type,
+        }
+
+    except Exception as exc:
+        message = _safe_error_message(exc)
+
+        error_result = {
+            "status": "failed",
+            "reason": "user_memory_embedding_rebuild_failed",
+            "task_type": task.task_type,
+            "error_type": exc.__class__.__name__,
+            "error_message": message,
+        }
+
+        updated_task, retried = await _mark_failed_or_retry(
+            repository=repository,
+            task=task,
+            error_message=message,
+            result=error_result,
+            retryable=True,
+        )
+
+        return {
+            "status": updated_task.status,
+            "reason": "user_memory_embedding_rebuild_retrying"
+            if retried
+            else "user_memory_embedding_rebuild_failed",
             "task_id": updated_task.id,
             "task_type": updated_task.task_type,
             "retry_count": updated_task.retry_count,

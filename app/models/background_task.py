@@ -18,6 +18,7 @@ class BackgroundTask(Base):
             "'candidate_scoring_async',"
             "'candidate_ai_explanation_async',"
             "'user_profile_refresh',"
+            "'user_memory_embedding_rebuild',"
             "'daily_report',"
             "'alert_scan',"
             "'paper_trading_tick'"

@@ -21,6 +21,8 @@ from app.models.user_memory import UserMemory
 from app.models.user_profile import UserProfile
 from app.models.user_memory_embedding import UserMemoryEmbedding
 from app.models.daily_report import DailyReport
+from app.models.quant_alert_rule import QuantAlertRule
+from app.models.quant_alert_event import QuantAlertEvent
 
 
 __all__ = [
@@ -47,4 +49,6 @@ __all__ = [
     "UserProfile",
     "UserMemoryEmbedding",
     "DailyReport",
+    "QuantAlertRule",
+    "QuantAlertEvent",
 ]

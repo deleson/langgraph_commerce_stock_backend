@@ -28,6 +28,14 @@ def build_beat_schedule(settings: Settings) -> dict[str, dict]:
             ),
         }
 
+    if settings.celery_beat_quant_alert_scan_enabled:
+        beat_schedule["scheduled-quant-alert-scans"] = {
+            "task": "background_tasks.submit_scheduled_alert_scans",
+            "schedule": schedule(
+                run_every=settings.celery_beat_quant_alert_scan_interval_seconds
+            ),
+        }
+
     return beat_schedule
 
 celery_app = Celery(

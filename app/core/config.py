@@ -59,6 +59,14 @@ class Settings(BaseSettings):
     celery_beat_daily_report_batch_size: int = Field(default=200, ge=1, le=1000)
     celery_beat_daily_report_max_retries: int = Field(default=2, ge=0, le=5)
 
+    celery_beat_quant_alert_scan_enabled: bool = Field(default=False)
+    celery_beat_quant_alert_scan_interval_seconds: int = Field(default=900, ge=60)
+    celery_beat_quant_alert_scan_notify: bool = Field(default=True)
+    celery_beat_quant_alert_scan_force: bool = Field(default=False)
+    celery_beat_quant_alert_scan_max_watchlist_items: int = Field(default=100, ge=1, le=500)
+    celery_beat_quant_alert_scan_batch_size: int = Field(default=200, ge=1, le=1000)
+    celery_beat_quant_alert_scan_max_retries: int = Field(default=2, ge=0, le=5)
+
     jwt_secret_key: str = Field(default="change-this-in-production")
     jwt_algorithm: str = Field(default="HS256")
     jwt_access_token_expire_minutes: int = Field(default=60)

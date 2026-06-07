@@ -79,6 +79,12 @@ from app.services.daily_report_ai_service import (
     DailyReportAIService,
 )
 from app.services.daily_report_query_service import DailyReportQueryService
+from app.services.quant_alert_data_service import (
+    QuantAlertDataContext,
+    QuantAlertDataItem,
+    QuantAlertDataService,
+    QuantAlertUniverseItem,
+)
 # from app.services.stock_analysis_service import StockAnalysisService
 
 
@@ -150,5 +156,9 @@ __all__ = [
     "DailyReportAIResult",
     "DailyReportAIService",
     "DailyReportQueryService",
+    "QuantAlertDataContext",
+    "QuantAlertDataItem",
+    "QuantAlertDataService",
+    "QuantAlertUniverseItem",
     # "StockAnalysisService",
 ]

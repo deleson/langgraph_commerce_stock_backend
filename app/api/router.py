@@ -28,6 +28,8 @@ from app.api.routers.user_memory_retrieval import (
     router as user_memory_retrieval_router,
 )
 from app.api.routers.daily_reports import router as daily_reports_router
+from app.api.routers.quant_alerts import router as quant_alerts_router
+
 
 from app.core.config import get_settings
 
@@ -58,3 +60,4 @@ api_router.include_router(background_tasks_router)
 api_router.include_router(user_memories_router)
 api_router.include_router(user_memory_retrieval_router)
 api_router.include_router(daily_reports_router)
+api_router.include_router(quant_alerts_router)

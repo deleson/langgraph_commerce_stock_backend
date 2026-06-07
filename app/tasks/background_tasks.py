@@ -12,6 +12,7 @@ from app.repositories.background_task_repo import AsyncBackgroundTaskRepository
 from app.schemas.background_task import (
     BackgroundTaskCreateRequest,
     MarketDataSyncTaskPayload,
+    QuantAlertScanTaskPayload,
     StockAnalysisAsyncTaskPayload,
     UserMemoryEmbeddingRebuildTaskPayload,
     UserProfileRefreshTaskPayload,
@@ -31,6 +32,8 @@ from app.services.user_memory_embedding_service import UserMemoryEmbeddingServic
 from app.services.user_profile_service import UserProfileService
 from app.repositories.user_repo import AsyncUserRepository
 from app.services.daily_report_query_service import DailyReportQueryService
+from app.schemas.quant_alert import QuantAlertScanRequest, QuantAlertScanSource
+from app.services.quant_alert_query_service import QuantAlertQueryService
 
 @celery_app.task(name="background_tasks.smoke_test")
 def smoke_test() -> dict[str, str]:
@@ -253,6 +256,13 @@ async def _dispatch_background_task_async(task_id: int) -> dict[str, object]:
 
         if running_task.task_type == "daily_report":
             return await _run_daily_report_task(
+                repository=repository,
+                task=running_task,
+                db=db,
+            )
+
+        if running_task.task_type == "alert_scan":
+            return await _run_alert_scan_task(
                 repository=repository,
                 task=running_task,
                 db=db,
@@ -859,6 +869,163 @@ async def _run_daily_report_task(
         return {
             "status": updated_task.status,
             "reason": "daily_report_retrying" if retried else "daily_report_failed",
+            "task_id": updated_task.id,
+            "task_type": updated_task.task_type,
+            "retry_count": updated_task.retry_count,
+            "max_retries": updated_task.max_retries,
+            "will_retry": retried,
+        }
+
+async def _run_alert_scan_task(
+    *,
+    repository: AsyncBackgroundTaskRepository,
+    task,
+    db,
+) -> dict[str, Any]:
+    try:
+        payload = QuantAlertScanTaskPayload.model_validate(task.payload)
+
+        if task.user_id is None and payload.target_user_id is None:
+            failed_task = await repository.mark_failed(
+                task=task,
+                error_message="alert_scan requires user_id or target_user_id",
+                result={
+                    "status": "failed",
+                    "reason": "missing_user_id_for_alert_scan",
+                    "task_type": task.task_type,
+                    "will_retry": False,
+                    "retry_count": task.retry_count,
+                    "max_retries": task.max_retries,
+                },
+            )
+
+            return {
+                "status": failed_task.status,
+                "reason": "missing_user_id_for_alert_scan",
+                "task_id": failed_task.id,
+                "task_type": failed_task.task_type,
+            }
+
+        target_user_id = task.user_id or payload.target_user_id
+        user = await AsyncUserRepository(db).get_by_id(target_user_id)
+
+        if user is None:
+            failed_task = await repository.mark_failed(
+                task=task,
+                error_message="alert scan target user not found",
+                result={
+                    "status": "failed",
+                    "reason": "alert_scan_user_not_found",
+                    "task_type": task.task_type,
+                    "target_user_id": target_user_id,
+                    "will_retry": False,
+                    "retry_count": task.retry_count,
+                    "max_retries": task.max_retries,
+                },
+            )
+
+            return {
+                "status": failed_task.status,
+                "reason": "alert_scan_user_not_found",
+                "task_id": failed_task.id,
+                "task_type": failed_task.task_type,
+                "target_user_id": target_user_id,
+            }
+
+        request = QuantAlertScanRequest(
+            target_user_id=target_user_id,
+            symbols=payload.symbols,
+            market=payload.market,
+            rule_types=payload.rule_types,
+            source=(
+                QuantAlertScanSource.SCHEDULER
+                if task.source == "scheduler"
+                else QuantAlertScanSource.BACKGROUND_TASK
+            ),
+            notify=payload.notify,
+            force=payload.force,
+            max_watchlist_items=payload.max_watchlist_items,
+        )
+
+        scan_result = await QuantAlertQueryService(db).scan_alerts(
+            user=user,
+            request=request,
+        )
+
+        success_task = await repository.mark_success(
+            task=task,
+            result={
+                "status": "success",
+                "reason": "alert_scan_completed",
+                "task_type": task.task_type,
+                "target_user_id": target_user_id,
+                "scan_status": scan_result.status,
+                "unavailable_reason": scan_result.unavailable_reason,
+                "scanned_count": scan_result.scanned_count,
+                "triggered_count": scan_result.triggered_count,
+                "notification_count": scan_result.notification_count,
+                "summary": scan_result.summary,
+                "warnings": scan_result.warnings[:20],
+            },
+        )
+
+        return {
+            "status": success_task.status,
+            "reason": "alert_scan_completed",
+            "task_id": success_task.id,
+            "task_type": success_task.task_type,
+            "target_user_id": target_user_id,
+            "scanned_count": scan_result.scanned_count,
+            "triggered_count": scan_result.triggered_count,
+            "notification_count": scan_result.notification_count,
+        }
+
+    except ValidationError as exc:
+        message = _safe_error_message(exc)
+
+        failed_task = await repository.mark_failed(
+            task=task,
+            error_message=message,
+            result={
+                "status": "failed",
+                "reason": "invalid_alert_scan_payload",
+                "task_type": task.task_type,
+                "will_retry": False,
+                "retry_count": task.retry_count,
+                "max_retries": task.max_retries,
+                "error_type": exc.__class__.__name__,
+            },
+        )
+
+        return {
+            "status": failed_task.status,
+            "reason": "invalid_alert_scan_payload",
+            "task_id": failed_task.id,
+            "task_type": task.task_type,
+        }
+
+    except Exception as exc:
+        message = _safe_error_message(exc)
+
+        error_result = {
+            "status": "failed",
+            "reason": "alert_scan_failed",
+            "task_type": task.task_type,
+            "error_type": exc.__class__.__name__,
+            "error_message": message,
+        }
+
+        updated_task, retried = await _mark_failed_or_retry(
+            repository=repository,
+            task=task,
+            error_message=message,
+            result=error_result,
+            retryable=True,
+        )
+
+        return {
+            "status": updated_task.status,
+            "reason": "alert_scan_retrying" if retried else "alert_scan_failed",
             "task_id": updated_task.id,
             "task_type": updated_task.task_type,
             "retry_count": updated_task.retry_count,

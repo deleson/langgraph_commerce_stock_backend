@@ -150,8 +150,12 @@ class QuantAlertDataService:
             enabled_items = [
                 item
                 for item in enabled_items
-                if (self._normalize_text(item.market), self._normalize_text(item.symbol))
+                if (
+                    self._normalize_text(item.market),
+                    self._normalize_text(item.symbol),
+                )
                 in request_symbols
+                or ("*", self._normalize_text(item.symbol)) in request_symbols
             ]
 
         limited_items = enabled_items[: request.max_watchlist_items]
@@ -233,12 +237,17 @@ class QuantAlertDataService:
         request: QuantAlertScanRequest,
     ) -> set[tuple[str, str]]:
         symbols = request.symbols or []
+        market = self._normalize_optional_text(request.market)
+
+        if market:
+            return {
+                (market, self._normalize_text(symbol))
+                for symbol in symbols
+            }
+
         return {
-            (
-                self._normalize_text(item.market),
-                self._normalize_text(item.symbol),
-            )
-            for item in symbols
+            ("*", self._normalize_text(symbol))
+            for symbol in symbols
         }
 
     def _normalize_optional_text(self, value: str | None) -> str | None:

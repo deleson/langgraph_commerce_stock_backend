@@ -85,6 +85,12 @@ from app.services.quant_alert_data_service import (
     QuantAlertDataService,
     QuantAlertUniverseItem,
 )
+from app.services.quant_alert_trigger_service import (
+    QuantAlertTriggeredCandidate,
+    QuantAlertTriggerEvaluationItem,
+    QuantAlertTriggerEvaluationResult,
+    QuantAlertTriggerService,
+)
 # from app.services.stock_analysis_service import StockAnalysisService
 
 
@@ -160,5 +166,9 @@ __all__ = [
     "QuantAlertDataItem",
     "QuantAlertDataService",
     "QuantAlertUniverseItem",
+    "QuantAlertTriggeredCandidate",
+    "QuantAlertTriggerEvaluationItem",
+    "QuantAlertTriggerEvaluationResult",
+    "QuantAlertTriggerService",
     # "StockAnalysisService",
 ]

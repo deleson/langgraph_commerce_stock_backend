@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Iterable
 
@@ -19,8 +20,10 @@ from app.schemas.quant_alert import (
     QuantAlertScanStatus,
     QuantAlertUnavailableReason,
 )
+from app.schemas.notification import NotificationCreateRequest
 from app.services.market_service import MarketService
 from app.services.quant_alert_data_service import QuantAlertDataContext, QuantAlertDataService
+from app.services.notification_service import AsyncNotificationService
 from app.services.quant_alert_trigger_service import (
     QuantAlertTriggeredCandidate,
     QuantAlertTriggerEvaluationResult,
@@ -29,14 +32,17 @@ from app.services.quant_alert_trigger_service import (
 from app.services.watchlist_service import AsyncWatchlistService
 
 
+@dataclass(slots=True)
+class QuantAlertCreatedEvent:
+    event: QuantAlertEvent
+    candidate: QuantAlertTriggeredCandidate
+
 class QuantAlertScanService:
     """Orchestrates one quant alert scan.
 
     This service reads rules, collects market data, evaluates deterministic
-    alert rules, writes new QuantAlertEvent rows, and returns a scan response.
-
-    It does not create notifications yet. Notification creation is handled in a
-    later step so the scan flow can be tested independently first.
+    alert rules, writes new QuantAlertEvent rows, optionally creates
+    abnormal_alert notifications, and returns a scan response.
     """
 
     def __init__(
@@ -46,6 +52,7 @@ class QuantAlertScanService:
         repository: AsyncQuantAlertRepository | None = None,
         data_service: QuantAlertDataService | None = None,
         trigger_service: QuantAlertTriggerService | None = None,
+        notification_service: AsyncNotificationService | None = None,
     ) -> None:
         self.db = db
         self.repository = repository or AsyncQuantAlertRepository(db)
@@ -54,6 +61,7 @@ class QuantAlertScanService:
             market_service=MarketService(db),
         )
         self.trigger_service = trigger_service or QuantAlertTriggerService()
+        self.notification_service = notification_service or AsyncNotificationService(db)
 
     async def scan_alerts(
         self,
@@ -101,19 +109,27 @@ class QuantAlertScanService:
         )
         warnings.extend(evaluation_result.warnings)
 
-        created_events = await self._create_new_events(
+        created_event_items = await self._create_new_events(
             user_id=user.id,
             candidates=evaluation_result.triggered_candidates,
+            warnings=warnings,
+        )
+
+        created_event_items = await self._create_notifications_for_events(
+            user=user,
+            request=request,
+            created_event_items=created_event_items,
             warnings=warnings,
         )
 
         items = self._build_scan_items(
             data_context=data_context,
             evaluation_result=evaluation_result,
-            created_events=created_events,
+            created_event_items=created_event_items,
         )
 
-        triggered_count = len(created_events)
+        triggered_count = len(created_event_items)
+        notification_count = self._count_created_notifications(created_event_items)
         scanned_count = len(data_context.items)
 
         return QuantAlertScanResponse(
@@ -125,7 +141,7 @@ class QuantAlertScanService:
             ),
             scanned_count=scanned_count,
             triggered_count=triggered_count,
-            notification_count=0,
+            notification_count=notification_count,
             items=items,
             input_snapshot=self._build_input_snapshot(
                 user=user,
@@ -158,8 +174,8 @@ class QuantAlertScanService:
         user_id: int,
         candidates: Iterable[QuantAlertTriggeredCandidate],
         warnings: list[str],
-    ) -> list[QuantAlertEvent]:
-        created_events: list[QuantAlertEvent] = []
+    ) -> list[QuantAlertCreatedEvent]:
+        created_events: list[QuantAlertCreatedEvent] = []
 
         for candidate in candidates:
             payload = candidate.event_payload
@@ -185,23 +201,85 @@ class QuantAlertScanService:
                 )
                 continue
 
-            created_events.append(event)
+            created_events.append(
+                QuantAlertCreatedEvent(
+                    event=event,
+                    candidate=candidate,
+                )
+            )
 
         return created_events
+
+    async def _create_notifications_for_events(
+            self,
+            *,
+            user: User,
+            request: QuantAlertScanRequest,
+            created_event_items: list[QuantAlertCreatedEvent],
+            warnings: list[str],
+    ) -> list[QuantAlertCreatedEvent]:
+        if not request.notify:
+            return created_event_items
+
+        result: list[QuantAlertCreatedEvent] = []
+
+        for item in created_event_items:
+            event = item.event
+            rule = item.candidate.rule
+
+            if not bool(getattr(rule, "enabled_notification", False)):
+                result.append(item)
+                continue
+
+            if event.notification_id is not None:
+                result.append(item)
+                continue
+
+            try:
+                notification = await self.notification_service.create_notification(
+                    user=user,
+                    payload=NotificationCreateRequest(
+                        title=self._build_notification_title(event),
+                        content=self._build_notification_content(event),
+                        notification_type="abnormal_alert",
+                        related_record_id=None,
+                    ),
+                )
+
+                updated_event = await self.repository.set_event_notification(
+                    event=event,
+                    notification_id=notification.id,
+                )
+
+                result.append(
+                    QuantAlertCreatedEvent(
+                        event=updated_event,
+                        candidate=item.candidate,
+                    )
+                )
+            except Exception as exc:
+                warnings.append(
+                    f"{event.market}:{event.symbol} 提醒事件已生成，但通知创建失败："
+                    f"{self._safe_exception_message(exc)}"
+                )
+                result.append(item)
+
+        return result
 
     def _build_scan_items(
         self,
         *,
         data_context: QuantAlertDataContext,
         evaluation_result: QuantAlertTriggerEvaluationResult,
-        created_events: list[QuantAlertEvent],
+        created_event_items: list[QuantAlertCreatedEvent],
     ) -> list[QuantAlertScanItem]:
         evaluation_by_symbol = {
             (item.market, item.symbol): item for item in evaluation_result.items
         }
 
         events_by_symbol: dict[tuple[str, str], list[QuantAlertEvent]] = defaultdict(list)
-        for event in created_events:
+        for item in created_event_items:
+            event = item.event
             events_by_symbol[(event.market, event.symbol)].append(event)
 
         items: list[QuantAlertScanItem] = []
@@ -320,6 +398,53 @@ class QuantAlertScanService:
             force=request.force,
             max_watchlist_items=request.max_watchlist_items,
         )
+
+    def _build_notification_title(self, event: QuantAlertEvent) -> str:
+        severity_label = {
+            "info": "量化提醒",
+            "warning": "量化提醒",
+            "critical": "重要量化提醒",
+        }.get(str(event.severity), "量化提醒")
+
+        return self._truncate(
+            f"{severity_label}：{event.market}:{event.symbol} 触发提醒",
+            120,
+        )
+
+    def _build_notification_content(self, event: QuantAlertEvent) -> str:
+        return "\n".join(
+            [
+                event.message,
+                "",
+                f"提醒类型：{event.rule_type}",
+                f"严重程度：{event.severity}",
+                f"触发时间：{event.triggered_at}",
+                "",
+                "本提醒基于历史行情、技术指标、策略信号和数据质量规则生成，只作为研究线索，不构成投资建议。",
+            ]
+        )
+
+    def _count_created_notifications(
+            self,
+            created_event_items: list[QuantAlertCreatedEvent],
+    ) -> int:
+        return sum(
+            1
+            for item in created_event_items
+            if item.event.notification_id is not None
+        )
+
+    def _safe_exception_message(self, exc: Exception) -> str:
+        message = str(exc).strip()
+        if not message:
+            return exc.__class__.__name__
+        return self._truncate(message, 200)
+
+    def _truncate(self, text: str, max_length: int) -> str:
+        normalized = str(text).strip()
+        if len(normalized) <= max_length:
+            return normalized
+        return normalized[: max_length - 3] + "..."
 
     def _build_completed_summary(
         self,

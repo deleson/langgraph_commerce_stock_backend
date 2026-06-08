@@ -100,6 +100,11 @@ from app.services.paper_trading_signal_service import (
     PaperTradingSignalService,
     PaperTradingUniverseItem,
 )
+from app.services.paper_trading_order_service import (
+    PaperTradingOrderExecutionItem,
+    PaperTradingOrderExecutionResult,
+    PaperTradingOrderService,
+)
 
 # from app.services.stock_analysis_service import StockAnalysisService
 
@@ -187,5 +192,8 @@ __all__ = [
     "PaperTradingSignalItem",
     "PaperTradingSignalService",
     "PaperTradingUniverseItem",
+    "PaperTradingOrderExecutionItem",
+    "PaperTradingOrderExecutionResult",
+    "PaperTradingOrderService",
     # "StockAnalysisService",
 ]

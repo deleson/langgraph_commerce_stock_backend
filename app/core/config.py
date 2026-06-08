@@ -67,6 +67,15 @@ class Settings(BaseSettings):
     celery_beat_quant_alert_scan_batch_size: int = Field(default=200, ge=1, le=1000)
     celery_beat_quant_alert_scan_max_retries: int = Field(default=2, ge=0, le=5)
 
+    celery_beat_paper_trading_tick_enabled: bool = Field(default=False)
+    celery_beat_paper_trading_tick_hour: int = Field(default=20, ge=0, le=23)
+    celery_beat_paper_trading_tick_minute: int = Field(default=30, ge=0, le=59)
+    celery_beat_paper_trading_tick_notify: bool = Field(default=False)
+    celery_beat_paper_trading_tick_force: bool = Field(default=False)
+    celery_beat_paper_trading_tick_max_symbols: int = Field(default=50, ge=1, le=500)
+    celery_beat_paper_trading_tick_batch_size: int = Field(default=200, ge=1, le=1000)
+    celery_beat_paper_trading_tick_max_retries: int = Field(default=2, ge=0, le=5)
+
     jwt_secret_key: str = Field(default="change-this-in-production")
     jwt_algorithm: str = Field(default="HS256")
     jwt_access_token_expire_minutes: int = Field(default=60)

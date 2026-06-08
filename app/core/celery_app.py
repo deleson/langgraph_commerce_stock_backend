@@ -36,6 +36,15 @@ def build_beat_schedule(settings: Settings) -> dict[str, dict]:
             ),
         }
 
+    if settings.celery_beat_paper_trading_tick_enabled:
+        beat_schedule["scheduled-paper-trading-ticks"] = {
+            "task": "background_tasks.submit_scheduled_paper_trading_ticks",
+            "schedule": crontab(
+                hour=settings.celery_beat_paper_trading_tick_hour,
+                minute=settings.celery_beat_paper_trading_tick_minute,
+            ),
+        }
+
     return beat_schedule
 
 celery_app = Celery(

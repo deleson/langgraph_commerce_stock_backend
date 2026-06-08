@@ -14,6 +14,7 @@ from app.schemas.market_data import (
 from app.schemas.user_memory import UserProfileRefreshRequest
 from app.schemas.user_memory_embedding import UserMemoryEmbeddingRebuildRequest
 from app.schemas.quant_alert import QuantAlertScanRequest
+from app.schemas.paper_trading import PaperTradingTickRequest
 
 BackgroundTaskType = Literal[
     "market_data_sync",
@@ -98,6 +99,11 @@ class UserMemoryEmbeddingRebuildTaskPayload(UserMemoryEmbeddingRebuildRequest):
 
 class QuantAlertScanTaskPayload(QuantAlertScanRequest):
     """Payload for running current user's quant alert scan in background."""
+
+    pass
+
+class PaperTradingTickTaskPayload(PaperTradingTickRequest):
+    """Payload for running current user's paper trading tick in background."""
 
     pass
 

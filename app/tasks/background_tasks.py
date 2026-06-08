@@ -12,6 +12,7 @@ from app.repositories.background_task_repo import AsyncBackgroundTaskRepository
 from app.schemas.background_task import (
     BackgroundTaskCreateRequest,
     MarketDataSyncTaskPayload,
+    PaperTradingTickTaskPayload,
     QuantAlertScanTaskPayload,
     StockAnalysisAsyncTaskPayload,
     UserMemoryEmbeddingRebuildTaskPayload,
@@ -34,6 +35,8 @@ from app.repositories.user_repo import AsyncUserRepository
 from app.services.daily_report_query_service import DailyReportQueryService
 from app.schemas.quant_alert import QuantAlertScanRequest, QuantAlertScanSource
 from app.services.quant_alert_query_service import QuantAlertQueryService
+from app.schemas.paper_trading import PaperTradingTickRequest, PaperTradingTickSource
+from app.services.paper_trading_query_service import PaperTradingQueryService
 
 @celery_app.task(name="background_tasks.smoke_test")
 def smoke_test() -> dict[str, str]:
@@ -360,6 +363,13 @@ async def _dispatch_background_task_async(task_id: int) -> dict[str, object]:
 
         if running_task.task_type == "alert_scan":
             return await _run_alert_scan_task(
+                repository=repository,
+                task=running_task,
+                db=db,
+            )
+
+        if running_task.task_type == "paper_trading_tick":
+            return await _run_paper_trading_tick_task(
                 repository=repository,
                 task=running_task,
                 db=db,
@@ -1123,6 +1133,189 @@ async def _run_alert_scan_task(
         return {
             "status": updated_task.status,
             "reason": "alert_scan_retrying" if retried else "alert_scan_failed",
+            "task_id": updated_task.id,
+            "task_type": updated_task.task_type,
+            "retry_count": updated_task.retry_count,
+            "max_retries": updated_task.max_retries,
+            "will_retry": retried,
+        }
+
+async def _run_paper_trading_tick_task(
+    *,
+    repository: AsyncBackgroundTaskRepository,
+    task,
+    db,
+) -> dict[str, Any]:
+    try:
+        payload = PaperTradingTickTaskPayload.model_validate(task.payload)
+
+        if task.user_id is None and payload.target_user_id is None:
+            failed_task = await repository.mark_failed(
+                task=task,
+                error_message="paper_trading_tick requires user_id or target_user_id",
+                result={
+                    "status": "failed",
+                    "reason": "missing_user_id_for_paper_trading_tick",
+                    "task_type": task.task_type,
+                    "will_retry": False,
+                    "retry_count": task.retry_count,
+                    "max_retries": task.max_retries,
+                },
+            )
+
+            return {
+                "status": failed_task.status,
+                "reason": "missing_user_id_for_paper_trading_tick",
+                "task_id": failed_task.id,
+                "task_type": failed_task.task_type,
+            }
+
+        target_user_id = task.user_id or payload.target_user_id
+        user = await AsyncUserRepository(db).get_by_id(target_user_id)
+
+        if user is None:
+            failed_task = await repository.mark_failed(
+                task=task,
+                error_message="paper trading tick target user not found",
+                result={
+                    "status": "failed",
+                    "reason": "paper_trading_tick_user_not_found",
+                    "task_type": task.task_type,
+                    "target_user_id": target_user_id,
+                    "will_retry": False,
+                    "retry_count": task.retry_count,
+                    "max_retries": task.max_retries,
+                },
+            )
+
+            return {
+                "status": failed_task.status,
+                "reason": "paper_trading_tick_user_not_found",
+                "task_id": failed_task.id,
+                "task_type": failed_task.task_type,
+                "target_user_id": target_user_id,
+            }
+
+        request = PaperTradingTickRequest(
+            account_id=payload.account_id,
+            target_user_id=target_user_id,
+            source=(
+                PaperTradingTickSource.SCHEDULER
+                if task.source == "scheduler"
+                else PaperTradingTickSource.BACKGROUND_TASK
+            ),
+            force=payload.force,
+            max_symbols=payload.max_symbols,
+            notify=payload.notify,
+        )
+
+        tick_result = await PaperTradingQueryService(db).run_tick(
+            user=user,
+            request=request,
+        )
+
+        success_task = await repository.mark_success(
+            task=task,
+            result={
+                "status": "success",
+                "reason": "paper_trading_tick_completed",
+                "task_type": task.task_type,
+                "target_user_id": target_user_id,
+                "tick_status": tick_result.status,
+                "unavailable_reason": tick_result.unavailable_reason,
+                "account_id": (
+                    tick_result.account.id
+                    if tick_result.account is not None
+                    else payload.account_id
+                ),
+                "order_count": (
+                    tick_result.input_snapshot.order_count
+                    if tick_result.input_snapshot is not None
+                    else 0
+                ),
+                "trade_count": (
+                    tick_result.input_snapshot.trade_count
+                    if tick_result.input_snapshot is not None
+                    else 0
+                ),
+                "scanned_count": (
+                    tick_result.input_snapshot.scanned_count
+                    if tick_result.input_snapshot is not None
+                    else 0
+                ),
+                "equity_snapshot_id": (
+                    tick_result.equity_snapshot.id
+                    if tick_result.equity_snapshot is not None
+                    else None
+                ),
+                "warnings": tick_result.warnings[:20],
+            },
+        )
+
+        return {
+            "status": success_task.status,
+            "reason": "paper_trading_tick_completed",
+            "task_id": success_task.id,
+            "task_type": success_task.task_type,
+            "target_user_id": target_user_id,
+            "tick_status": tick_result.status,
+            "account_id": (
+                tick_result.account.id
+                if tick_result.account is not None
+                else payload.account_id
+            ),
+        }
+
+    except ValidationError as exc:
+        message = _safe_error_message(exc)
+
+        failed_task = await repository.mark_failed(
+            task=task,
+            error_message=message,
+            result={
+                "status": "failed",
+                "reason": "invalid_paper_trading_tick_payload",
+                "task_type": task.task_type,
+                "will_retry": False,
+                "retry_count": task.retry_count,
+                "max_retries": task.max_retries,
+                "error_type": exc.__class__.__name__,
+            },
+        )
+
+        return {
+            "status": failed_task.status,
+            "reason": "invalid_paper_trading_tick_payload",
+            "task_id": failed_task.id,
+            "task_type": task.task_type,
+        }
+
+    except Exception as exc:
+        message = _safe_error_message(exc)
+
+        error_result = {
+            "status": "failed",
+            "reason": "paper_trading_tick_failed",
+            "task_type": task.task_type,
+            "error_type": exc.__class__.__name__,
+            "error_message": message,
+        }
+
+        updated_task, retried = await _mark_failed_or_retry(
+            repository=repository,
+            task=task,
+            error_message=message,
+            result=error_result,
+            retryable=True,
+        )
+
+        return {
+            "status": updated_task.status,
+            "reason": (
+                "paper_trading_tick_retrying"
+                if retried
+                else "paper_trading_tick_failed"
+            ),
             "task_id": updated_task.id,
             "task_type": updated_task.task_type,
             "retry_count": updated_task.retry_count,

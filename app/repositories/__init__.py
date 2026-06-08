@@ -14,6 +14,7 @@ from app.repositories.user_memory_repo import AsyncUserMemoryRepository
 from app.repositories.user_memory_embedding_repo import AsyncUserMemoryEmbeddingRepository
 from app.repositories.daily_report_repo import AsyncDailyReportRepository
 from app.repositories.quant_alert_repo import AsyncQuantAlertRepository
+from app.repositories.paper_trading_repo import AsyncPaperTradingRepository
 
 __all__ = [
     "AnalysisRecordRepository",
@@ -32,4 +33,5 @@ __all__ = [
     "AsyncUserMemoryEmbeddingRepository",
     "AsyncDailyReportRepository",
     "AsyncQuantAlertRepository",
+    "AsyncPaperTradingRepository",
 ]

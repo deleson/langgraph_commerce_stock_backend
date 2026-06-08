@@ -23,6 +23,11 @@ from app.models.user_memory_embedding import UserMemoryEmbedding
 from app.models.daily_report import DailyReport
 from app.models.quant_alert_rule import QuantAlertRule
 from app.models.quant_alert_event import QuantAlertEvent
+from app.models.paper_trading_account import PaperTradingAccount
+from app.models.paper_trading_position import PaperTradingPosition
+from app.models.paper_trading_order import PaperTradingOrder
+from app.models.paper_trading_trade import PaperTradingTrade
+from app.models.paper_trading_equity_snapshot import PaperTradingEquitySnapshot
 
 
 __all__ = [
@@ -51,4 +56,9 @@ __all__ = [
     "DailyReport",
     "QuantAlertRule",
     "QuantAlertEvent",
+    "PaperTradingAccount",
+    "PaperTradingPosition",
+    "PaperTradingOrder",
+    "PaperTradingTrade",
+    "PaperTradingEquitySnapshot",
 ]

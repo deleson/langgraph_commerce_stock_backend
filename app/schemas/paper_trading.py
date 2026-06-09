@@ -52,6 +52,11 @@ class PaperTradingTickStatus(StrEnum):
     SKIPPED = "skipped"
     FAILED = "failed"
 
+class PaperTradingRunStatus(StrEnum):
+    RUNNING = "running"
+    COMPLETED = "completed"
+    SKIPPED = "skipped"
+    FAILED = "failed"
 
 class PaperTradingUnavailableReason(StrEnum):
     NO_ACCOUNT = "no_account"
@@ -90,6 +95,73 @@ class PaperTradingAccountResponse(BaseModel):
     cash_balance: Decimal
     currency: str
     status: PaperTradingAccountStatus
+    created_at: datetime
+    updated_at: datetime
+    disclaimer: str = Field(default=PAPER_TRADING_DISCLAIMER, max_length=300)
+
+class PaperTradingAccountConfigBase(BaseModel):
+    is_enabled: bool = True
+    max_symbols_per_tick: int = Field(default=50, ge=1, le=500)
+    allow_buy: bool = True
+    allow_sell: bool = True
+    max_single_order_cash_ratio: Decimal = Field(
+        default=Decimal("0.10"),
+        gt=0,
+        le=Decimal("1"),
+    )
+    max_total_position_ratio: Decimal = Field(
+        default=Decimal("0.95"),
+        gt=0,
+        le=Decimal("1"),
+    )
+    max_position_count: int = Field(default=20, ge=1, le=500)
+    min_order_cash_amount: Decimal = Field(default=Decimal("100"), ge=0)
+    fee_rate: Decimal = Field(
+        default=Decimal("0.0003"),
+        ge=0,
+        le=Decimal("0.1"),
+    )
+    enforce_data_quality: bool = True
+    data_quality_stale_after_days: int = Field(default=7, ge=1, le=365)
+    notes: str | None = Field(default=None, max_length=500)
+
+
+class PaperTradingAccountConfigCreate(PaperTradingAccountConfigBase):
+    pass
+
+
+class PaperTradingAccountConfigUpdate(BaseModel):
+    is_enabled: bool | None = None
+    max_symbols_per_tick: int | None = Field(default=None, ge=1, le=500)
+    allow_buy: bool | None = None
+    allow_sell: bool | None = None
+    max_single_order_cash_ratio: Decimal | None = Field(
+        default=None,
+        gt=0,
+        le=Decimal("1"),
+    )
+    max_total_position_ratio: Decimal | None = Field(
+        default=None,
+        gt=0,
+        le=Decimal("1"),
+    )
+    max_position_count: int | None = Field(default=None, ge=1, le=500)
+    min_order_cash_amount: Decimal | None = Field(default=None, ge=0)
+    fee_rate: Decimal | None = Field(
+        default=None,
+        ge=0,
+        le=Decimal("0.1"),
+    )
+    enforce_data_quality: bool | None = None
+    data_quality_stale_after_days: int | None = Field(default=None, ge=1, le=365)
+    notes: str | None = Field(default=None, max_length=500)
+
+
+class PaperTradingAccountConfigResponse(PaperTradingAccountConfigBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    account_id: int
     created_at: datetime
     updated_at: datetime
     disclaimer: str = Field(default=PAPER_TRADING_DISCLAIMER, max_length=300)
@@ -227,6 +299,7 @@ class PaperTradingTickResponse(BaseModel):
     status: PaperTradingTickStatus
     unavailable_reason: PaperTradingUnavailableReason | None = None
     account: PaperTradingAccountResponse | None = None
+    run_id: int | None = None
     items: list[PaperTradingTickItem] = Field(default_factory=list)
     equity_snapshot: PaperTradingEquitySnapshotResponse | None = None
     input_snapshot: PaperTradingTickInputSnapshot | None = None
@@ -234,13 +307,68 @@ class PaperTradingTickResponse(BaseModel):
     generated_at: datetime
     disclaimer: str = Field(default=PAPER_TRADING_DISCLAIMER, max_length=300)
 
+class PaperTradingRunCreate(BaseModel):
+    account_id: int
+    source: PaperTradingTickSource
+    request_snapshot: dict[str, Any] = Field(default_factory=dict)
+    account_config_snapshot: dict[str, Any] = Field(default_factory=dict)
+
+
+class PaperTradingRunUpdate(BaseModel):
+    status: PaperTradingRunStatus
+    unavailable_reason: PaperTradingUnavailableReason | None = None
+    scanned_count: int = Field(default=0, ge=0)
+    actionable_count: int = Field(default=0, ge=0)
+    order_count: int = Field(default=0, ge=0)
+    trade_count: int = Field(default=0, ge=0)
+    skipped_count: int = Field(default=0, ge=0)
+    equity_snapshot_id: int | None = None
+    warnings: list[str] = Field(default_factory=list, max_length=50)
+    errors: list[str] = Field(default_factory=list, max_length=50)
+    signal_snapshot: dict[str, Any] = Field(default_factory=dict)
+    execution_snapshot: dict[str, Any] = Field(default_factory=dict)
+    position_snapshot: dict[str, Any] = Field(default_factory=dict)
+    duration_ms: int | None = Field(default=None, ge=0)
+
+
+class PaperTradingRunResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    account_id: int
+    status: PaperTradingRunStatus
+    source: PaperTradingTickSource
+    unavailable_reason: PaperTradingUnavailableReason | None = None
+    scanned_count: int
+    actionable_count: int
+    order_count: int
+    trade_count: int
+    skipped_count: int
+    equity_snapshot_id: int | None = None
+    warnings: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    started_at: datetime
+    finished_at: datetime | None = None
+    duration_ms: int | None = None
+    created_at: datetime
+    updated_at: datetime
+    disclaimer: str = Field(default=PAPER_TRADING_DISCLAIMER, max_length=300)
+
+
+class PaperTradingRunDetailResponse(PaperTradingRunResponse):
+    request_snapshot: dict[str, Any] = Field(default_factory=dict)
+    account_config_snapshot: dict[str, Any] = Field(default_factory=dict)
+    signal_snapshot: dict[str, Any] = Field(default_factory=dict)
+    execution_snapshot: dict[str, Any] = Field(default_factory=dict)
+    position_snapshot: dict[str, Any] = Field(default_factory=dict)
+    equity_snapshot: PaperTradingEquitySnapshotResponse | None = None
 
 class PaperTradingAccountDetailResponse(BaseModel):
     account: PaperTradingAccountResponse
+    config: PaperTradingAccountConfigResponse | None = None
     positions: list[PaperTradingPositionResponse] = Field(default_factory=list)
     latest_equity: PaperTradingEquitySnapshotResponse | None = None
-    disclaimer: str = Field(default=PAPER_TRADING_DISCLAIMER, max_length=300)
-
+    latest_run: PaperTradingRunResponse | None = None
 
 class PaperTradingListQuery(BaseModel):
     limit: int = Field(default=20, ge=1, le=100)
@@ -270,3 +398,7 @@ class PaperTradingTradeListResponse(BaseModel):
 class PaperTradingEquitySnapshotListResponse(BaseModel):
     total: int = Field(ge=0)
     items: list[PaperTradingEquitySnapshotResponse]
+
+class PaperTradingRunListResponse(BaseModel):
+    total: int = Field(ge=0)
+    items: list[PaperTradingRunResponse]

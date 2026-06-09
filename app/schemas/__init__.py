@@ -324,6 +324,18 @@ from app.schemas.paper_trading import (
     PaperTradingTradeResponse,
     PaperTradingUnavailableReason,
 )
+from app.schemas.paper_trading import (
+    PaperTradingAccountConfigBase,
+    PaperTradingAccountConfigCreate,
+    PaperTradingAccountConfigResponse,
+    PaperTradingAccountConfigUpdate,
+    PaperTradingRunCreate,
+    PaperTradingRunDetailResponse,
+    PaperTradingRunListResponse,
+    PaperTradingRunResponse,
+    PaperTradingRunStatus,
+    PaperTradingRunUpdate,
+)
 
 __all__ = [
     "ApiResponse",
@@ -622,4 +634,15 @@ __all__ = [
     "PaperTradingTradeListResponse",
     "PaperTradingTradeResponse",
     "PaperTradingUnavailableReason",
+
+    "PaperTradingAccountConfigBase",
+    "PaperTradingAccountConfigCreate",
+    "PaperTradingAccountConfigResponse",
+    "PaperTradingAccountConfigUpdate",
+    "PaperTradingRunCreate",
+    "PaperTradingRunDetailResponse",
+    "PaperTradingRunListResponse",
+    "PaperTradingRunResponse",
+    "PaperTradingRunStatus",
+    "PaperTradingRunUpdate",
 ]

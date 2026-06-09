@@ -16,6 +16,10 @@ from app.schemas.paper_trading import (
     PaperTradingTickResponse,
     PaperTradingTickSource,
     PaperTradingTradeListResponse,
+    PaperTradingAccountConfigResponse,
+    PaperTradingAccountConfigUpdate,
+    PaperTradingRunDetailResponse,
+    PaperTradingRunListResponse,
 )
 from app.services.paper_trading_query_service import PaperTradingQueryService
 from app.utils.responses import success_response
@@ -124,6 +128,54 @@ async def update_paper_trading_account(
     )
     return success_response(data=result)
 
+@router.get(
+    "/accounts/{account_id}/config",
+    summary="Get Paper Trading Account Config",
+    description=(
+        "Get current paper trading config for one account. "
+        "If the account does not have a config yet, a default config is created."
+    ),
+    response_model=ApiResponse[PaperTradingAccountConfigResponse],
+    status_code=status.HTTP_200_OK,
+)
+async def get_paper_trading_account_config(
+    account_id: int,
+    current_user: AsyncCurrentUser,
+    db: AsyncDBSession,
+) -> ApiResponse[PaperTradingAccountConfigResponse]:
+    """Get paper trading account config."""
+
+    result = await PaperTradingQueryService(db).get_account_config(
+        user_id=current_user.id,
+        account_id=account_id,
+    )
+    return success_response(data=result)
+
+@router.patch(
+    "/accounts/{account_id}/config",
+    summary="Update Paper Trading Account Config",
+    description=(
+        "Update paper trading account config, including enable flag, "
+        "scan limit, buy/sell switches, position ratios, order amount, "
+        "fee rate, and data quality rules."
+    ),
+    response_model=ApiResponse[PaperTradingAccountConfigResponse],
+    status_code=status.HTTP_200_OK,
+)
+async def update_paper_trading_account_config(
+    account_id: int,
+    payload: PaperTradingAccountConfigUpdate,
+    current_user: AsyncCurrentUser,
+    db: AsyncDBSession,
+) -> ApiResponse[PaperTradingAccountConfigResponse]:
+    """Update paper trading account config."""
+
+    result = await PaperTradingQueryService(db).update_account_config(
+        user_id=current_user.id,
+        account_id=account_id,
+        request=payload,
+    )
+    return success_response(data=result)
 
 @router.get(
     "/accounts/{account_id}/positions",
@@ -253,5 +305,58 @@ async def run_paper_trading_tick(
     result = await PaperTradingQueryService(db).run_tick(
         user=current_user,
         request=request,
+    )
+    return success_response(data=result)
+
+
+@router.get(
+    "/accounts/{account_id}/runs",
+    summary="List Paper Trading Runs",
+    description=(
+        "List paper trading tick run records for one account. "
+        "Each run records one paper trading tick lifecycle and summary statistics."
+    ),
+    response_model=ApiResponse[PaperTradingRunListResponse],
+    status_code=status.HTTP_200_OK,
+)
+async def list_paper_trading_runs(
+    account_id: int,
+    current_user: AsyncCurrentUser,
+    db: AsyncDBSession,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> ApiResponse[PaperTradingRunListResponse]:
+    """List paper trading run records for one account."""
+
+    result = await PaperTradingQueryService(db).list_runs(
+        user_id=current_user.id,
+        account_id=account_id,
+        query=PaperTradingListQuery(limit=limit, offset=offset),
+    )
+    return success_response(data=result)
+
+@router.get(
+    "/accounts/{account_id}/runs/{run_id}",
+    summary="Get Paper Trading Run Detail",
+    description=(
+        "Get one paper trading tick run detail, including request snapshot, "
+        "account config snapshot, signal snapshot, execution snapshot, "
+        "and position snapshot."
+    ),
+    response_model=ApiResponse[PaperTradingRunDetailResponse],
+    status_code=status.HTTP_200_OK,
+)
+async def get_paper_trading_run_detail(
+    account_id: int,
+    run_id: int,
+    current_user: AsyncCurrentUser,
+    db: AsyncDBSession,
+) -> ApiResponse[PaperTradingRunDetailResponse]:
+    """Get one paper trading run detail."""
+
+    result = await PaperTradingQueryService(db).get_run(
+        user_id=current_user.id,
+        account_id=account_id,
+        run_id=run_id,
     )
     return success_response(data=result)

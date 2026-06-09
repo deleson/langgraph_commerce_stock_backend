@@ -35,6 +35,10 @@ from app.schemas.paper_trading import (
     PaperTradingTradeListResponse,
     PaperTradingTradeResponse,
     PaperTradingUnavailableReason,
+    PaperTradingAccountConfigResponse,
+    PaperTradingAccountConfigUpdate,
+    PaperTradingRunDetailResponse,
+    PaperTradingRunListResponse,
 )
 from app.services.paper_trading_account_service import PaperTradingAccountService
 from app.services.paper_trading_equity_service import PaperTradingEquityService
@@ -143,6 +147,30 @@ class PaperTradingQueryService:
         request: PaperTradingAccountUpdate,
     ) -> PaperTradingAccountResponse:
         return await self.account_service.update_account(
+            user_id=user_id,
+            account_id=account_id,
+            request=request,
+        )
+
+    async def get_account_config(
+        self,
+        *,
+        user_id: int,
+        account_id: int,
+    ) -> PaperTradingAccountConfigResponse:
+        return await self.account_config_service.get_config(
+            user_id=user_id,
+            account_id=account_id,
+        )
+
+    async def update_account_config(
+        self,
+        *,
+        user_id: int,
+        account_id: int,
+        request: PaperTradingAccountConfigUpdate,
+    ) -> PaperTradingAccountConfigResponse:
+        return await self.account_config_service.update_config(
             user_id=user_id,
             account_id=account_id,
             request=request,
@@ -294,6 +322,32 @@ class PaperTradingQueryService:
         return PaperTradingEquitySnapshotListResponse(
             total=total,
             items=[self._build_equity_response(item) for item in items],
+        )
+
+    async def list_runs(
+        self,
+        *,
+        user_id: int,
+        account_id: int,
+        query: PaperTradingListQuery,
+    ) -> PaperTradingRunListResponse:
+        return await self.run_service.list_runs(
+            user_id=user_id,
+            account_id=account_id,
+            query=query,
+        )
+
+    async def get_run(
+        self,
+        *,
+        user_id: int,
+        account_id: int,
+        run_id: int,
+    ) -> PaperTradingRunDetailResponse:
+        return await self.run_service.get_run(
+            user_id=user_id,
+            account_id=account_id,
+            run_id=run_id,
         )
 
     async def run_tick(

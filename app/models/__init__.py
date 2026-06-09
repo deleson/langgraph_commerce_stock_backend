@@ -28,7 +28,8 @@ from app.models.paper_trading_position import PaperTradingPosition
 from app.models.paper_trading_order import PaperTradingOrder
 from app.models.paper_trading_trade import PaperTradingTrade
 from app.models.paper_trading_equity_snapshot import PaperTradingEquitySnapshot
-
+from app.models.paper_trading_account_config import PaperTradingAccountConfig
+from app.models.paper_trading_run import PaperTradingRun
 
 __all__ = [
     "AnalysisRecord",
@@ -61,4 +62,6 @@ __all__ = [
     "PaperTradingOrder",
     "PaperTradingTrade",
     "PaperTradingEquitySnapshot",
+    "PaperTradingAccountConfig",
+    "PaperTradingRun",
 ]

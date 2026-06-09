@@ -7,6 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import BadRequestException
 from app.models.paper_trading_account import PaperTradingAccount
 from app.models.user import User
+from app.models.paper_trading_run import PaperTradingRun
+from app.services.paper_trading_account_config_service import (
+    PaperTradingAccountConfigService,
+)
+from app.services.paper_trading_run_service import PaperTradingRunService
 from app.repositories.paper_trading_repo import AsyncPaperTradingRepository
 from app.schemas.paper_trading import (
     PaperTradingAccountCreate,
@@ -57,6 +62,8 @@ class PaperTradingQueryService:
         *,
         repository: AsyncPaperTradingRepository | None = None,
         account_service: PaperTradingAccountService | None = None,
+        account_config_service: PaperTradingAccountConfigService | None = None,
+        run_service: PaperTradingRunService | None = None,
         signal_service: PaperTradingSignalService | None = None,
         order_service: PaperTradingOrderService | None = None,
         position_service: PaperTradingPositionService | None = None,
@@ -67,6 +74,19 @@ class PaperTradingQueryService:
         self.account_service = account_service or PaperTradingAccountService(
             db,
             repository=self.repository,
+        )
+        self.account_config_service = (
+                account_config_service
+                or PaperTradingAccountConfigService(
+            db,
+            repository=self.repository,
+            account_service=self.account_service,
+        )
+        )
+        self.run_service = run_service or PaperTradingRunService(
+            db,
+            repository=self.repository,
+            account_service=self.account_service,
         )
         self.signal_service = signal_service or PaperTradingSignalService(db)
         self.order_service = order_service or PaperTradingOrderService(
@@ -152,10 +172,20 @@ class PaperTradingQueryService:
             user_id=user_id,
         )
 
+        config_model = await self.account_config_service.get_or_create_config_model(
+            account=account,
+        )
+        latest_run = await self.run_service.get_latest_run(
+            user_id=user_id,
+            account_id=account.id,
+        )
+
         return PaperTradingAccountDetailResponse(
             account=self._build_account_response(account),
+            config=self.account_config_service._build_config_response(config_model),
             positions=[self._build_position_response(item) for item in positions],
             latest_equity=latest_equity,
+            latest_run=latest_run,
         )
 
     async def list_positions(
@@ -288,14 +318,59 @@ class PaperTradingQueryService:
             request=tick_request,
         )
 
+        config = await self.account_config_service.get_or_create_config_model(
+            account=account,
+        )
+        config_snapshot = self.account_config_service.build_config_snapshot(config)
+
+        tick_request = tick_request.model_copy(
+            update={
+                "max_symbols": min(
+                    tick_request.max_symbols,
+                    config.max_symbols_per_tick,
+                ),
+            }
+        )
+
+        run = await self.run_service.start_run(
+            account=account,
+            request=tick_request,
+            account_config_snapshot=config_snapshot,
+        )
+
         if account.status != PaperTradingAccountStatus.ACTIVE:
+            warnings = ["纸面交易账户不是 active 状态，本次 tick 已跳过。"]
+            await self.run_service.mark_skipped(
+                run=run,
+                unavailable_reason=PaperTradingUnavailableReason.TICK_FAILED,
+                warnings=warnings,
+            )
             return self._build_tick_response(
                 status=PaperTradingTickStatus.SKIPPED,
                 unavailable_reason=PaperTradingUnavailableReason.TICK_FAILED,
                 account=account,
                 request=tick_request,
-                warnings=["纸面交易账户不是 active 状态，本次 tick 已跳过。"],
+                run=run,
+                warnings=warnings,
             )
+
+        if not config.is_enabled:
+            warnings = ["纸面交易账户配置未启用，本次 tick 已跳过。"]
+            await self.run_service.mark_skipped(
+                run=run,
+                unavailable_reason=PaperTradingUnavailableReason.TICK_FAILED,
+                warnings=warnings,
+            )
+            return self._build_tick_response(
+                status=PaperTradingTickStatus.SKIPPED,
+                unavailable_reason=PaperTradingUnavailableReason.TICK_FAILED,
+                account=account,
+                request=tick_request,
+                run=run,
+                warnings=warnings,
+            )
+
+        signal_context: PaperTradingSignalContext | None = None
 
         try:
             signal_context = await self.signal_service.collect_signal_context(
@@ -304,16 +379,25 @@ class PaperTradingQueryService:
             )
 
             if signal_context.unavailable_reason is not None:
+                warnings = [
+                    *signal_context.warnings,
+                    *signal_context.errors,
+                ]
+                await self.run_service.mark_skipped(
+                    run=run,
+                    unavailable_reason=signal_context.unavailable_reason,
+                    signal_context=signal_context,
+                    warnings=warnings,
+                    errors=signal_context.errors,
+                )
                 return self._build_tick_response(
                     status=PaperTradingTickStatus.SKIPPED,
                     unavailable_reason=signal_context.unavailable_reason,
                     account=account,
                     request=tick_request,
+                    run=run,
                     signal_context=signal_context,
-                    warnings=[
-                        *signal_context.warnings,
-                        *signal_context.errors,
-                    ],
+                    warnings=warnings,
                 )
 
             execution_result = await self.order_service.execute_signal_orders(
@@ -349,11 +433,21 @@ class PaperTradingQueryService:
             if not signal_context.actionable_items:
                 warnings.append("本次 tick 没有 buy / sell 信号，仅更新权益快照。")
 
+            completed_run = await self.run_service.mark_completed(
+                run=run,
+                signal_context=signal_context,
+                execution_result=execution_result,
+                position_result=position_result,
+                equity_result=equity_result,
+                warnings=warnings,
+            )
+
             return self._build_tick_response(
                 status=PaperTradingTickStatus.COMPLETED,
                 unavailable_reason=None,
                 account=updated_account,
                 request=tick_request,
+                run=completed_run,
                 signal_context=signal_context,
                 execution_result=execution_result,
                 equity_snapshot=self._build_equity_response(equity_result.snapshot),
@@ -361,12 +455,23 @@ class PaperTradingQueryService:
             )
         except Exception as exc:
             await self.db.rollback()
+            error_message = f"纸面交易 tick 执行失败：{self._safe_error_message(exc)}"
+
+            failed_run = await self.run_service.mark_failed(
+                run=run,
+                error_message=error_message,
+                signal_context=signal_context,
+                warnings=[error_message],
+            )
+
             return self._build_tick_response(
                 status=PaperTradingTickStatus.FAILED,
                 unavailable_reason=PaperTradingUnavailableReason.TICK_FAILED,
                 account=account,
                 request=tick_request,
-                warnings=[f"纸面交易 tick 执行失败：{self._safe_error_message(exc)}"],
+                run=failed_run,
+                signal_context=signal_context,
+                warnings=[error_message],
             )
 
     async def _resolve_tick_account(
@@ -408,6 +513,7 @@ class PaperTradingQueryService:
         unavailable_reason: PaperTradingUnavailableReason | None,
         account: PaperTradingAccount,
         request: PaperTradingTickRequest,
+        run: PaperTradingRun | None = None,
         signal_context: PaperTradingSignalContext | None = None,
         execution_result: PaperTradingOrderExecutionResult | None = None,
         equity_snapshot: PaperTradingEquitySnapshotResponse | None = None,
@@ -421,6 +527,7 @@ class PaperTradingQueryService:
             status=status,
             unavailable_reason=unavailable_reason,
             account=self._build_account_response(account),
+            run_id=run.id if run is not None else None,
             items=self._build_tick_items(execution_result),
             equity_snapshot=equity_snapshot,
             input_snapshot=PaperTradingTickInputSnapshot(

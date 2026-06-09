@@ -116,6 +116,11 @@ from app.services.paper_trading_equity_service import (
     PaperTradingEquitySnapshotResult,
 )
 from app.services.paper_trading_query_service import PaperTradingQueryService
+from app.services.paper_trading_account_config_service import (
+    PaperTradingAccountConfigService,
+)
+
+
 # from app.services.stock_analysis_service import StockAnalysisService
 
 
@@ -212,5 +217,6 @@ __all__ = [
     "PaperTradingEquityService",
     "PaperTradingEquitySnapshotResult",
     "PaperTradingQueryService",
+    "PaperTradingAccountConfigService",
     # "StockAnalysisService",
 ]

@@ -10,6 +10,8 @@ from app.models.paper_trading_equity_snapshot import PaperTradingEquitySnapshot
 from app.models.paper_trading_order import PaperTradingOrder
 from app.models.paper_trading_position import PaperTradingPosition
 from app.models.paper_trading_trade import PaperTradingTrade
+from app.models.paper_trading_account_config import PaperTradingAccountConfig
+from app.models.paper_trading_run import PaperTradingRun
 from app.schemas.paper_trading import (
     PaperTradingAccountCreate,
     PaperTradingAccountStatus,
@@ -17,6 +19,11 @@ from app.schemas.paper_trading import (
     PaperTradingListQuery,
     PaperTradingOrderCreate,
     PaperTradingOrderStatus,
+    PaperTradingAccountConfigCreate,
+    PaperTradingAccountConfigUpdate,
+    PaperTradingRunCreate,
+    PaperTradingRunStatus,
+    PaperTradingRunUpdate,
 )
 
 
@@ -139,6 +146,245 @@ class AsyncPaperTradingRepository:
         await self.db.commit()
         await self.db.refresh(account)
         return account
+
+    async def create_account_config(
+        self,
+        *,
+        account_id: int,
+        payload: PaperTradingAccountConfigCreate,
+    ) -> PaperTradingAccountConfig:
+        config = PaperTradingAccountConfig(
+            account_id=account_id,
+            is_enabled=payload.is_enabled,
+            max_symbols_per_tick=payload.max_symbols_per_tick,
+            allow_buy=payload.allow_buy,
+            allow_sell=payload.allow_sell,
+            max_single_order_cash_ratio=payload.max_single_order_cash_ratio,
+            max_total_position_ratio=payload.max_total_position_ratio,
+            max_position_count=payload.max_position_count,
+            min_order_cash_amount=payload.min_order_cash_amount,
+            fee_rate=payload.fee_rate,
+            enforce_data_quality=payload.enforce_data_quality,
+            data_quality_stale_after_days=payload.data_quality_stale_after_days,
+            notes=payload.notes,
+        )
+
+        self.db.add(config)
+        await self.db.commit()
+        await self.db.refresh(config)
+        return config
+
+    async def get_account_config(
+        self,
+        *,
+        account_id: int,
+        user_id: int,
+    ) -> PaperTradingAccountConfig | None:
+        stmt = (
+            select(PaperTradingAccountConfig)
+            .join(
+                PaperTradingAccount,
+                PaperTradingAccountConfig.account_id == PaperTradingAccount.id,
+            )
+            .where(
+                PaperTradingAccountConfig.account_id == account_id,
+                PaperTradingAccount.user_id == user_id,
+            )
+        )
+
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_account_config_by_account_id(
+        self,
+        *,
+        account_id: int,
+    ) -> PaperTradingAccountConfig | None:
+        stmt = select(PaperTradingAccountConfig).where(
+            PaperTradingAccountConfig.account_id == account_id,
+        )
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def update_account_config(
+        self,
+        *,
+        config: PaperTradingAccountConfig,
+        payload: PaperTradingAccountConfigUpdate,
+    ) -> PaperTradingAccountConfig:
+        update_data = payload.model_dump(
+            mode="json",
+            exclude_unset=True,
+        )
+
+        for field, value in update_data.items():
+            setattr(config, field, value)
+
+        self.db.add(config)
+        await self.db.commit()
+        await self.db.refresh(config)
+        return config
+
+    async def get_or_create_account_config(
+        self,
+        *,
+        account_id: int,
+    ) -> PaperTradingAccountConfig:
+        config = await self.get_account_config_by_account_id(
+            account_id=account_id,
+        )
+
+        if config is not None:
+            return config
+
+        return await self.create_account_config(
+            account_id=account_id,
+            payload=PaperTradingAccountConfigCreate(),
+        )
+
+    async def create_run(
+        self,
+        *,
+        payload: PaperTradingRunCreate,
+    ) -> PaperTradingRun:
+        run = PaperTradingRun(
+            account_id=payload.account_id,
+            source=payload.source,
+            status=PaperTradingRunStatus.RUNNING,
+            request_snapshot=payload.request_snapshot,
+            account_config_snapshot=payload.account_config_snapshot,
+        )
+
+        self.db.add(run)
+        await self.db.commit()
+        await self.db.refresh(run)
+        return run
+
+    async def get_run(
+        self,
+        *,
+        run_id: int,
+        account_id: int,
+        user_id: int,
+    ) -> PaperTradingRun | None:
+        stmt = (
+            select(PaperTradingRun)
+            .join(
+                PaperTradingAccount,
+                PaperTradingRun.account_id == PaperTradingAccount.id,
+            )
+            .where(
+                PaperTradingRun.id == run_id,
+                PaperTradingRun.account_id == account_id,
+                PaperTradingAccount.user_id == user_id,
+            )
+        )
+
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_run_by_id(
+        self,
+        *,
+        run_id: int,
+    ) -> PaperTradingRun | None:
+        stmt = select(PaperTradingRun).where(
+            PaperTradingRun.id == run_id,
+        )
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_latest_run(
+        self,
+        *,
+        account_id: int,
+        user_id: int,
+    ) -> PaperTradingRun | None:
+        stmt = (
+            select(PaperTradingRun)
+            .join(
+                PaperTradingAccount,
+                PaperTradingRun.account_id == PaperTradingAccount.id,
+            )
+            .where(
+                PaperTradingRun.account_id == account_id,
+                PaperTradingAccount.user_id == user_id,
+            )
+            .order_by(PaperTradingRun.started_at.desc())
+            .limit(1)
+        )
+
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def list_runs(
+        self,
+        *,
+        account_id: int,
+        user_id: int,
+        query: PaperTradingListQuery,
+    ) -> list[PaperTradingRun]:
+        stmt = (
+            select(PaperTradingRun)
+            .join(
+                PaperTradingAccount,
+                PaperTradingRun.account_id == PaperTradingAccount.id,
+            )
+            .where(
+                PaperTradingRun.account_id == account_id,
+                PaperTradingAccount.user_id == user_id,
+            )
+            .order_by(PaperTradingRun.started_at.desc())
+            .offset(query.offset)
+            .limit(query.limit)
+        )
+
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def count_runs(
+        self,
+        *,
+        account_id: int,
+        user_id: int,
+    ) -> int:
+        stmt = (
+            select(func.count(PaperTradingRun.id))
+            .join(
+                PaperTradingAccount,
+                PaperTradingRun.account_id == PaperTradingAccount.id,
+            )
+            .where(
+                PaperTradingRun.account_id == account_id,
+                PaperTradingAccount.user_id == user_id,
+            )
+        )
+
+        result = await self.db.execute(stmt)
+        return int(result.scalar_one())
+
+    async def update_run(
+        self,
+        *,
+        run: PaperTradingRun,
+        payload: PaperTradingRunUpdate,
+        finished_at: datetime | None = None,
+    ) -> PaperTradingRun:
+        update_data = payload.model_dump(
+            mode="json",
+            exclude_unset=True,
+        )
+
+        for field, value in update_data.items():
+            setattr(run, field, value)
+
+        if finished_at is not None:
+            run.finished_at = finished_at
+
+        self.db.add(run)
+        await self.db.commit()
+        await self.db.refresh(run)
+        return run
 
     async def get_position(
         self,

@@ -1311,42 +1311,25 @@ async def _run_paper_trading_tick_task(
             request=request,
         )
 
+        resolved_account_id = (
+            tick_result.account.id
+            if tick_result.account is not None
+            else payload.account_id
+        )
+
+        input_snapshot = tick_result.input_snapshot
+        equity_snapshot = tick_result.equity_snapshot
+
+        paper_trading_result = _build_paper_trading_tick_task_result(
+            task=task,
+            target_user_id=target_user_id,
+            account_id=resolved_account_id,
+            tick_result=tick_result,
+        )
+
         success_task = await repository.mark_success(
             task=task,
-            result={
-                "status": "success",
-                "reason": "paper_trading_tick_completed",
-                "task_type": task.task_type,
-                "target_user_id": target_user_id,
-                "tick_status": tick_result.status,
-                "unavailable_reason": tick_result.unavailable_reason,
-                "account_id": (
-                    tick_result.account.id
-                    if tick_result.account is not None
-                    else payload.account_id
-                ),
-                "order_count": (
-                    tick_result.input_snapshot.order_count
-                    if tick_result.input_snapshot is not None
-                    else 0
-                ),
-                "trade_count": (
-                    tick_result.input_snapshot.trade_count
-                    if tick_result.input_snapshot is not None
-                    else 0
-                ),
-                "scanned_count": (
-                    tick_result.input_snapshot.scanned_count
-                    if tick_result.input_snapshot is not None
-                    else 0
-                ),
-                "equity_snapshot_id": (
-                    tick_result.equity_snapshot.id
-                    if tick_result.equity_snapshot is not None
-                    else None
-                ),
-                "warnings": tick_result.warnings[:20],
-            },
+            result=paper_trading_result,
         )
 
         return {
@@ -1356,11 +1339,9 @@ async def _run_paper_trading_tick_task(
             "task_type": success_task.task_type,
             "target_user_id": target_user_id,
             "tick_status": tick_result.status,
-            "account_id": (
-                tick_result.account.id
-                if tick_result.account is not None
-                else payload.account_id
-            ),
+            "account_id": resolved_account_id,
+            "run_id": tick_result.run_id,
+            "paper_trading_run_id": tick_result.run_id,
         }
 
     except ValidationError as exc:
@@ -1419,6 +1400,84 @@ async def _run_paper_trading_tick_task(
             "max_retries": updated_task.max_retries,
             "will_retry": retried,
         }
+
+def _build_paper_trading_tick_task_result(
+    *,
+    task,
+    target_user_id: int,
+    account_id: int | None,
+    tick_result,
+) -> dict[str, Any]:
+    input_snapshot = tick_result.input_snapshot
+    equity_snapshot = tick_result.equity_snapshot
+
+    result: dict[str, Any] = {
+        "status": "success",
+        "reason": "paper_trading_tick_completed",
+        "task_type": task.task_type,
+        "target_user_id": target_user_id,
+        "tick_status": tick_result.status,
+        "unavailable_reason": tick_result.unavailable_reason,
+        "account_id": account_id,
+        "run_id": tick_result.run_id,
+        "paper_trading_run_id": tick_result.run_id,
+        "order_count": (
+            input_snapshot.order_count
+            if input_snapshot is not None
+            else 0
+        ),
+        "trade_count": (
+            input_snapshot.trade_count
+            if input_snapshot is not None
+            else 0
+        ),
+        "scanned_count": (
+            input_snapshot.scanned_count
+            if input_snapshot is not None
+            else 0
+        ),
+        "effective_max_symbols": (
+            input_snapshot.scanned_count
+            if input_snapshot is not None
+            else None
+        ),
+        "equity_snapshot_id": (
+            equity_snapshot.id
+            if equity_snapshot is not None
+            else None
+        ),
+        "has_equity_snapshot": equity_snapshot is not None,
+        "warning_count": len(tick_result.warnings),
+        "warnings": tick_result.warnings[:20],
+        "tick_generated_at": tick_result.generated_at.isoformat(),
+    }
+
+    if account_id is not None:
+        result["run_list_path"] = _build_paper_trading_run_list_path(
+            account_id=account_id,
+        )
+
+        if tick_result.run_id is not None:
+            result["run_detail_path"] = _build_paper_trading_run_detail_path(
+                account_id=account_id,
+                run_id=tick_result.run_id,
+            )
+
+    return result
+
+def _build_paper_trading_run_list_path(
+    *,
+    account_id: int,
+) -> str:
+    return f"/api/v1/paper-trading/accounts/{account_id}/runs"
+
+
+def _build_paper_trading_run_detail_path(
+    *,
+    account_id: int,
+    run_id: int,
+) -> str:
+    return f"/api/v1/paper-trading/accounts/{account_id}/runs/{run_id}"
 
 async def _check_stock_analysis_async_ai_quota(
     *,

@@ -119,9 +119,7 @@ from app.services.paper_trading_query_service import PaperTradingQueryService
 from app.services.paper_trading_account_config_service import (
     PaperTradingAccountConfigService,
 )
-from app.services.paper_trading_account_config_service import (
-    PaperTradingAccountConfigService,
-)
+from app.services.paper_trading_run_service import PaperTradingRunService
 
 # from app.services.stock_analysis_service import StockAnalysisService
 

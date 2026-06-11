@@ -1006,7 +1006,7 @@ class StockCandidateScoringService:
                 dimension="volatility",
                 score_delta=score,
                 reason=reason,
-                warnings=warnings,
+                warnings=self._limit_text_list(warnings, limit=5),
             )
         )
         return score
@@ -1161,6 +1161,8 @@ class StockCandidateScoringService:
 
         if strategy_signal.risks:
             warnings.extend(strategy_signal.risks[:3])
+
+        warnings = self._limit_text_list(warnings, limit=5)
 
         rule_results.append(
             StockCandidateScoreRuleResult(

@@ -1,3 +1,9 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   postgres:
     image: postgres:16
@@ -16,6 +22,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    logging: *default-logging
 
   redis:
     image: redis:7
@@ -31,6 +38,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    logging: *default-logging
 
   api:
     build:
@@ -56,6 +64,7 @@ services:
         condition: service_healthy
     networks:
       - langgraph_commerce_prod
+    logging: *default-logging
 
   worker:
     build:
@@ -79,6 +88,7 @@ services:
         condition: service_healthy
     networks:
       - langgraph_commerce_prod
+    logging: *default-logging
 
   beat:
     build:
@@ -102,6 +112,7 @@ services:
         condition: service_healthy
     networks:
       - langgraph_commerce_prod
+    logging: *default-logging
 
   nginx:
     image: nginx:1.27-alpine
@@ -115,6 +126,7 @@ services:
       - api
     networks:
       - langgraph_commerce_prod
+    logging: *default-logging
 
 volumes:
   postgres_data:

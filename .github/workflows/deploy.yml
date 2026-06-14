@@ -38,9 +38,29 @@ jobs:
              sudo docker compose --env-file .env.production -f docker-compose.prod.yml up -d postgres redis && \
              sudo docker compose --env-file .env.production -f docker-compose.prod.yml run --rm api uv run alembic upgrade head && \
              sudo docker compose --env-file .env.production -f docker-compose.prod.yml up -d --remove-orphans && \
+             sudo docker compose --env-file .env.production -f docker-compose.prod.yml restart nginx && \
              sudo docker compose --env-file .env.production -f docker-compose.prod.yml ps"
 
       - name: Health check
         run: |
-          sleep 5
-          curl --fail --show-error --silent "http://${{ secrets.PROD_HOST }}/api/v1/system/health"
+          for i in {1..30}; do
+            echo "Health check attempt $i..."
+            if curl --fail --show-error --silent --connect-timeout 5 --max-time 10 "http://${{ secrets.PROD_HOST }}/api/v1/system/health"; then
+              echo "Health check passed."
+              exit 0
+            fi
+            sleep 5
+          done
+
+          echo "Health check failed after retries."
+          exit 1
+
+      - name: Print server logs on failure
+        if: failure()
+        run: |
+          ssh -i ~/.ssh/prod_deploy_key \
+            "${{ secrets.PROD_USER }}@${{ secrets.PROD_HOST }}" \
+            "cd '${{ secrets.PROD_DEPLOY_PATH }}' && \
+             sudo docker compose --env-file .env.production -f docker-compose.prod.yml ps && \
+             sudo docker compose --env-file .env.production -f docker-compose.prod.yml logs --tail=120 api && \
+             sudo docker compose --env-file .env.production -f docker-compose.prod.yml logs --tail=120 nginx"

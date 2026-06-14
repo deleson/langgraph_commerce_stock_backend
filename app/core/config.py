@@ -1,3 +1,14 @@
+"""项目配置中心。
+
+该文件通过 pydantic-settings 读取环境变量，并支持用 APP_ENV_FILE
+在本地开发、pytest 测试和生产 Docker Compose 环境之间切换配置。
+
+注意：
+1. `.env.production` 保存真实密钥和生产连接信息，不能提交 Git。
+2. `.env.test` 必须指向测试数据库，避免测试误写生产数据。
+3. 业务代码应通过 `get_settings()` 读取配置，避免分散访问环境变量。
+"""
+
 from functools import lru_cache
 
 from pydantic import Field,SecretStr
@@ -5,6 +16,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from os import getenv
 
 class Settings(BaseSettings):
+    """后端运行配置集合。
+
+    Settings 汇总应用基础信息、数据库、Redis、JWT、LLM、行情 Provider、
+    Celery 和定时任务等配置，是 API、Service、Repository、Graph、Task
+    共同依赖的基础配置对象。
+    """
+
     app_name: str = Field(default="LangGraph Commerce Backend")
     app_version: str = Field(default="0.1.0")
     app_env: str = Field(default="dev")
@@ -118,6 +136,7 @@ class Settings(BaseSettings):
     api_v1_prefix: str = Field(default="/api/v1")
 
     model_config = SettingsConfigDict(
+        # APP_ENV_FILE 让同一套代码可以在开发、测试、生产环境读取不同 env 文件。
         env_file=getenv("APP_ENV_FILE", ".env"),
         env_file_encoding="utf-8",
         case_sensitive=False,
@@ -127,4 +146,10 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
+    """返回全局配置实例。
+
+    使用 lru_cache 避免每次请求都重新解析环境变量。
+    如果测试或脚本需要切换 APP_ENV_FILE，应在新进程中执行或显式清理缓存。
+    """
+
     return Settings()

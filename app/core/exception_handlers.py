@@ -1,3 +1,9 @@
+"""FastAPI 异常统一处理。
+
+该文件把业务异常、请求校验异常和未捕获异常转换为统一响应结构。
+生产环境不应把 Python 堆栈直接返回给用户，详细错误应记录到日志中。
+"""
+
 from fastapi import FastAPI,Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -7,11 +13,15 @@ from app.schemas.common import ErrorResponse,ErrorDetail
 
 
 def register_exception_handlers(app:FastAPI) ->None:
+    """注册项目统一异常处理器。"""
+
     @app.exception_handler(AppException)
     async def handle_app_exception(
             request:Request,
             exc:AppException,
     ) -> JSONResponse:
+        """处理业务层主动抛出的 AppException。"""
+
         details = None
         if exc.details:
             details = [ErrorDetail(**detail).model_dump() for detail in exc.details]
@@ -31,6 +41,8 @@ def register_exception_handlers(app:FastAPI) ->None:
             request:Request,
             exc:RequestValidationError,
     ) -> JSONResponse:
+        """处理 FastAPI / Pydantic 请求参数校验错误。"""
+
         details = [
             ErrorDetail(
                 field=".".join(str(item) for item in error["loc"]),
@@ -55,6 +67,11 @@ def register_exception_handlers(app:FastAPI) ->None:
         request: Request,
         exc: Exception,
     ) -> JSONResponse:
+        """处理未预期异常。
+
+        这里统一返回 internal server error，避免生产环境泄露内部实现细节。
+        """
+
         response = ErrorResponse(
             code=10005,
             message="internal server error",

@@ -1,3 +1,9 @@
+"""API Router 汇总入口。
+
+该文件统一注册所有业务 Router，并挂载到 settings.api_v1_prefix。
+当前默认 API 前缀是 /api/v1，前端、App 和生产健康检查都通过该前缀访问业务接口。
+"""
+
 from fastapi import APIRouter
 
 from app.api.routers.analysis_records import router as analysis_records_router

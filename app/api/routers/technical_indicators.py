@@ -1,3 +1,9 @@
+"""技术指标 API Router。
+
+该 Router 提供 MA、RSI、MACD、波动率、动量和成交量因子等技术指标查询。
+指标结果只作为研究辅助，不直接代表买卖建议。
+"""
+
 from fastapi import APIRouter, Path, Query
 
 from app.api.deps import AsyncCurrentUser, AsyncDBSession

@@ -1,3 +1,9 @@
+"""用户记忆 API Router。
+
+该 Router 提供当前用户长期记忆和用户画像的查询、刷新、更新与停用接口。
+用户记忆用于改善 AI 上下文，不应跨用户访问。
+"""
+
 from fastapi import APIRouter, Query, status
 
 from app.api.deps import AsyncCurrentUser, AsyncDBSession
@@ -44,7 +50,7 @@ async def list_user_memories(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ) -> ApiResponse[UserMemoryListResponse]:
-    """List memories owned by the current user."""
+    """查询当前用户拥有的长期记忆列表。"""
 
     query = UserMemoryListQuery(
         memory_type=memory_type,
@@ -78,7 +84,7 @@ async def get_user_profile(
     current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ) -> ApiResponse[UserProfileResponse]:
-    """Get current user's profile."""
+    """查询当前用户画像。"""
 
     result = await UserMemoryQueryService(db).get_profile(
         user_id=current_user.id,
@@ -102,7 +108,7 @@ async def refresh_user_profile(
     current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ) -> ApiResponse[UserProfileRefreshResponse]:
-    """Refresh current user's profile."""
+    """根据当前用户记忆、偏好、自选股和分析记录刷新用户画像。"""
 
     result = await UserMemoryQueryService(db).refresh_profile(
         user_id=current_user.id,
@@ -126,7 +132,7 @@ async def get_user_memory(
     current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ) -> ApiResponse[UserMemoryResponse]:
-    """Get one memory owned by the current user."""
+    """查询当前用户拥有的一条长期记忆。"""
 
     result = await UserMemoryQueryService(db).get_memory(
         user_id=current_user.id,
@@ -151,7 +157,7 @@ async def update_user_memory(
     current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ) -> ApiResponse[UserMemoryResponse]:
-    """Update one memory owned by the current user."""
+    """更新当前用户拥有的一条长期记忆。"""
 
     result = await UserMemoryQueryService(db).update_memory(
         user_id=current_user.id,
@@ -176,7 +182,7 @@ async def deactivate_user_memory(
     current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ) -> ApiResponse[UserMemoryResponse]:
-    """Deactivate one memory owned by the current user."""
+    """停用当前用户拥有的一条长期记忆。"""
 
     result = await UserMemoryQueryService(db).deactivate_memory(
         user_id=current_user.id,

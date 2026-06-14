@@ -1,3 +1,9 @@
+"""行情数据质量 API Router。
+
+该 Router 提供 K 线数据质量报告、同步状态和同步日志查询。
+数据质量用于提示数据为空、不足、过旧等风险，避免量化和 AI 链路误用不可靠数据。
+"""
+
 from fastapi import APIRouter, Path, Query
 
 from app.api.deps import AsyncCurrentUser, AsyncDBSession

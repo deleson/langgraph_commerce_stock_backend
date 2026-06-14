@@ -1,3 +1,9 @@
+"""单股回测 API Router。
+
+该 Router 提供基于历史 K 线和策略信号的单股回测入口。
+回测只用于研究和学习，历史结果不代表未来收益，也不构成投资建议。
+"""
+
 from fastapi import APIRouter, status
 
 from app.api.deps import AsyncCurrentUser, AsyncDBSession
@@ -27,14 +33,11 @@ async def run_stock_backtest(
     current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ) -> ApiResponse[BacktestResponse]:
-    """Run one historical backtest for the current user.
+    """执行一次单股历史回测。
 
-    The router only handles HTTP concerns:
-    - receive and validate request payload
-    - require authenticated user
-    - inject AsyncSession
-    - call BacktestQueryService
-    - return unified API response
+    Router 只负责接收请求和鉴权，K 线读取、策略信号、模拟成交、
+    资金曲线和绩效指标由 BacktestQueryService 及下游服务处理。
+    回测结果只用于研究，不能代表未来收益。
     """
 
     _ = current_user

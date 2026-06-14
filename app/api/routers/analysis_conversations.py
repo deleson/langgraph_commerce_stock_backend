@@ -1,3 +1,9 @@
+"""分析会话 API Router。
+
+该 Router 用于查询个股分析线程中的会话消息、ReAct Trace 和聚合上下文。
+所有查询都基于当前登录用户，避免用户读取其他人的分析会话。
+"""
+
 from fastapi import APIRouter, Path, Query
 
 from app.api.deps import AsyncCurrentUser, AsyncDBSession

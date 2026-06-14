@@ -1,3 +1,9 @@
+"""设备 API Router。
+
+该 Router 管理当前用户的设备注册、列表和停用。
+设备能力主要为后续多端登录、推送通知或客户端识别预留。
+"""
+
 from fastapi import APIRouter, status
 
 from app.api.deps import AsyncCurrentUser, AsyncDBSession

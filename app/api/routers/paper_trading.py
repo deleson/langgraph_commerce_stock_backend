@@ -1,3 +1,11 @@
+"""纸面交易 API Router。
+
+该 Router 定义纸面交易账户、配置、持仓、订单、成交、权益曲线、运行记录
+和 tick 推进接口。Router 层只处理当前用户、路径参数、分页参数和响应包装。
+
+注意：纸面交易只做虚拟模拟，不连接券商，也不会真实下单。
+"""
+
 from fastapi import APIRouter, Query, status
 
 from app.api.deps import AsyncCurrentUser, AsyncDBSession
@@ -43,7 +51,7 @@ async def create_paper_trading_account(
     current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ) -> ApiResponse[PaperTradingAccountResponse]:
-    """Create one paper trading account owned by the current user."""
+    """创建当前用户拥有的纸面交易账户。"""
 
     result = await PaperTradingQueryService(db).create_account(
         user_id=current_user.id,
@@ -65,7 +73,7 @@ async def list_paper_trading_accounts(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ) -> ApiResponse[PaperTradingAccountListResponse]:
-    """List current user's paper trading accounts."""
+    """查询当前用户的纸面交易账户列表。"""
 
     query = PaperTradingListQuery(
         limit=limit,
@@ -94,7 +102,7 @@ async def get_paper_trading_account_detail(
     current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ) -> ApiResponse[PaperTradingAccountDetailResponse]:
-    """Get one paper trading account detail."""
+    """查询当前用户拥有的一条纸面交易账户详情。"""
 
     result = await PaperTradingQueryService(db).get_account_detail(
         user_id=current_user.id,
@@ -119,7 +127,7 @@ async def update_paper_trading_account(
     current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ) -> ApiResponse[PaperTradingAccountResponse]:
-    """Update paper trading account name or status."""
+    """更新纸面交易账户名称或状态。"""
 
     result = await PaperTradingQueryService(db).update_account(
         user_id=current_user.id,
@@ -143,7 +151,7 @@ async def get_paper_trading_account_config(
     current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ) -> ApiResponse[PaperTradingAccountConfigResponse]:
-    """Get paper trading account config."""
+    """查询纸面交易账户配置。"""
 
     result = await PaperTradingQueryService(db).get_account_config(
         user_id=current_user.id,
@@ -168,7 +176,7 @@ async def update_paper_trading_account_config(
     current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ) -> ApiResponse[PaperTradingAccountConfigResponse]:
-    """Update paper trading account config."""
+    """更新纸面交易账户配置。"""
 
     result = await PaperTradingQueryService(db).update_account_config(
         user_id=current_user.id,
@@ -191,7 +199,7 @@ async def list_paper_trading_positions(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ) -> ApiResponse[PaperTradingPositionListResponse]:
-    """List current positions for one account."""
+    """查询某个纸面交易账户的当前模拟持仓。"""
 
     result = await PaperTradingQueryService(db).list_positions(
         user_id=current_user.id,
@@ -215,7 +223,7 @@ async def list_paper_trading_orders(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ) -> ApiResponse[PaperTradingOrderListResponse]:
-    """List simulated orders for one account."""
+    """查询某个纸面交易账户的模拟订单列表。"""
 
     result = await PaperTradingQueryService(db).list_orders(
         user_id=current_user.id,
@@ -239,7 +247,7 @@ async def list_paper_trading_trades(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ) -> ApiResponse[PaperTradingTradeListResponse]:
-    """List simulated trades for one account."""
+    """查询某个纸面交易账户的模拟成交列表。"""
 
     result = await PaperTradingQueryService(db).list_trades(
         user_id=current_user.id,
@@ -263,7 +271,7 @@ async def list_paper_trading_equity_snapshots(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ) -> ApiResponse[PaperTradingEquitySnapshotListResponse]:
-    """List equity snapshots for one account."""
+    """查询某个纸面交易账户的权益快照列表。"""
 
     result = await PaperTradingQueryService(db).list_equity_snapshots(
         user_id=current_user.id,
@@ -292,7 +300,12 @@ async def run_paper_trading_tick(
     current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ) -> ApiResponse[PaperTradingTickResponse]:
-    """Run one manual paper trading tick for one account."""
+    """手动推进一次纸面交易 tick。
+
+    Router 会强制覆盖 account_id、target_user_id 和 source，
+    避免调用方伪造用户或来源。具体信号读取、虚拟订单、虚拟成交、
+    持仓更新、权益快照和运行记录由 PaperTradingQueryService 编排。
+    """
 
     request = payload.model_copy(
         update={
@@ -326,7 +339,7 @@ async def list_paper_trading_runs(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ) -> ApiResponse[PaperTradingRunListResponse]:
-    """List paper trading run records for one account."""
+    """查询某个纸面交易账户的 tick 运行记录列表。"""
 
     result = await PaperTradingQueryService(db).list_runs(
         user_id=current_user.id,
@@ -352,7 +365,7 @@ async def get_paper_trading_run_detail(
     current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ) -> ApiResponse[PaperTradingRunDetailResponse]:
-    """Get one paper trading run detail."""
+    """查询某次纸面交易 tick 运行详情。"""
 
     result = await PaperTradingQueryService(db).get_run(
         user_id=current_user.id,

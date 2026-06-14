@@ -1,3 +1,9 @@
+"""组合回测 API Router。
+
+该 Router 提供多资产组合回测入口，支持目标权重、调仓频率、资金曲线和绩效指标。
+组合回测用于研究历史表现，不代表未来收益，也不构成投资建议。
+"""
+
 from fastapi import APIRouter, status
 
 from app.api.deps import AsyncCurrentUser, AsyncDBSession
@@ -33,14 +39,11 @@ async def run_portfolio_backtest(
     current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ) -> ApiResponse[PortfolioBacktestResponse]:
-    """Run one historical portfolio backtest for the current user.
+    """执行一次组合历史回测。
 
-    The router only handles HTTP concerns:
-    - receive and validate request payload
-    - require authenticated user
-    - inject AsyncSession
-    - call PortfolioBacktestQueryService
-    - return unified API response
+    Router 不直接处理调仓和绩效计算。
+    多资产对齐、目标权重、调仓交易、组合权益和绩效指标由
+    PortfolioBacktestQueryService 及下游服务完成。
     """
 
     _ = current_user

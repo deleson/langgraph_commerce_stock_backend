@@ -1,3 +1,9 @@
+"""认证 API Router。
+
+该 Router 提供注册、登录、刷新 token 和退出登录接口。
+密码哈希、会话创建、refresh token 管理等安全细节由 AsyncAuthService 处理。
+"""
+
 from fastapi import APIRouter
 
 from app.api.deps import AsyncDBSession, CurrentToken, AsyncCurrentUser

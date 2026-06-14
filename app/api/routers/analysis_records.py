@@ -1,3 +1,9 @@
+"""分析记录 API Router。
+
+该 Router 提供当前用户历史个股分析记录的列表和详情查询。
+Router 层只注入当前用户和数据库会话，记录归属校验由 Service / Repository 继续保证。
+"""
+
 from fastapi import APIRouter
 
 from app.api.deps import AsyncCurrentUser, AsyncDBSession

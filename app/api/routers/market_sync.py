@@ -1,3 +1,9 @@
+"""行情同步 API Router。
+
+该 Router 提供手动同步股票基础信息和 K 线数据的入口。
+真实 Provider 调用、数据标准化、去重和落库由 MarketDataSyncService 处理。
+"""
+
 from fastapi import APIRouter, Path, Query
 
 from app.api.deps import AsyncCurrentUser, AsyncDBSession

@@ -1,3 +1,9 @@
+"""自选股 API Router。
+
+该 Router 提供当前用户自选股的创建、列表、详情、更新和删除接口。
+自选股是用户私有资源，所有访问都必须按当前用户隔离。
+"""
+
 from fastapi import APIRouter, status
 
 from app.api.deps import AsyncCurrentUser, AsyncDBSession

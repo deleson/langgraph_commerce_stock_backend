@@ -1,3 +1,9 @@
+"""策略信号 API Router。
+
+该 Router 提供基于技术指标和数据质量的策略信号查询接口。
+策略信号是规则化研究结果，不等于真实买卖建议，也不构成投资建议。
+"""
+
 from fastapi import APIRouter, Path, Query
 
 from app.api.deps import AsyncCurrentUser, AsyncDBSession

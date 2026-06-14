@@ -1,3 +1,9 @@
+"""行情查询 API Router。
+
+该 Router 提供股票搜索、报价、K 线、指标快照和 overview 查询。
+查询接口主要读取已同步或 Provider 返回的数据，不直接承担复杂同步和质量判断逻辑。
+"""
+
 from fastapi import APIRouter, Path, Query
 
 from app.api.deps import AsyncCurrentUser, AsyncDBSession

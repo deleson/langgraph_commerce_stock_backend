@@ -1,3 +1,9 @@
+"""量化提醒 API Router。
+
+该 Router 提供量化提醒规则、提醒事件和手动扫描接口。
+提醒结果只表示规则被触发，不构成投资建议，也不代表必须买入或卖出。
+"""
+
 from datetime import date
 
 from fastapi import APIRouter, Query, status
@@ -46,7 +52,7 @@ async def create_quant_alert_rule(
     current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ) -> ApiResponse[QuantAlertRuleResponse]:
-    """Create one quant alert rule owned by the current user."""
+    """创建一条当前用户拥有的量化提醒规则。"""
 
     result = await QuantAlertQueryService(db).create_rule(
         user_id=current_user.id,
@@ -73,7 +79,7 @@ async def list_quant_alert_rules(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ) -> ApiResponse[QuantAlertRuleListResponse]:
-    """List current user's quant alert rules."""
+    """查询当前用户的量化提醒规则列表。"""
 
     query = QuantAlertRuleListQuery(
         rule_type=rule_type,
@@ -104,7 +110,7 @@ async def get_quant_alert_rule(
     current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ) -> ApiResponse[QuantAlertRuleResponse]:
-    """Get one quant alert rule detail."""
+    """查询当前用户拥有的一条量化提醒规则详情。"""
 
     result = await QuantAlertQueryService(db).get_rule(
         user_id=current_user.id,
@@ -126,7 +132,7 @@ async def update_quant_alert_rule(
     current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ) -> ApiResponse[QuantAlertRuleResponse]:
-    """Update one quant alert rule."""
+    """更新当前用户拥有的一条量化提醒规则。"""
 
     result = await QuantAlertQueryService(db).update_rule(
         user_id=current_user.id,
@@ -148,7 +154,7 @@ async def deactivate_quant_alert_rule(
     current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ) -> ApiResponse[QuantAlertRuleResponse]:
-    """Deactivate one quant alert rule."""
+    """停用当前用户拥有的一条量化提醒规则。"""
 
     result = await QuantAlertQueryService(db).deactivate_rule(
         user_id=current_user.id,
@@ -177,7 +183,7 @@ async def list_quant_alert_events(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ) -> ApiResponse[QuantAlertEventListResponse]:
-    """List current user's quant alert events."""
+    """查询当前用户的量化提醒事件列表。"""
 
     query = QuantAlertEventListQuery(
         rule_type=rule_type,
@@ -210,7 +216,7 @@ async def get_quant_alert_event(
     current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ) -> ApiResponse[QuantAlertEventResponse]:
-    """Get one quant alert event detail."""
+    """查询当前用户拥有的一条量化提醒事件详情。"""
 
     result = await QuantAlertQueryService(db).get_event(
         user_id=current_user.id,
@@ -235,7 +241,7 @@ async def update_quant_alert_event(
     current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ) -> ApiResponse[QuantAlertEventResponse]:
-    """Update one quant alert event status."""
+    """更新当前用户拥有的一条量化提醒事件状态。"""
 
     result = await QuantAlertQueryService(db).update_event(
         user_id=current_user.id,
@@ -262,7 +268,11 @@ async def scan_quant_alerts(
     current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ) -> ApiResponse[QuantAlertScanResponse]:
-    """Run one manual quant alert scan for the current user."""
+    """手动执行一次当前用户的量化提醒扫描。
+
+    Router 会强制把 target_user_id 设置为当前登录用户，
+    避免调用方通过请求体扫描或写入其他用户的提醒事件。
+    """
 
     request = payload.model_copy(
         update={

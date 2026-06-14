@@ -1,3 +1,9 @@
+"""每日简报 API Router。
+
+该 Router 提供每日简报生成、今日简报、列表和详情查询接口。
+AI 仅可用于润色确定性简报内容，不能修改价格、评分、信号和风险边界。
+"""
+
 from datetime import date
 
 from fastapi import APIRouter, Query, status
@@ -38,14 +44,10 @@ async def generate_daily_report(
     current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ) -> ApiResponse[DailyReportGenerationResponse]:
-    """Generate one daily report for the current user.
+    """为当前用户生成或复用一份每日简报。
 
-    The router only handles HTTP concerns:
-    - receive and validate request payload
-    - require authenticated user
-    - inject AsyncSession
-    - call DailyReportQueryService
-    - return unified API response
+    Router 只负责请求体、当前用户和数据库会话。
+    简报数据组装、AI 润色、通知生成和幂等复用由 DailyReportQueryService 编排。
     """
 
     result = await DailyReportQueryService(db).generate_daily_report(
@@ -76,7 +78,7 @@ async def list_daily_reports(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ) -> ApiResponse[DailyReportListResponse]:
-    """List current user's daily reports."""
+    """查询当前用户的每日简报列表。"""
 
     query = DailyReportListQuery(
         start_date=start_date,
@@ -105,7 +107,7 @@ async def get_today_daily_report(
     current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ) -> ApiResponse[DailyReportTodayResponse]:
-    """Get today's report for the current user."""
+    """查询当前用户今天的每日简报。"""
 
     result = await DailyReportQueryService(db).get_today_report(
         user_id=current_user.id,
@@ -128,7 +130,7 @@ async def get_daily_report(
     current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ) -> ApiResponse[DailyReportResponse]:
-    """Get one daily report detail."""
+    """查询当前用户拥有的一条每日简报详情。"""
 
     result = await DailyReportQueryService(db).get_report(
         user_id=current_user.id,

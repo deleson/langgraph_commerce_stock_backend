@@ -1,3 +1,9 @@
+"""用户记忆检索 API Router。
+
+该 Router 提供当前用户相似记忆检索接口。
+检索结果只来自当前用户记忆，用于为 AI 分析和追问提供个性化上下文。
+"""
+
 from fastapi import APIRouter, status
 
 from app.api.deps import AsyncCurrentUser, AsyncDBSession
@@ -32,14 +38,10 @@ async def search_similar_user_memories(
     current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ) -> ApiResponse[UserMemoryRetrievalResponse]:
-    """Search similar memories owned by the current user.
+    """检索当前用户的相似长期记忆。
 
-    Router only handles HTTP concerns:
-    - receive and validate request payload
-    - require authenticated user
-    - inject AsyncSession
-    - call UserMemoryRetrievalService
-    - return unified API response
+    Router 只负责请求体、当前用户和数据库会话。
+    向量检索、相似度计算和结果裁剪由 UserMemoryRetrievalService 处理。
     """
 
     result = await UserMemoryRetrievalService(db).search_similar_memories(

@@ -1,3 +1,9 @@
+"""候选股票评分 API Router。
+
+该 Router 提供基于手动股票池或用户上下文的候选评分入口。
+候选评分用于研究优先级排序，不是荐股，也不承诺未来收益。
+"""
+
 from fastapi import APIRouter, status
 
 from app.api.deps import AsyncCurrentUser, AsyncDBSession
@@ -30,14 +36,10 @@ async def run_stock_candidates(
     current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ) -> ApiResponse[StockCandidateResponse]:
-    """Run stock candidate scoring for the current user.
+    """执行一次候选股票评分。
 
-    The router only handles HTTP concerns:
-    - receive and validate request payload
-    - require authenticated user
-    - inject AsyncSession
-    - call StockCandidateQueryService
-    - return unified API response
+    候选评分会综合数据质量、技术指标、策略信号、回测表现和用户偏好。
+    评分结果只是研究优先级，不是荐股，也不承诺未来收益。
     """
 
     result = await StockCandidateQueryService(db).run_stock_candidates(

@@ -1,3 +1,10 @@
+"""个股 AI 分析 API Router。
+
+该 Router 提供主分析、普通追问和 ReAct 工具追问接口。
+Router 层负责当前用户和请求响应，AI 调用、额度检查、图执行、结果落库和安全边界
+由 StockAnalysisService 与 StockAnalysisReactService 处理。
+"""
+
 from fastapi import APIRouter, status
 
 from app.api.deps import AsyncCurrentUser, AsyncDBSession
@@ -35,14 +42,14 @@ async def analyze_stock(
     current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ) -> ApiResponse[StockAnalysisResponse]:
-    """Analyze one stock for the current user.
+    """为当前用户执行一次个股主分析。
 
-    The router only handles HTTP concerns:
-    - receive request payload
-    - resolve current user
-    - inject AsyncSession
-    - call service
-    - return unified response
+    Router 只处理 HTTP 层职责：
+    1. 接收请求体；
+    2. 解析当前登录用户；
+    3. 注入异步数据库会话；
+    4. 调用 AsyncStockAnalysisService；
+    5. 返回统一响应。
     """
 
     result = await AsyncStockAnalysisService(db).analyze_stock(
@@ -66,12 +73,10 @@ async def follow_up_stock_analysis(
     current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ) -> ApiResponse[StockAnalysisFollowUpResponse]:
-    """Answer a follow-up question for a previous stock analysis.
+    """基于已有分析线程回答普通追问。
 
-    This is a minimal follow-up API:
-    - it reads previous analysis context from AnalysisRecord
-    - it does not run the full stock analysis graph again
-    - it does not implement full ReAct tool calling yet
+    普通追问会读取已有 AnalysisRecord 上下文，但不会重新执行完整主分析图，
+    也不会调用 ReAct 工具链。它适合较轻量的上下文问答。
     """
 
     result = await AsyncStockAnalysisService(db).follow_up_stock_analysis(
@@ -96,13 +101,11 @@ async def react_follow_up_stock_analysis(
     current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ) -> ApiResponse[StockAnalysisReactFollowUpResponse]:
-    """Answer a follow-up question with ReAct tool calling.
+    """基于 ReAct 图回答工具增强追问。
 
-    This endpoint is stricter and more capable than the minimal follow-up API:
-    - it requires an existing analysis_thread_id
-    - it verifies the thread belongs to the current user
-    - it lets the ReAct graph decide whether to call safe business tools
-    - it returns tool observations and trace for debugging and audit
+    该接口要求传入已有 analysis_thread_id，并校验线程归属当前用户。
+    ReAct 图只能在白名单工具范围内调用后端函数，并返回 observations 和 trace，
+    方便后续调试、审计和解释。
     """
 
     result = await StockAnalysisReactService(db).follow_up_stock_analysis(

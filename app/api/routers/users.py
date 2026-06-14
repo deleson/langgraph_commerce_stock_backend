@@ -1,3 +1,9 @@
+"""用户 API Router。
+
+该 Router 提供当前登录用户资料读取和更新接口。
+用户身份来自 JWT 当前用户依赖，不从请求体中信任 user_id。
+"""
+
 from fastapi import APIRouter
 
 from app.api.deps import AsyncCurrentUser,AsyncDBSession

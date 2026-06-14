@@ -1,3 +1,9 @@
+"""用户偏好 API Router。
+
+该 Router 提供当前用户偏好的读取和更新接口。
+偏好会影响日报、候选评分、通知默认值等个性化能力，必须基于当前登录用户。
+"""
+
 from fastapi import APIRouter
 from app.api.deps import AsyncCurrentUser,AsyncDBSession
 from app.schemas.common import ApiResponse

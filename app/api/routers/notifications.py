@@ -1,3 +1,9 @@
+"""通知 API Router。
+
+该 Router 提供当前用户通知列表、详情、单条已读和全部已读接口。
+通知数据必须按当前用户隔离，不能跨用户读取或修改。
+"""
+
 from fastapi import APIRouter, Query
 
 from app.api.deps import AsyncCurrentUser, AsyncDBSession

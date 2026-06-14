@@ -1,3 +1,10 @@
+"""后台任务 API Router。
+
+该 Router 提供后台任务提交、列表、详情和取消接口。
+Router 只负责接收任务请求和当前用户，真正的任务投递、状态流转和结果记录
+由 BackgroundTaskService 与 Celery Worker 完成。
+"""
+
 from fastapi import APIRouter, Query, status
 
 from app.api.deps import AsyncCurrentUser, AsyncDBSession
@@ -33,14 +40,10 @@ async def submit_background_task(
     current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ) -> ApiResponse[BackgroundTaskSubmitResponse]:
-    """Submit one background task.
+    """提交一个当前用户的后台任务。
 
-    The router only handles HTTP concerns:
-    - receive and validate request payload
-    - require authenticated user
-    - inject AsyncSession
-    - call BackgroundTaskService
-    - return unified API response
+    Router 只负责请求体、当前用户和数据库会话。
+    任务创建、Celery 投递、状态流转和失败记录由 BackgroundTaskService 处理。
     """
 
     result = await BackgroundTaskService(db).submit_task(
@@ -68,10 +71,10 @@ async def list_background_tasks(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ) -> ApiResponse[BackgroundTaskListResponse]:
-    """List current user's background tasks.
+    """查询当前用户的后台任务列表。
 
-    The user_id is taken from the login token, not from query parameters,
-    so users cannot read other users' background task records.
+    user_id 来自登录 token，而不是查询参数，避免用户伪造 user_id
+    读取其他用户的后台任务记录。
     """
 
     query = BackgroundTaskListQuery(
@@ -103,7 +106,7 @@ async def get_background_task(
     current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ) -> ApiResponse[BackgroundTaskResponse]:
-    """Get one background task detail."""
+    """查询当前用户拥有的一条后台任务详情。"""
 
     result = await BackgroundTaskService(db).get_task(
         task_id=task_id,
@@ -128,7 +131,7 @@ async def cancel_background_task(
     current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ) -> ApiResponse[BackgroundTaskResponse]:
-    """Cancel one background task owned by the current user."""
+    """取消当前用户拥有的一条后台任务。"""
 
     result = await BackgroundTaskService(db).cancel_task(
         task_id=task_id,

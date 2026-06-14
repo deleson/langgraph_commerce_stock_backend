@@ -1,0 +1,46 @@
+name: Deploy Backend To Production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy production backend
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "${{ secrets.PROD_SSH_KEY }}" > ~/.ssh/prod_deploy_key
+          chmod 600 ~/.ssh/prod_deploy_key
+          ssh-keyscan -H "${{ secrets.PROD_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Deploy on server
+        run: |
+          ssh -i ~/.ssh/prod_deploy_key \
+            "${{ secrets.PROD_USER }}@${{ secrets.PROD_HOST }}" \
+            "cd '${{ secrets.PROD_DEPLOY_PATH }}' && \
+             git fetch origin main && \
+             git reset --hard origin/main && \
+             sudo docker compose --env-file .env.production -f docker-compose.prod.yml build api worker beat && \
+             sudo docker compose --env-file .env.production -f docker-compose.prod.yml up -d postgres redis && \
+             sudo docker compose --env-file .env.production -f docker-compose.prod.yml run --rm api uv run alembic upgrade head && \
+             sudo docker compose --env-file .env.production -f docker-compose.prod.yml up -d --remove-orphans && \
+             sudo docker compose --env-file .env.production -f docker-compose.prod.yml ps"
+
+      - name: Health check
+        run: |
+          sleep 5
+          curl --fail --show-error --silent "http://${{ secrets.PROD_HOST }}/api/v1/system/health"

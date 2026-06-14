@@ -1,3 +1,9 @@
+"""纸面交易运行记录 Model。
+
+paper_trading_runs 表保存每一次 tick 的请求快照、配置快照、信号快照、执行快照和持仓快照。
+它用于审计一次模拟盘推进为什么生成或跳过订单。
+"""
+
 from datetime import datetime
 from typing import Any
 
@@ -16,6 +22,8 @@ from app.models.base import Base
 
 
 class PaperTradingRun(Base):
+    """纸面交易 tick 运行记录表。"""
+
     __tablename__ = "paper_trading_runs"
 
     __table_args__ = (
@@ -82,6 +90,7 @@ class PaperTradingRun(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
+    # 每次运行记录都归属于一个虚拟账户。
     account_id: Mapped[int] = mapped_column(
         ForeignKey("paper_trading_accounts.id", ondelete="CASCADE"),
         index=True,

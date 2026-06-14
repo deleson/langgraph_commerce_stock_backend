@@ -1,3 +1,9 @@
+"""后台任务 Model。
+
+background_tasks 表记录 API 或调度器提交的异步任务、Celery task id、状态、结果和错误信息。
+它让用户可以追踪 queued / running / success / failed 等任务生命周期。
+"""
+
 from datetime import datetime
 from typing import Any
 
@@ -8,6 +14,8 @@ from app.models.base import Base
 
 
 class BackgroundTask(Base):
+    """后台任务表。"""
+
     __tablename__ = "background_tasks"
 
     __table_args__ = (
@@ -70,6 +78,7 @@ class BackgroundTask(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
+    # 系统任务可以没有 user_id；用户任务必须带 user_id 才能做列表隔离。
     user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"),
         index=True,

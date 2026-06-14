@@ -1,3 +1,9 @@
+"""Model 统一导出入口。
+
+本文件集中导出所有 SQLAlchemy Model，方便业务代码引用，
+也方便 Alembic 在迁移时识别完整 metadata。这里不写业务逻辑。
+"""
+
 from app.models.analysis_record import AnalysisRecord
 from app.models.base import Base
 from app.models.device import Device

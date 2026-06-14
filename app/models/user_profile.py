@@ -1,3 +1,9 @@
+"""用户画像 Model。
+
+user_profiles 表保存由用户记忆、会话和分析记录汇总出来的画像摘要。
+画像用于辅助 AI 个性化表达，不代表系统对用户投资能力的判断。
+"""
+
 from datetime import datetime
 from typing import Any
 
@@ -8,6 +14,8 @@ from app.models.base import Base
 
 
 class UserProfile(Base):
+    """用户画像表。"""
+
     __tablename__ = "user_profiles"
 
     __table_args__ = (
@@ -35,6 +43,7 @@ class UserProfile(Base):
             "user_id",
             name="uq_user_profiles_user_id",
         ),
+        # 当前设计下每个用户只有一份最新画像。
         Index(
             "ix_user_profiles_status_refreshed_at",
             "status",

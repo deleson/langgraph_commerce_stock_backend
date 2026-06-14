@@ -1,3 +1,9 @@
+"""用户记忆向量 Model。
+
+user_memory_embeddings 表保存用户记忆文本对应的向量，
+用于相似记忆检索和 AI 上下文增强，不用于跨用户共享。
+"""
+
 from datetime import datetime
 from typing import Any
 
@@ -18,6 +24,8 @@ from app.models.base import Base
 
 
 class UserMemoryEmbedding(Base):
+    """用户记忆向量表。"""
+
     __tablename__ = "user_memory_embeddings"
 
     __table_args__ = (
@@ -77,6 +85,7 @@ class UserMemoryEmbedding(Base):
             "content_hash",
             name="uq_user_memory_embeddings_memory_model_hash",
         ),
+        # 记忆文本内容未变化时，同一模型下不重复生成向量。
         Index(
             "ix_user_memory_embeddings_user_status_created_at",
             "user_id",
@@ -108,6 +117,7 @@ class UserMemoryEmbedding(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
+    # user_id 用于向量检索隔离，防止检索到其他用户的记忆。
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
         index=True,

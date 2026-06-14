@@ -1,3 +1,9 @@
+"""纸面交易订单 Model。
+
+paper_trading_orders 表保存策略信号生成的虚拟订单。
+订单只在模拟盘内部流转，不会发送到真实券商。
+"""
+
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
@@ -19,6 +25,8 @@ from app.models.base import Base
 
 
 class PaperTradingOrder(Base):
+    """纸面交易虚拟订单表。"""
+
     __tablename__ = "paper_trading_orders"
 
     __table_args__ = (
@@ -66,6 +74,7 @@ class PaperTradingOrder(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
+    # 订单归属于虚拟账户，不能脱离账户单独存在。
     account_id: Mapped[int] = mapped_column(
         ForeignKey("paper_trading_accounts.id", ondelete="CASCADE"),
         index=True,

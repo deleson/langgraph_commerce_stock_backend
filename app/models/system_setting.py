@@ -1,3 +1,9 @@
+"""系统设置 Model。
+
+system_settings 表用于保存少量可持久化的系统配置。
+生产密钥、数据库密码、DeepSeek Key 等 Secret 仍应放在 .env.production，不应写入该表。
+"""
+
 from datetime import datetime
 
 from sqlalchemy import DateTime, String, Text, func
@@ -7,6 +13,8 @@ from app.models.base import Base
 
 
 class SystemSetting(Base):
+    """系统设置表。"""
+
     __tablename__ = "system_settings"
 
     id: Mapped[int] = mapped_column(primary_key=True)

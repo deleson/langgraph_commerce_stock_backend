@@ -1,3 +1,9 @@
+"""K 线行情 Model。
+
+market_candles 表保存按 symbol、market、timeframe、source 和 adjust_type 区分的 K 线数据。
+技术指标、策略信号、回测、候选评分和纸面交易都依赖该表。
+"""
+
 from datetime import datetime
 from decimal import Decimal
 
@@ -19,9 +25,12 @@ from app.models.base import Base
 
 
 class MarketCandle(Base):
+    """市场 K 线表。"""
+
     __tablename__ = "market_candles"
 
     __table_args__ = (
+        # 同一来源、同一复权类型下，同一股票同一时间粒度和时间点只能有一根 K 线。
         UniqueConstraint(
             "symbol",
             "market",

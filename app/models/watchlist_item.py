@@ -1,3 +1,9 @@
+"""自选股 Model。
+
+watchlist_items 表保存用户关注的股票列表，
+是每日简报、量化提醒和纸面交易扫描股票池的重要来源。
+"""
+
 from datetime import datetime
 
 
@@ -8,9 +14,12 @@ from app.models.base import Base
 
 
 class WatchlistItem(Base):
+    """用户自选股表。"""
+
     __tablename__ = "watchlist_items"
 
     __table_args__ = (
+        # 同一用户在同一市场下不能重复添加同一个 symbol。
         UniqueConstraint(
             "user_id",
             "market",
@@ -26,6 +35,7 @@ class WatchlistItem(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
+    # user_id 是自选股的用户隔离边界，查询时必须限制当前用户。
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
         index=True,

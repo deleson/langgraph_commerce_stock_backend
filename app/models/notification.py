@@ -1,3 +1,8 @@
+"""通知 Model。
+
+notifications 表保存分析完成、日报生成、量化提醒等用户可见通知。
+"""
+
 from datetime import datetime
 
 from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, String, Text, func
@@ -7,6 +12,8 @@ from app.models.base import Base
 
 
 class Notification(Base):
+    """用户通知表。"""
+
     __tablename__ = "notifications"
 
     __table_args__ = (
@@ -18,6 +25,7 @@ class Notification(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
+    # 通知必须归属于用户，避免列表接口泄露其他用户消息。
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
         index=True,

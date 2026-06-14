@@ -1,3 +1,9 @@
+"""股票基础信息 Model。
+
+market_symbols 表保存股票代码、市场、名称、币种和 Provider 映射代码。
+它是 K 线和行情同步状态的基础引用表。
+"""
+
 from datetime import datetime
 
 from sqlalchemy import Boolean, CheckConstraint, DateTime, String, UniqueConstraint, func
@@ -7,9 +13,12 @@ from app.models.base import Base
 
 
 class MarketSymbol(Base):
+    """股票基础信息表。"""
+
     __tablename__ = "market_symbols"
 
     __table_args__ = (
+        # 同一市场下同一股票代码只保留一条基础信息。
         UniqueConstraint(
             "symbol",
             "market",

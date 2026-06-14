@@ -1,3 +1,9 @@
+"""用户设备 Model。
+
+devices 表保存 Web / App 设备标识、平台和推送 token，
+用于后续通知推送和设备管理。
+"""
+
 from datetime import datetime
 
 from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, String, UniqueConstraint, func
@@ -7,6 +13,8 @@ from app.models.base import Base
 
 
 class Device(Base):
+    """用户设备表。"""
+
     __tablename__ = "devices"
 
     __table_args__ = (

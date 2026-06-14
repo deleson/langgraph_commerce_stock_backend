@@ -1,3 +1,9 @@
+"""行情同步状态 Model。
+
+market_data_sync_statuses 表记录每只股票、时间周期、数据源和复权类型的最新同步状态。
+它用于判断数据是否已经同步、最近一次成功或失败发生在什么时候。
+"""
+
 from datetime import datetime
 
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, UniqueConstraint, func
@@ -7,6 +13,8 @@ from app.models.base import Base
 
 
 class MarketDataSyncStatus(Base):
+    """行情同步状态表。"""
+
     __tablename__ = "market_data_sync_statuses"
 
     __table_args__ = (
@@ -18,6 +26,7 @@ class MarketDataSyncStatus(Base):
             "adjust_type",
             name="uq_market_data_sync_status_identity",
         ),
+        # 常用查询路径：按股票、市场和周期查看同步状态。
         CheckConstraint(
             "market IN ('US','CN','HK')",
             name="market_data_sync_status_market_valid",

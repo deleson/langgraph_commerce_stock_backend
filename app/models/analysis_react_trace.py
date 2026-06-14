@@ -1,3 +1,9 @@
+"""ReAct 推理轨迹 Model。
+
+analysis_react_traces 表记录 ReAct 图每一步推理、工具调用、Observation 和错误信息。
+它是排查 AI 工具调用是否越界、是否失败的重要审计表。
+"""
+
 from datetime import datetime
 from typing import Any
 
@@ -18,6 +24,8 @@ from app.models.base import Base
 
 
 class AnalysisReactTrace(Base):
+    """ReAct 推理轨迹表。"""
+
     __tablename__ = "analysis_react_traces"
 
     __table_args__ = (
@@ -57,6 +65,7 @@ class AnalysisReactTrace(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
+    # trace 归属于用户和分析线程，不能跨用户查询。
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
         index=True,

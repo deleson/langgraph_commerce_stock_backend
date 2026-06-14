@@ -1,3 +1,9 @@
+"""量化提醒事件 Model。
+
+quant_alert_events 表保存提醒扫描后真正触发的事件。
+事件用于通知、列表查询和后续处理状态追踪，不代表交易指令。
+"""
+
 from datetime import date, datetime
 from typing import Any
 
@@ -19,6 +25,8 @@ from app.models.base import Base
 
 
 class QuantAlertEvent(Base):
+    """量化提醒触发事件表。"""
+
     __tablename__ = "quant_alert_events"
 
     __table_args__ = (
@@ -50,6 +58,7 @@ class QuantAlertEvent(Base):
             "dedup_key",
             name="uq_quant_alert_events_user_dedup_key",
         ),
+        # dedup_key 防止同一用户在同一触发条件下重复产生事件。
         Index("ix_quant_alert_events_user_event_date", "user_id", "event_date"),
         Index("ix_quant_alert_events_user_status", "user_id", "status"),
         Index("ix_quant_alert_events_user_symbol", "user_id", "market", "symbol"),
@@ -58,6 +67,7 @@ class QuantAlertEvent(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
+    # 事件必须按用户隔离，避免通知中心泄露其他用户提醒。
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
         index=True,

@@ -1,3 +1,9 @@
+"""AI 额度账户 Model。
+
+ai_quota_accounts 表保存每个用户的日/月调用次数、token 和成本上限。
+额度账户用于在真实 LLM 调用前做成本保护。
+"""
+
 from datetime import datetime
 from decimal import Decimal
 
@@ -8,6 +14,8 @@ from app.models.base import Base
 
 
 class AIQuotaAccount(Base):
+    """用户 AI 额度账户表。"""
+
     __tablename__ = "ai_quota_accounts"
 
     __table_args__ = (
@@ -39,6 +47,7 @@ class AIQuotaAccount(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
+    # 一个用户只有一份额度账户配置。
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
         unique=True,

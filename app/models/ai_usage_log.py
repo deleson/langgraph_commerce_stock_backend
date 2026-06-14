@@ -1,3 +1,9 @@
+"""AI 调用日志 Model。
+
+ai_usage_logs 表记录每次 LLM 调用的功能类型、状态、token、估算成本和耗时。
+它用于成本审计、额度控制和问题排查。
+"""
+
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
@@ -9,6 +15,8 @@ from app.models.base import Base
 
 
 class AIUsageLog(Base):
+    """AI 调用日志表。"""
+
     __tablename__ = "ai_usage_logs"
 
     __table_args__ = (
@@ -73,6 +81,7 @@ class AIUsageLog(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
+    # AI 用量按用户归集，额度校验和账单统计都依赖该字段。
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
         index=True,

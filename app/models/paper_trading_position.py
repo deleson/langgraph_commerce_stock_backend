@@ -1,3 +1,9 @@
+"""纸面交易持仓 Model。
+
+paper_trading_positions 表保存虚拟账户当前持仓。
+它是“当前状态表”，不是历史成交流水；历史成交由 paper_trading_trades 保存。
+"""
+
 from datetime import datetime
 from decimal import Decimal
 
@@ -17,6 +23,8 @@ from app.models.base import Base
 
 
 class PaperTradingPosition(Base):
+    """纸面交易当前模拟持仓表。"""
+
     __tablename__ = "paper_trading_positions"
 
     __table_args__ = (
@@ -42,6 +50,7 @@ class PaperTradingPosition(Base):
             "symbol",
             name="uq_paper_trading_positions_account_market_symbol",
         ),
+        # 同一账户同一市场同一股票只保留一条当前持仓记录。
         Index(
             "ix_paper_trading_positions_account_symbol",
             "account_id",
@@ -52,6 +61,7 @@ class PaperTradingPosition(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
+    # 持仓归属于虚拟账户，查询时通过账户继续校验用户归属。
     account_id: Mapped[int] = mapped_column(
         ForeignKey("paper_trading_accounts.id", ondelete="CASCADE"),
         index=True,

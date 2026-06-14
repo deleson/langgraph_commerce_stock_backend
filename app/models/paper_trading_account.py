@@ -1,3 +1,9 @@
+"""纸面交易账户 Model。
+
+paper_trading_accounts 表保存用户的虚拟账户、初始资金和当前现金余额。
+该账户只用于模拟盘，不连接券商，也不会真实下单。
+"""
+
 from datetime import datetime
 from decimal import Decimal
 
@@ -16,6 +22,8 @@ from app.models.base import Base
 
 
 class PaperTradingAccount(Base):
+    """纸面交易虚拟账户表。"""
+
     __tablename__ = "paper_trading_accounts"
 
     __table_args__ = (
@@ -40,6 +48,7 @@ class PaperTradingAccount(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
+    # 虚拟账户归属于用户，所有纸面交易子资源都从 account 继续隔离。
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
         index=True,

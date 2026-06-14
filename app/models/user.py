@@ -1,3 +1,9 @@
+"""用户主表 Model。
+
+users 表保存系统登录身份、邮箱、用户名、密码哈希和账号状态。
+它是多用户隔离的根表，其他用户私有数据通常通过 user_id 关联到这里。
+"""
+
 from datetime import datetime
 
 from sqlalchemy import Boolean,DateTime,String,func
@@ -6,6 +12,11 @@ from sqlalchemy.orm import Mapped,mapped_column
 from app.models.base import Base
 
 class User(Base):
+    """系统用户表。
+
+    hashed_password 只保存哈希值，不保存明文密码。
+    """
+
     __tablename__ = "users"
 
     id:Mapped[int] = mapped_column(primary_key=True)

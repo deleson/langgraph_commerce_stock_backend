@@ -1,3 +1,9 @@
+"""分析会话消息 Model。
+
+analysis_conversation_messages 表保存普通追问、ReAct 追问、工具 Observation
+和系统摘要消息，使 AI 会话可以被回放和审计。
+"""
+
 from datetime import datetime
 from typing import Any
 
@@ -18,6 +24,8 @@ from app.models.base import Base
 
 
 class AnalysisConversationMessage(Base):
+    """分析会话消息表。"""
+
     __tablename__ = "analysis_conversation_messages"
 
     __table_args__ = (
@@ -43,6 +51,7 @@ class AnalysisConversationMessage(Base):
             "sequence_no",
             name="uq_analysis_conversation_messages_user_thread_sequence",
         ),
+        # 按用户、线程和序号读取，是恢复会话上下文的主要查询路径。
         Index(
             "ix_analysis_conversation_messages_user_thread_sequence",
             "user_id",
@@ -58,6 +67,7 @@ class AnalysisConversationMessage(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
+    # 会话消息必须归属于当前用户，避免跨用户读取分析上下文。
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
         index=True,

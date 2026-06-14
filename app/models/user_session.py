@@ -1,3 +1,9 @@
+"""用户会话 Model。
+
+user_sessions 表保存 refresh token 的哈希、撤销状态和过期时间，
+用于支持刷新 Token、退出登录和会话失效控制。
+"""
+
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String, func
@@ -7,10 +13,13 @@ from app.models.base import Base
 
 
 class UserSession(Base):
+    """用户刷新 Token 会话表。"""
+
     __tablename__ = "user_sessions"
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
+    # user_id 是会话归属边界，用户被删除时其会话也应级联删除。
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
         index=True,

@@ -1,3 +1,9 @@
+"""AI 分析记录 Model。
+
+analysis_records 表保存一次个股主分析或相关分析任务的结果快照。
+普通追问和 ReAct 追问会通过 analysis_thread_id 引用这些记录。
+"""
+
 from datetime import datetime
 from typing import Any
 
@@ -8,6 +14,8 @@ from app.models.base import Base
 
 
 class AnalysisRecord(Base):
+    """AI 分析记录表。"""
+
     __tablename__ = "analysis_records"
 
     __table_args__ = (
@@ -27,6 +35,7 @@ class AnalysisRecord(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
+    # user_id 是分析记录的用户隔离边界，查询历史记录时必须限制当前用户。
     user_id:Mapped[int] = mapped_column(
         ForeignKey("users.id",ondelete="CASCADE"),
         index=True,

@@ -1,3 +1,9 @@
+"""AI 用量汇总 Model。
+
+ai_usage_summaries 表按日或月汇总用户 AI 调用次数、token 和估算成本。
+它用于快速展示额度剩余和历史消耗趋势。
+"""
+
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -8,6 +14,8 @@ from app.models.base import Base
 
 
 class AIUsageSummary(Base):
+    """AI 日/月用量汇总表。"""
+
     __tablename__ = "ai_usage_summaries"
 
     __table_args__ = (
@@ -57,6 +65,7 @@ class AIUsageSummary(Base):
             "period_start",
             name="uq_ai_usage_summaries_user_period",
         ),
+        # 查询额度时会频繁按用户、周期类型和周期开始日期定位汇总记录。
         Index(
             "ix_ai_usage_summaries_user_period",
             "user_id",
@@ -67,6 +76,7 @@ class AIUsageSummary(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
+    # 汇总按用户隔离，避免不同用户的 AI 成本混算。
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
         index=True,

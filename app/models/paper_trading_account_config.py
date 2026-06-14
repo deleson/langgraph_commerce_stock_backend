@@ -1,3 +1,9 @@
+"""纸面交易账户配置 Model。
+
+paper_trading_account_configs 表保存单个虚拟账户的运行开关、仓位限制、手续费和数据质量门控。
+这些配置会影响 tick 是否生成虚拟订单，但不会产生真实交易。
+"""
+
 from datetime import datetime
 from decimal import Decimal
 
@@ -18,6 +24,8 @@ from app.models.base import Base
 
 
 class PaperTradingAccountConfig(Base):
+    """纸面交易账户配置表。"""
+
     __tablename__ = "paper_trading_account_configs"
 
     __table_args__ = (
@@ -53,6 +61,7 @@ class PaperTradingAccountConfig(Base):
             "account_id",
             name="uq_paper_trading_account_configs_account_id",
         ),
+        # 一个纸面交易账户只有一份当前配置。
         Index(
             "ix_paper_trading_account_configs_enabled",
             "is_enabled",
@@ -61,6 +70,7 @@ class PaperTradingAccountConfig(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
+    # 配置随账户删除而删除，避免留下无归属的模拟参数。
     account_id: Mapped[int] = mapped_column(
         ForeignKey("paper_trading_accounts.id", ondelete="CASCADE"),
         index=True,

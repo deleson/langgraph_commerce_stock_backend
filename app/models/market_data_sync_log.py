@@ -1,3 +1,9 @@
+"""行情同步日志 Model。
+
+market_data_sync_logs 表记录每一次行情同步的抓取数量、标准化数量、落库数量和错误信息。
+它是排查 Provider、网络和数据质量问题的基础观测表。
+"""
+
 from datetime import datetime
 
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, func
@@ -7,6 +13,8 @@ from app.models.base import Base
 
 
 class MarketDataSyncLog(Base):
+    """行情同步日志表。"""
+
     __tablename__ = "market_data_sync_logs"
 
     __table_args__ = (

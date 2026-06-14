@@ -1,3 +1,9 @@
+"""每日简报 Model。
+
+daily_reports 表保存用户某一天的日报结果、输入快照、AI 润色状态和通知关联。
+日报基于历史行情和规则生成，只作为研究参考，不构成投资建议。
+"""
+
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
@@ -18,9 +24,12 @@ from app.models.base import Base
 
 
 class DailyReport(Base):
+    """每日简报表。"""
+
     __tablename__ = "daily_reports"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    # 每个日报都属于某个用户，列表和详情查询必须按 user_id 隔离。
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
@@ -139,6 +148,7 @@ class DailyReport(Base):
     )
 
     __table_args__ = (
+        # 同一用户同一天只保留一份日报，force_rebuild 时更新已有记录。
         UniqueConstraint(
             "user_id",
             "report_date",

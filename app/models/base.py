@@ -1,3 +1,9 @@
+"""SQLAlchemy Declarative Base。
+
+所有数据库 Model 都继承 Base，使 SQLAlchemy 和 Alembic 可以统一收集表结构。
+NAMING_CONVENTION 用于让索引、唯一约束、检查约束、外键和主键命名保持稳定。
+"""
+
 from sqlalchemy import MetaData
 from sqlalchemy.orm import DeclarativeBase
 
@@ -10,4 +16,6 @@ NAMING_CONVENTION = {
 }
 
 class Base(DeclarativeBase):
+    """项目所有 SQLAlchemy ORM Model 的基类。"""
+
     metadata = MetaData(naming_convention=NAMING_CONVENTION)

@@ -1,3 +1,9 @@
+"""纸面交易权益快照 Model。
+
+paper_trading_equity_snapshots 表保存虚拟账户每日现金、持仓市值和总权益。
+这些快照形成模拟盘权益曲线，不代表真实账户资产。
+"""
+
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -17,6 +23,8 @@ from app.models.base import Base
 
 
 class PaperTradingEquitySnapshot(Base):
+    """纸面交易权益快照表。"""
+
     __tablename__ = "paper_trading_equity_snapshots"
 
     __table_args__ = (
@@ -37,6 +45,7 @@ class PaperTradingEquitySnapshot(Base):
             "snapshot_date",
             name="uq_paper_trading_equity_snapshots_account_date",
         ),
+        # 同一账户同一天只保留一条权益快照，重复 tick 会更新已有快照。
         Index(
             "ix_paper_trading_equity_snapshots_account_date",
             "account_id",
@@ -46,6 +55,7 @@ class PaperTradingEquitySnapshot(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
+    # 权益快照归属于虚拟账户。
     account_id: Mapped[int] = mapped_column(
         ForeignKey("paper_trading_accounts.id", ondelete="CASCADE"),
         index=True,

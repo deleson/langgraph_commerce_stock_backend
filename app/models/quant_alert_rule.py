@@ -1,3 +1,9 @@
+"""量化提醒规则 Model。
+
+quant_alert_rules 表保存用户配置的提醒规则，例如策略信号、分数阈值、涨跌幅和数据质量。
+规则只产生研究提醒，不会触发真实交易。
+"""
+
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
@@ -21,6 +27,8 @@ from app.models.base import Base
 
 
 class QuantAlertRule(Base):
+    """量化提醒规则表。"""
+
     __tablename__ = "quant_alert_rules"
 
     __table_args__ = (
@@ -62,6 +70,7 @@ class QuantAlertRule(Base):
             "symbol",
             name="uq_quant_alert_rules_user_type_market_symbol",
         ),
+        # 规则查询最常按用户、状态、类型或股票过滤。
         Index("ix_quant_alert_rules_user_status", "user_id", "status"),
         Index("ix_quant_alert_rules_user_type", "user_id", "rule_type"),
         Index("ix_quant_alert_rules_user_symbol", "user_id", "market", "symbol"),
@@ -69,6 +78,7 @@ class QuantAlertRule(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
+    # 提醒规则属于用户私有配置，不能跨用户读取或执行。
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
         index=True,

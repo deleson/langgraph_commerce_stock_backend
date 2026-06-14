@@ -1,3 +1,9 @@
+"""纸面交易成交 Model。
+
+paper_trading_trades 表保存虚拟订单撮合出的模拟成交。
+成交用于更新模拟现金、持仓和权益快照，不代表真实市场成交。
+"""
+
 from datetime import datetime
 from decimal import Decimal
 
@@ -16,6 +22,8 @@ from app.models.base import Base
 
 
 class PaperTradingTrade(Base):
+    """纸面交易虚拟成交表。"""
+
     __tablename__ = "paper_trading_trades"
 
     __table_args__ = (
@@ -58,6 +66,7 @@ class PaperTradingTrade(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
+    # 成交归属于虚拟账户，是后续更新持仓和现金的依据。
     account_id: Mapped[int] = mapped_column(
         ForeignKey("paper_trading_accounts.id", ondelete="CASCADE"),
         index=True,

@@ -1,3 +1,9 @@
+"""用户偏好 Model。
+
+user_preferences 表保存风险偏好、时区和通知开关，
+会影响 AI 分析口径、候选评分和默认提醒行为。
+"""
+
 from datetime import datetime
 
 from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, String, func
@@ -7,6 +13,8 @@ from app.models.base import Base
 
 
 class UserPreference(Base):
+    """用户偏好表。"""
+
     __tablename__ = "user_preferences"
 
     __table_args__ = (
@@ -18,6 +26,7 @@ class UserPreference(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
+    # 每个用户当前只保留一份偏好配置。
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
         unique=True,

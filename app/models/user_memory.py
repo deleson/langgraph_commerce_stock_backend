@@ -1,3 +1,9 @@
+"""用户记忆 Model。
+
+user_memories 表保存用户偏好、关注股票、研究习惯和对话中抽取出的长期上下文。
+这些记忆只用于增强当前用户的 AI 分析体验，必须按 user_id 隔离。
+"""
+
 from datetime import datetime
 from typing import Any
 
@@ -8,6 +14,8 @@ from app.models.base import Base
 
 
 class UserMemory(Base):
+    """用户长期记忆表。"""
+
     __tablename__ = "user_memories"
 
     __table_args__ = (
@@ -77,6 +85,7 @@ class UserMemory(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
+    # 记忆属于用户隐私上下文，任何查询都必须限制当前用户。
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
         index=True,

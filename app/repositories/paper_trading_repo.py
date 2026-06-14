@@ -1,3 +1,10 @@
+"""纸面交易 Repository。
+
+本文件封装纸面交易账户、配置、运行记录、持仓、订单、成交和权益快照的数据访问。
+纸面交易只做虚拟模拟，不连接券商、不真实下单；Repository 只负责读写数据库，
+不判断策略信号、不计算成交、不更新资金曲线。
+"""
+
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
@@ -28,11 +35,9 @@ from app.schemas.paper_trading import (
 
 
 class AsyncPaperTradingRepository:
-    """Database access for paper trading accounts, positions, orders, trades, and equity snapshots.
+    """异步纸面交易数据访问对象。
 
-    Repository only reads and writes database rows.
-    It does not decide whether a strategy should buy or sell.
-    It does not calculate signals, holdings, cash, or returns.
+    账户及子资源查询需要通过 user_id 或账户 join 做隔离，避免用户访问其他人的模拟盘数据。
     """
 
     def __init__(self, db: AsyncSession) -> None:
@@ -64,6 +69,11 @@ class AsyncPaperTradingRepository:
         account_id: int,
         user_id: int,
     ) -> PaperTradingAccount | None:
+        """查询当前用户的纸面交易账户。
+
+        account_id 不是权限凭证，必须同时匹配 user_id。
+        """
+
         stmt = select(PaperTradingAccount).where(
             PaperTradingAccount.id == account_id,
             PaperTradingAccount.user_id == user_id,
@@ -105,6 +115,11 @@ class AsyncPaperTradingRepository:
         limit: int = 500,
         offset: int = 0,
     ) -> list[PaperTradingAccount]:
+        """查询所有活跃纸面交易账户。
+
+        该方法供定时任务批量推进 tick 使用，因此不按单个用户过滤。
+        """
+
         stmt = (
             select(PaperTradingAccount)
             .where(PaperTradingAccount.status == PaperTradingAccountStatus.ACTIVE)
@@ -180,6 +195,11 @@ class AsyncPaperTradingRepository:
         account_id: int,
         user_id: int,
     ) -> PaperTradingAccountConfig | None:
+        """查询当前用户某个账户的配置。
+
+        配置表本身没有 user_id，因此通过账户表 join 做归属校验。
+        """
+
         stmt = (
             select(PaperTradingAccountConfig)
             .join(
@@ -230,6 +250,11 @@ class AsyncPaperTradingRepository:
         *,
         account_id: int,
     ) -> PaperTradingAccountConfig:
+        """获取或创建账户默认配置。
+
+        默认配置保证新账户即使没有手动配置，也能进入受控 tick 流程。
+        """
+
         config = await self.get_account_config_by_account_id(
             account_id=account_id,
         )
@@ -247,6 +272,8 @@ class AsyncPaperTradingRepository:
         *,
         payload: PaperTradingRunCreate,
     ) -> PaperTradingRun:
+        """创建一次纸面交易 tick 的运行记录。"""
+
         run = PaperTradingRun(
             account_id=payload.account_id,
             source=payload.source,
@@ -267,6 +294,11 @@ class AsyncPaperTradingRepository:
         account_id: int,
         user_id: int,
     ) -> PaperTradingRun | None:
+        """查询当前用户某个账户下的运行记录。
+
+        run 属于账户子资源，需要 join 账户表确认 user_id。
+        """
+
         stmt = (
             select(PaperTradingRun)
             .join(
@@ -324,6 +356,8 @@ class AsyncPaperTradingRepository:
         user_id: int,
         query: PaperTradingListQuery,
     ) -> list[PaperTradingRun]:
+        """分页查询当前用户某个账户的 tick 运行记录。"""
+
         stmt = (
             select(PaperTradingRun)
             .join(
@@ -408,6 +442,8 @@ class AsyncPaperTradingRepository:
         user_id: int,
         query: PaperTradingListQuery,
     ) -> list[PaperTradingPosition]:
+        """分页查询当前用户某个账户的模拟持仓。"""
+
         stmt = (
             select(PaperTradingPosition)
             .join(
@@ -504,6 +540,11 @@ class AsyncPaperTradingRepository:
         self,
         payload: PaperTradingOrderCreate,
     ) -> PaperTradingOrder:
+        """创建模拟订单。
+
+        订单只是纸面交易内部记录，不会发送到真实券商。
+        """
+
         order = PaperTradingOrder(
             account_id=payload.account_id,
             symbol=payload.symbol,
@@ -554,6 +595,8 @@ class AsyncPaperTradingRepository:
         user_id: int,
         query: PaperTradingListQuery,
     ) -> list[PaperTradingOrder]:
+        """分页查询当前用户某个账户的模拟订单。"""
+
         stmt = (
             select(PaperTradingOrder)
             .join(
@@ -636,6 +679,11 @@ class AsyncPaperTradingRepository:
         fee_amount: Decimal,
         traded_at: datetime,
     ) -> PaperTradingTrade:
+        """创建模拟成交记录。
+
+        成交价格和数量由 Service 层计算，Repository 只负责落库。
+        """
+
         trade = PaperTradingTrade(
             account_id=account_id,
             order_id=order_id,
@@ -661,6 +709,8 @@ class AsyncPaperTradingRepository:
         user_id: int,
         query: PaperTradingListQuery,
     ) -> list[PaperTradingTrade]:
+        """分页查询当前用户某个账户的模拟成交。"""
+
         stmt = (
             select(PaperTradingTrade)
             .join(
@@ -712,6 +762,11 @@ class AsyncPaperTradingRepository:
         daily_return: Decimal | None,
         max_drawdown: Decimal | None,
     ) -> PaperTradingEquitySnapshot:
+        """创建权益快照。
+
+        快照保存某一日现金、持仓市值、总权益、收益率和回撤，用于绘制模拟盘权益曲线。
+        """
+
         snapshot = PaperTradingEquitySnapshot(
             account_id=account_id,
             snapshot_date=snapshot_date,
@@ -771,6 +826,8 @@ class AsyncPaperTradingRepository:
         user_id: int,
         query: PaperTradingListQuery,
     ) -> list[PaperTradingEquitySnapshot]:
+        """分页查询当前用户某个账户的权益快照。"""
+
         stmt = (
             select(PaperTradingEquitySnapshot)
             .join(

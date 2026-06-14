@@ -1,3 +1,9 @@
+"""用户会话 Repository。
+
+本文件封装 user_sessions 表的数据访问，用于 refresh token 会话创建、查询和撤销。
+真实 token 明文不会落库，数据库中只保存 refresh_token_hash。
+"""
+
 from datetime import datetime
 
 from sqlalchemy import select
@@ -8,6 +14,8 @@ from app.models.user_session import UserSession
 
 
 class UserSessionRepository:
+    """同步用户会话数据访问对象。"""
+
     def __init__(self, db: Session) -> None:
         self.db = db
 
@@ -50,6 +58,11 @@ class UserSessionRepository:
 
 
 class AsyncUserSessionRepository:
+    """异步用户会话数据访问对象。
+
+    只负责会话记录读写；token 生成、黑名单和过期校验由 Service/Core 层处理。
+    """
+
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 

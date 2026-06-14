@@ -1,3 +1,9 @@
+"""通知 Repository。
+
+本文件封装 notifications 表的数据访问，包括通知列表、详情、创建和已读状态更新。
+通知属于用户私有资源，查询详情和批量已读都必须以 user_id 作为边界。
+"""
+
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -8,6 +14,8 @@ from app.models.notification import Notification
 
 
 class NotificationRepository:
+    """同步通知数据访问对象。"""
+
     def __init__(self, db: Session) -> None:
         self.db = db
 
@@ -80,6 +88,11 @@ class NotificationRepository:
         return len(notifications)
 
 class AsyncNotificationRepository:
+    """异步通知数据访问对象。
+
+    只负责通知记录读写；通知内容何时生成由分析、日报、提醒等 Service 决定。
+    """
+
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 

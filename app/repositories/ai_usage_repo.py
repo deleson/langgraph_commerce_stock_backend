@@ -1,3 +1,9 @@
+"""AI 用量 Repository。
+
+本文件封装 AI 调用日志、额度账户和周期用量汇总的数据访问。
+它支撑成本追踪、额度检查和审计，但不直接调用 LLM。
+"""
+
 from datetime import date
 from decimal import Decimal
 
@@ -17,6 +23,8 @@ from app.schemas.ai_usage import (
 
 
 class AsyncAIUsageRepository:
+    """异步 AI 用量数据访问对象。"""
+
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
@@ -36,6 +44,11 @@ class AsyncAIUsageRepository:
         user_id: int,
         query: AIUsageQuery,
     ) -> list[AIUsageLog]:
+        """按用户和筛选条件查询 AI 调用日志。
+
+        user_id 是审计边界，用户不能查看其他用户的 token 和成本记录。
+        """
+
         stmt = select(AIUsageLog).where(AIUsageLog.user_id == user_id)
 
         if query.feature is not None:
@@ -110,6 +123,11 @@ class AsyncAIUsageRepository:
         *,
         user_id: int,
     ) -> AIQuotaAccount:
+        """获取或创建用户额度账户。
+
+        额度账户是后续 stock_analysis、ReAct、日报 AI 等功能的成本控制基础。
+        """
+
         existing = await self.get_quota_account(user_id=user_id)
         if existing is not None:
             return existing
@@ -184,6 +202,11 @@ class AsyncAIUsageRepository:
         total_tokens: int,
         estimated_cost,
     ) -> AIUsageSummary:
+        """累加周期用量汇总。
+
+        成功、失败、被阻断都会进入调用次数统计，便于后续评估真实 AI 成本。
+        """
+
         summary.call_count += 1
 
         if status == "success":

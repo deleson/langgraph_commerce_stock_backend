@@ -1,3 +1,9 @@
+"""AI 分析记录 Repository。
+
+本文件封装 analysis_records 表的数据访问。analysis_thread_id 是主分析、普通追问
+和 ReAct 追问之间的连接键，但查询时仍必须带 user_id 防止跨用户访问。
+"""
+
 from typing import Any
 
 from sqlalchemy import select
@@ -8,6 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class AnalysisRecordRepository:
+    """同步分析记录数据访问对象。"""
+
     def __init__(self, db: Session) -> None:
         self.db = db
 
@@ -37,6 +45,11 @@ class AnalysisRecordRepository:
         thread_id: str,
         user_id: int,
     ) -> AnalysisRecord | None:
+        """按分析线程查询当前用户最新分析记录。
+
+        thread_id 不是权限凭证，必须和 user_id 一起使用。
+        """
+
         stmt = (
             select(AnalysisRecord)
             .where(
@@ -84,6 +97,8 @@ class AnalysisRecordRepository:
 
 
 class AsyncAnalysisRecordRepository:
+    """异步分析记录数据访问对象。"""
+
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
@@ -115,6 +130,8 @@ class AsyncAnalysisRecordRepository:
         thread_id: str,
         user_id: int,
     ) -> AnalysisRecord | None:
+        """按分析线程查询当前用户最新分析记录。"""
+
         stmt = (
             select(AnalysisRecord)
             .where(

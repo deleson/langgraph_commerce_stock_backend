@@ -1,3 +1,9 @@
+"""用户偏好 Repository。
+
+本文件封装 user_preferences 表的数据访问。每个用户通常只有一份偏好配置，
+Service 层会在需要时获取或创建默认偏好。
+"""
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
@@ -6,6 +12,8 @@ from app.models.user_preference import UserPreference
 
 
 class UserPreferenceRepository:
+    """同步用户偏好数据访问对象。"""
+
     def __init__(self, db: Session) -> None:
         self.db = db
 
@@ -41,6 +49,11 @@ class UserPreferenceRepository:
 
 
 class AsyncUserPreferenceRepository:
+    """异步用户偏好数据访问对象。
+
+    Repository 只保存偏好字段，不决定这些偏好如何影响日报、提醒或候选评分。
+    """
+
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 

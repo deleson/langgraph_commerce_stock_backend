@@ -1,3 +1,9 @@
+"""用户记忆 Repository。
+
+本文件封装 user_memories 和 user_profiles 的数据访问。用户记忆会影响后续 AI 上下文和用户画像，
+因此所有查询都必须以 user_id 作为隔离边界，不能跨用户复用记忆。
+"""
+
 from datetime import datetime, timezone
 
 from sqlalchemy import func, or_, select
@@ -15,6 +21,8 @@ from app.schemas.user_memory import (
 
 
 class AsyncUserMemoryRepository:
+    """异步用户记忆数据访问对象。"""
+
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
@@ -84,6 +92,11 @@ class AsyncUserMemoryRepository:
         include_expired: bool = False,
         limit: int = 200,
     ) -> list[UserMemory]:
+        """查询可用于画像聚合的活跃记忆。
+
+        默认排除已过期记忆，避免旧偏好长期影响用户画像。
+        """
+
         stmt = select(UserMemory).where(
             UserMemory.user_id == user_id,
             UserMemory.status == "active",
@@ -156,6 +169,11 @@ class AsyncUserMemoryRepository:
         *,
         user_id: int,
     ) -> UserProfile:
+        """获取或创建用户画像记录。
+
+        画像是一类按用户聚合的长期上下文，创建时只能绑定当前 user_id。
+        """
+
         existing = await self.get_profile(user_id=user_id)
         if existing is not None:
             return existing
@@ -184,6 +202,8 @@ class AsyncUserMemoryRepository:
         user_id: int,
         query: UserMemoryListQuery,
     ):
+        """为用户记忆列表和计数复用同一套筛选条件。"""
+
         stmt = stmt.where(UserMemory.user_id == user_id)
 
         if not query.include_inactive:

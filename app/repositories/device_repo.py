@@ -1,3 +1,9 @@
+"""设备 Repository。
+
+本文件封装 devices 表的数据访问，用于记录用户的推送设备和设备活跃状态。
+设备 token 只能在当前用户范围内查询，避免把推送能力串到其他用户。
+"""
+
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -8,6 +14,8 @@ from app.models.device import Device
 
 
 class DeviceRepository:
+    """同步设备数据访问对象。"""
+
     def __init__(self, db: Session) -> None:
         self.db = db
 
@@ -80,6 +88,8 @@ class DeviceRepository:
         return device
 
 class AsyncDeviceRepository:
+    """异步设备数据访问对象。"""
+
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 

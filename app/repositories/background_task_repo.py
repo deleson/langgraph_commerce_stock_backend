@@ -1,3 +1,9 @@
+"""后台任务 Repository。
+
+本文件封装 background_tasks 表的数据访问，是 API 提交任务与 Celery Worker 执行任务之间的持久化连接点。
+Repository 只负责任务记录和状态流转，不直接执行任务业务。
+"""
+
 from datetime import datetime, timezone
 from typing import Any
 
@@ -12,6 +18,8 @@ from app.schemas.background_task import (
 
 
 class AsyncBackgroundTaskRepository:
+    """异步后台任务数据访问对象。"""
+
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
@@ -64,6 +72,11 @@ class AsyncBackgroundTaskRepository:
         query: BackgroundTaskListQuery,
         user_id: int | None = None,
     ) -> list[BackgroundTask]:
+        """分页查询后台任务列表。
+
+        user_id 为空时通常用于系统内部查询；用户接口必须传入 user_id 做隔离。
+        """
+
         stmt = select(BackgroundTask)
 
         if user_id is not None:
@@ -139,6 +152,8 @@ class AsyncBackgroundTaskRepository:
         task: BackgroundTask,
         result: dict[str, Any] | None = None,
     ) -> BackgroundTask:
+        """把任务标记为成功并保存执行结果。"""
+
         finished_at = self._now()
 
         task.status = "success"
@@ -162,6 +177,8 @@ class AsyncBackgroundTaskRepository:
         error_message: str,
         result: dict[str, Any] | None = None,
     ) -> BackgroundTask:
+        """把任务标记为失败并记录错误信息。"""
+
         finished_at = self._now()
 
         task.status = "failed"

@@ -1,3 +1,9 @@
+"""自选股 Repository。
+
+本文件封装 watchlist_items 表的数据访问。自选股属于用户私有资源，
+所有详情查询、更新和删除都必须带 user_id，避免跨用户读取。
+"""
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -5,6 +11,8 @@ from app.models.watchlist_item import WatchlistItem
 
 
 class WatchlistRepository:
+    """同步自选股数据访问对象。"""
+
     def __init__(self, db: Session) -> None:
         self.db = db
 
@@ -17,6 +25,11 @@ class WatchlistRepository:
         return list(self.db.execute(stmt).scalars().all())
 
     def get_by_id_for_user(self, *, item_id: int, user_id: int) -> WatchlistItem | None:
+        """按资源 id 和当前用户 id 查询自选股。
+
+        不能只按 item_id 查询，否则用户可能通过猜测 id 访问别人的自选股。
+        """
+
         stmt = select(WatchlistItem).where(
             WatchlistItem.id == item_id,
             WatchlistItem.user_id == user_id,
@@ -72,6 +85,8 @@ class WatchlistRepository:
 
 
 class AsyncWatchlistRepository:
+    """异步自选股数据访问对象。"""
+
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
@@ -90,6 +105,8 @@ class AsyncWatchlistRepository:
         item_id: int,
         user_id: int,
     ) -> WatchlistItem | None:
+        """按资源 id 和当前用户 id 查询自选股。"""
+
         stmt = select(WatchlistItem).where(
             WatchlistItem.id == item_id,
             WatchlistItem.user_id == user_id,

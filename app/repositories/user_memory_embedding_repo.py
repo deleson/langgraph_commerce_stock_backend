@@ -1,3 +1,9 @@
+"""用户记忆向量 Repository。
+
+本文件封装 user_memory_embeddings 表的数据访问。向量用于记忆检索，但仍然必须按 user_id 隔离，
+避免把一个用户的长期偏好或历史对话暴露给另一个用户。
+"""
+
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select
@@ -12,6 +18,8 @@ from app.schemas.user_memory_embedding import (
 
 
 class AsyncUserMemoryEmbeddingRepository:
+    """异步用户记忆向量数据访问对象。"""
+
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
@@ -112,6 +120,11 @@ class AsyncUserMemoryEmbeddingRepository:
         include_inactive: bool = False,
         limit: int = 500,
     ) -> list[UserMemoryEmbedding]:
+        """查询可用于相似度检索的记忆向量。
+
+        检索候选只来自当前 user_id，保证用户记忆不会跨账号混用。
+        """
+
         stmt = select(UserMemoryEmbedding).where(
             UserMemoryEmbedding.user_id == user_id,
         )
@@ -167,6 +180,8 @@ class AsyncUserMemoryEmbeddingRepository:
         user_id: int,
         memory_id: int,
     ) -> int:
+        """当记忆内容变化时，将对应向量标记为 stale。"""
+
         embeddings = await self.list_embeddings_by_memory_ids(
             user_id=user_id,
             memory_ids=[memory_id],
@@ -259,6 +274,8 @@ class AsyncUserMemoryEmbeddingRepository:
         user_id: int,
         query: UserMemoryEmbeddingListQuery,
     ):
+        """为向量列表和计数复用筛选条件。"""
+
         stmt = stmt.where(UserMemoryEmbedding.user_id == user_id)
 
         if not query.include_inactive:

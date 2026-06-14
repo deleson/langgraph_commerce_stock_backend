@@ -1,3 +1,9 @@
+"""行情同步 Repository。
+
+本文件封装行情同步状态和同步日志的数据访问。状态表记录某个股票当前最新同步结果，
+日志表记录每一次同步过程，二者一起支撑生产排查和数据质量追踪。
+"""
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +20,8 @@ from app.schemas.market_data_sync import (
 
 
 class AsyncMarketDataSyncRepository:
+    """异步行情同步数据访问对象。"""
+
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
@@ -94,6 +102,11 @@ class AsyncMarketDataSyncRepository:
         self,
         payload: MarketDataSyncStatusCreate,
     ) -> MarketDataSyncStatus:
+        """创建或更新某个行情维度的同步状态。
+
+        symbol、market、timeframe、source、adjust_type 共同决定一条状态记录。
+        """
+
         existing = await self.get_status(
             symbol=payload.symbol,
             market=payload.market,
@@ -179,6 +192,8 @@ class AsyncMarketDataSyncRepository:
         source: str,
         adjust_type: str,
     ) -> MarketDataSyncLog | None:
+        """查询某个行情维度最近一次同步日志。"""
+
         stmt = (
             select(MarketDataSyncLog)
             .where(

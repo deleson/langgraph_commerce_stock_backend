@@ -1,3 +1,9 @@
+"""行情 Repository。
+
+本文件封装 market_symbols 和 market_candles 的数据访问。K 线查询必须区分
+market、symbol、timeframe、source 和 adjust_type，否则技术指标、回测和策略信号会混用数据。
+"""
+
 from collections.abc import Sequence
 
 from sqlalchemy import select
@@ -14,6 +20,8 @@ from app.schemas.market_data import (
 
 
 class AsyncMarketRepository:
+    """异步行情数据访问对象。"""
+
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
@@ -87,6 +95,8 @@ class AsyncMarketRepository:
         self,
         payload: MarketSymbolCreate,
     ) -> MarketSymbol:
+        """按 market + symbol 创建或更新股票基础信息。"""
+
         existing = await self.get_symbol(
             symbol=payload.symbol,
             market=payload.market,
@@ -130,6 +140,11 @@ class AsyncMarketRepository:
         self,
         query: MarketCandleQuery,
     ) -> list[MarketCandle]:
+        """按查询条件读取最近 K 线，并按时间升序返回。
+
+        数据库先倒序取最近 N 条，再反转为升序，方便指标计算和回测按时间推进。
+        """
+
         stmt = select(MarketCandle).where(
             MarketCandle.symbol == query.symbol,
             MarketCandle.market == query.market,
@@ -189,6 +204,11 @@ class AsyncMarketRepository:
         self,
         payload: MarketCandleCreate,
     ) -> MarketCandle:
+        """按唯一业务键创建或更新单根 K 线。
+
+        唯一键包含 source 和 adjust_type，避免不同数据源或复权口径互相覆盖。
+        """
+
         existing = await self.get_candle(
             symbol=payload.symbol,
             market=payload.market,

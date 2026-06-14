@@ -1,3 +1,9 @@
+"""量化提醒 Repository。
+
+本文件封装 quant_alert_rules 和 quant_alert_events 的数据访问。
+规则表示用户配置的提醒条件，事件表示某次扫描触发的结果；二者都只作为研究提醒，不代表真实交易指令。
+"""
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,10 +21,9 @@ from app.schemas.quant_alert import (
 
 
 class AsyncQuantAlertRepository:
-    """Database access for quant alert rules and triggered alert events.
+    """异步量化提醒数据访问对象。
 
-    Repository only reads and writes database rows. It does not decide whether
-    an alert should trigger, and it does not create notifications.
+    Repository 只读写规则和事件，不判断是否触发，也不创建通知。
     """
 
     def __init__(self, db: AsyncSession) -> None:
@@ -108,6 +113,11 @@ class AsyncQuantAlertRepository:
         market: str | None = None,
         symbol: str | None = None,
     ) -> list[QuantAlertRule]:
+        """查询当前用户可参与本次扫描的活跃规则。
+
+        全市场规则的 market/symbol 可以为空；具体股票扫描时会同时匹配通用规则和指定规则。
+        """
+
         stmt = select(QuantAlertRule).where(
             QuantAlertRule.user_id == user_id,
             QuantAlertRule.status == QuantAlertRuleStatus.ACTIVE,
@@ -194,6 +204,11 @@ class AsyncQuantAlertRepository:
         user_id: int,
         dedup_key: str,
     ) -> QuantAlertEvent | None:
+        """按去重键查询提醒事件。
+
+        dedup_key 用于避免同一用户、同一规则、同一交易日重复生成相同事件。
+        """
+
         stmt = select(QuantAlertEvent).where(
             QuantAlertEvent.user_id == user_id,
             QuantAlertEvent.dedup_key == dedup_key,
@@ -278,6 +293,8 @@ class AsyncQuantAlertRepository:
         user_id: int,
         query: QuantAlertRuleListQuery,
     ):
+        """为规则列表和计数复用筛选条件。"""
+
         stmt = stmt.where(QuantAlertRule.user_id == user_id)
 
         if not query.include_inactive:
@@ -304,6 +321,8 @@ class AsyncQuantAlertRepository:
         user_id: int,
         query: QuantAlertEventListQuery,
     ):
+        """为事件列表和计数复用筛选条件。"""
+
         stmt = stmt.where(QuantAlertEvent.user_id == user_id)
 
         if query.rule_type is not None:

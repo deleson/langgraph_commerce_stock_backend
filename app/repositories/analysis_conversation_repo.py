@@ -1,3 +1,9 @@
+"""分析会话 Repository。
+
+本文件封装普通追问消息、ReAct 工具消息和 ReAct trace 的数据访问。
+这些数据用于恢复多轮上下文和审计工具调用，必须始终限制在当前 user_id 内。
+"""
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +18,8 @@ from app.schemas.analysis_conversation import (
 
 
 class AsyncAnalysisConversationRepository:
+    """异步分析会话数据访问对象。"""
+
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
@@ -21,6 +29,11 @@ class AsyncAnalysisConversationRepository:
         user_id: int,
         analysis_thread_id: str,
     ) -> int:
+        """获取当前用户某个分析线程的下一条消息序号。
+
+        sequence_no 用于按时间顺序恢复对话上下文，查询必须带 user_id。
+        """
+
         stmt = select(func.max(AnalysisConversationMessage.sequence_no)).where(
             AnalysisConversationMessage.user_id == user_id,
             AnalysisConversationMessage.analysis_thread_id == analysis_thread_id,
@@ -94,6 +107,8 @@ class AsyncAnalysisConversationRepository:
         analysis_thread_id: str,
         limit: int = 10,
     ) -> list[AnalysisConversationMessage]:
+        """读取最近上下文消息，供普通追问或 ReAct 继续对话使用。"""
+
         safe_limit = max(1, min(limit, 20))
 
         stmt = (
@@ -144,6 +159,11 @@ class AsyncAnalysisConversationRepository:
         user_id: int,
         query: AnalysisReactTraceQuery,
     ) -> list[AnalysisReactTrace]:
+        """查询 ReAct trace。
+
+        trace 是工具调用审计记录，用于解释模型为什么调用某个工具以及工具返回了什么。
+        """
+
         stmt = select(AnalysisReactTrace).where(
             AnalysisReactTrace.user_id == user_id,
             AnalysisReactTrace.analysis_thread_id == query.analysis_thread_id,

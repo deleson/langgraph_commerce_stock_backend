@@ -1,3 +1,9 @@
+"""每日简报 Repository。
+
+本文件封装 daily_reports 表的数据访问。日报属于用户私有研究结果，
+查询列表、详情和同日记录时都必须带 user_id。
+"""
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,6 +16,11 @@ from app.schemas.daily_report import (
 
 
 class AsyncDailyReportRepository:
+    """异步每日简报数据访问对象。
+
+    Repository 只保存确定性日报结果和 AI 润色状态，不决定日报内容如何生成。
+    """
+
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
@@ -45,6 +56,11 @@ class AsyncDailyReportRepository:
         user_id: int,
         report_date,
     ) -> DailyReport | None:
+        """查询当前用户某一天的日报。
+
+        同一天重复生成时，Service 层会基于这条记录决定复用或重建。
+        """
+
         stmt = select(DailyReport).where(
             DailyReport.user_id == user_id,
             DailyReport.report_date == report_date,
@@ -125,6 +141,8 @@ class AsyncDailyReportRepository:
         user_id: int,
         query: DailyReportListQuery,
     ):
+        """为日报列表和计数复用同一套筛选条件。"""
+
         stmt = stmt.where(DailyReport.user_id == user_id)
 
         if query.start_date is not None:

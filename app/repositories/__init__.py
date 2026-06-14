@@ -1,3 +1,9 @@
+"""Repository 统一导出口。
+
+Repository 层负责封装数据库访问细节，Service 层通过这里集中导入各业务仓库。
+本文件只维护导入和 __all__，不承载具体查询逻辑。
+"""
+
 from app.repositories.analysis_record_repo import AnalysisRecordRepository
 from app.repositories.device_repo import DeviceRepository
 from app.repositories.notification_repo import NotificationRepository

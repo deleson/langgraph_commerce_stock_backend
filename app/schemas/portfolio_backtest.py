@@ -1,3 +1,9 @@
+"""组合回测 Schema。
+
+组合回测用于模拟多资产目标权重、调仓和组合权益曲线。
+它是研究工具，不代表真实组合收益，也不构成投资建议。
+"""
+
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Literal
@@ -46,6 +52,8 @@ PortfolioBacktestRebalanceFrequency = Literal[
 
 
 class PortfolioBacktestAsset(BaseModel):
+    """组合回测中的单个资产配置。"""
+
     symbol: str = Field(min_length=1, max_length=20, examples=["600519"])
     market: MarketCode = Field(examples=["CN"])
     target_weight: Decimal = Field(gt=0, le=1)
@@ -59,6 +67,8 @@ class PortfolioBacktestAsset(BaseModel):
 
 
 class PortfolioBacktestRequest(BaseModel):
+    """组合回测请求体。"""
+
     assets: list[PortfolioBacktestAsset] = Field(min_length=2, max_length=20)
     start_date: date
     end_date: date
@@ -114,6 +124,8 @@ class PortfolioBacktestRequest(BaseModel):
 
 
 class PortfolioBacktestTrade(BaseModel):
+    """组合回测中的一笔模拟交易。"""
+
     sequence_no: int = Field(ge=1)
     symbol: str = Field(min_length=1, max_length=20)
     market: MarketCode
@@ -153,6 +165,8 @@ class PortfolioBacktestTrade(BaseModel):
 
 
 class PortfolioBacktestPositionSnapshot(BaseModel):
+    """组合回测某日单资产持仓快照。"""
+
     symbol: str = Field(min_length=1, max_length=20)
     market: MarketCode
 
@@ -175,6 +189,8 @@ class PortfolioBacktestPositionSnapshot(BaseModel):
 
 
 class PortfolioBacktestDailyEquity(BaseModel):
+    """组合回测单日权益曲线节点。"""
+
     trade_date: date
 
     cash: Decimal = Field(ge=0)
@@ -188,6 +204,8 @@ class PortfolioBacktestDailyEquity(BaseModel):
 
 
 class PortfolioBacktestMetrics(BaseModel):
+    """组合回测绩效指标汇总。"""
+
     initial_cash: Decimal = Field(gt=0)
     final_equity: Decimal = Field(ge=0)
 
@@ -218,6 +236,8 @@ class PortfolioBacktestMetrics(BaseModel):
 
 
 class PortfolioBacktestInputSnapshot(BaseModel):
+    """组合回测输入参数和数据范围快照。"""
+
     asset_count: int = Field(ge=0)
     candle_count_by_symbol: dict[str, int] = Field(default_factory=dict)
 
@@ -240,6 +260,8 @@ class PortfolioBacktestInputSnapshot(BaseModel):
 
 
 class PortfolioBacktestResponse(BaseModel):
+    """组合回测响应体。"""
+
     assets: list[PortfolioBacktestAsset] = Field(default_factory=list)
     start_date: date
     end_date: date

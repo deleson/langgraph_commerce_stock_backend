@@ -1,3 +1,9 @@
+"""个股 AI 主分析 Schema。
+
+本文件定义主分析请求、市场快照、指标快照、质量上下文、图状态和响应结构。
+真实数据加载、质量路由和 DeepSeek 调用在 Service / LangGraph 节点中完成。
+"""
+
 from datetime import datetime
 from typing import Any, Literal
 
@@ -15,6 +21,8 @@ GraphRoute = Literal["normal", "degraded", "unavailable", "error", "quota_blocke
 
 
 class StockAnalysisRequest(BaseModel):
+    """个股 AI 分析请求体。"""
+
     symbol: str = Field(min_length=1, max_length=20, examples=["AAPL"])
     market: MarketCode = Field(examples=["US"])
     analysis_type: AnalysisType = Field(default="stock_basic")
@@ -40,6 +48,8 @@ class StockAnalysisRequest(BaseModel):
 
 
 class MarketSnapshot(BaseModel):
+    """主分析图使用的行情快照。"""
+
     symbol: str
     market: MarketCode
     name: str | None = None
@@ -54,6 +64,8 @@ class MarketSnapshot(BaseModel):
 
 
 class IndicatorSnapshot(BaseModel):
+    """主分析图兼容早期逻辑的基础指标快照。"""
+
     price_change: float
     price_change_percent: float
     moving_average_5: float
@@ -63,6 +75,8 @@ class IndicatorSnapshot(BaseModel):
 
 
 class StockAnalysisResult(BaseModel):
+    """LLM 结构化分析结果。"""
+
     summary: str
     risk_level: RiskLevel
     trend: TrendDirection
@@ -72,6 +86,8 @@ class StockAnalysisResult(BaseModel):
 
 
 class StockAnalysisQualityContext(BaseModel):
+    """主分析图的数据质量上下文。"""
+
     data_quality: MarketDataQualityReport | None = None
     graph_route: GraphRoute | None = None
     route_reason: str | None = Field(default=None, max_length=500)
@@ -80,6 +96,8 @@ class StockAnalysisQualityContext(BaseModel):
 
 
 class StockAnalysisContextSnapshot(BaseModel):
+    """主分析图执行过程的上下文快照。"""
+
     thread_id: str
     user_id: int
     symbol: str
@@ -107,6 +125,8 @@ class StockAnalysisContextSnapshot(BaseModel):
 
 
 class StockAnalysisResponse(BaseModel):
+    """个股 AI 主分析响应体。"""
+
     record_id: int | None = None
     thread_id: str | None = None
     symbol: str
@@ -124,6 +144,11 @@ class StockAnalysisResponse(BaseModel):
 
 
 class StockAnalysisFollowUpRequest(BaseModel):
+    """普通追问请求体。
+
+    普通追问基于已有分析线程回答，不执行 ReAct 工具循环。
+    """
+
     thread_id: str = Field(
         min_length=1,
         max_length=100,
@@ -144,6 +169,8 @@ class StockAnalysisFollowUpRequest(BaseModel):
 
 
 class StockAnalysisFollowUpResponse(BaseModel):
+    """普通追问响应体。"""
+
     thread_id: str
     answer: str
     referenced_analysis_record_id: int | None = None
@@ -153,6 +180,8 @@ class StockAnalysisFollowUpResponse(BaseModel):
 
 
 class StockAnalysisGraphState(BaseModel):
+    """主分析 LangGraph 的状态结构。"""
+
     user_id: int
     symbol: str
     market: MarketCode

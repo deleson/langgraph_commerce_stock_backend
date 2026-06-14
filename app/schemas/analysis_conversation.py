@@ -1,3 +1,9 @@
+"""分析会话与 ReAct Trace Schema。
+
+本文件定义普通追问、ReAct 追问、工具 Observation 和推理轨迹的持久化结构。
+这些结构用于审计 AI 如何回答、是否调用工具以及工具返回了什么。
+"""
+
 from datetime import datetime
 from typing import Any, Literal
 
@@ -22,6 +28,8 @@ ConversationSource = Literal[
 
 
 class AnalysisConversationMessageCreate(BaseModel):
+    """创建一条分析会话消息的数据结构。"""
+
     user_id: int
     analysis_record_id: int | None = None
     analysis_thread_id: str = Field(min_length=1, max_length=120)
@@ -41,6 +49,8 @@ class AnalysisConversationMessageCreate(BaseModel):
 
 
 class AnalysisConversationMessageResponse(BaseModel):
+    """分析会话消息响应体。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -57,6 +67,8 @@ class AnalysisConversationMessageResponse(BaseModel):
 
 
 class AnalysisConversationMessageQuery(BaseModel):
+    """分析会话消息查询条件。"""
+
     analysis_thread_id: str = Field(min_length=1, max_length=120)
     role: ConversationRole | None = None
     message_type: ConversationMessageType | None = None
@@ -71,6 +83,8 @@ class AnalysisConversationMessageQuery(BaseModel):
 
 
 class AnalysisConversationContextMessage(BaseModel):
+    """传给追问服务或图节点使用的上下文消息。"""
+
     role: ConversationRole
     content: str | None = None
     payload: dict[str, Any] | None = None
@@ -79,12 +93,16 @@ class AnalysisConversationContextMessage(BaseModel):
 
 
 class AnalysisConversationContext(BaseModel):
+    """某个分析线程的会话上下文。"""
+
     analysis_thread_id: str
     messages: list[AnalysisConversationContextMessage] = Field(default_factory=list)
     message_count: int = 0
 
 
 class AnalysisReactTraceCreate(BaseModel):
+    """创建 ReAct 推理轨迹的数据结构。"""
+
     user_id: int
     analysis_record_id: int | None = None
     analysis_thread_id: str = Field(min_length=1, max_length=120)
@@ -109,6 +127,8 @@ class AnalysisReactTraceCreate(BaseModel):
 
 
 class AnalysisReactTraceResponse(BaseModel):
+    """ReAct 推理轨迹响应体。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -129,6 +149,8 @@ class AnalysisReactTraceResponse(BaseModel):
 
 
 class AnalysisReactTraceQuery(BaseModel):
+    """ReAct 推理轨迹查询条件。"""
+
     analysis_thread_id: str = Field(min_length=1, max_length=120)
     react_graph_checkpoint_id: str | None = Field(default=None, max_length=160)
     tool_name: ReactToolName | None = None

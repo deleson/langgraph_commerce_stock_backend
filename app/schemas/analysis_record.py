@@ -1,3 +1,9 @@
+"""AI 分析记录 Schema。
+
+分析记录保存一次主分析或相关分析任务的结果快照。
+它用于历史查询、追问引用和审计，不负责实际调用 LLM。
+"""
+
 from datetime import datetime
 from typing import Any, Literal
 
@@ -10,6 +16,8 @@ AnalysisStatus = Literal["pending", "running", "completed", "failed"]
 
 
 class AnalysisRecordCreateRequest(BaseModel):
+    """创建分析记录的数据结构。"""
+
     symbol: str = Field(min_length=1, max_length=20)
     market: MarketCode
     analysis_type: AnalysisType = "stock_basic"
@@ -28,6 +36,8 @@ class AnalysisRecordCreateRequest(BaseModel):
 
 
 class AnalysisRecordResponse(BaseModel):
+    """分析记录响应体。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int

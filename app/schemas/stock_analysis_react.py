@@ -1,3 +1,9 @@
+"""个股分析 ReAct 追问 Schema。
+
+ReAct 追问允许 LLM 在白名单工具范围内读取后端上下文，
+并通过 observations 与 trace 记录工具调用过程，便于审计和排错。
+"""
+
 from datetime import datetime
 from typing import Any, Literal
 
@@ -24,6 +30,8 @@ ReactActionType = Literal[
 
 
 class ReactToolCall(BaseModel):
+    """ReAct 图中一次工具调用计划。"""
+
     tool_name: ReactToolName
     tool_input: dict[str, Any] = Field(default_factory=dict)
     reason: str | None = Field(
@@ -34,6 +42,8 @@ class ReactToolCall(BaseModel):
 
 
 class ReactObservation(BaseModel):
+    """ReAct 工具执行后的观察结果。"""
+
     tool_name: ReactToolName
     tool_input: dict[str, Any] = Field(default_factory=dict)
     tool_output: dict[str, Any] | list[Any] | str | None = None
@@ -43,6 +53,8 @@ class ReactObservation(BaseModel):
 
 
 class ReactToolTrace(BaseModel):
+    """ReAct 推理或工具执行的单步轨迹。"""
+
     step: int = Field(ge=1)
     action: ReactActionType
     tool_name: ReactToolName | None = None
@@ -52,6 +64,8 @@ class ReactToolTrace(BaseModel):
     error_message: str | None = Field(default=None, max_length=1000)
 
 class StockAnalysisReactFollowUpRequest(BaseModel):
+    """ReAct 工具增强追问请求体。"""
+
     analysis_thread_id: str = Field(
         min_length=1,
         max_length=120,
@@ -78,6 +92,8 @@ class StockAnalysisReactFollowUpRequest(BaseModel):
 
 
 class StockAnalysisReactFollowUpResponse(BaseModel):
+    """ReAct 工具增强追问响应体。"""
+
     analysis_thread_id: str
     react_graph_checkpoint_id: str | None = None
     answer: str
@@ -91,6 +107,8 @@ class StockAnalysisReactFollowUpResponse(BaseModel):
 
 
 class StockAnalysisReactGraphState(BaseModel):
+    """ReAct LangGraph 的状态结构。"""
+
     analysis_thread_id: str
     react_graph_checkpoint_id: str | None = None
     user_id: int

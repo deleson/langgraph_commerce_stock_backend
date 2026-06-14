@@ -1,3 +1,9 @@
+"""Schema 统一导出入口。
+
+本文件集中导出各业务模块的 Pydantic Schema，方便 Router、Service 和测试统一引用。
+这里不写业务逻辑，也不进行字段校验以外的处理。
+"""
+
 from app.schemas.analysis_record import (
     AnalysisRecordCreateRequest,
     AnalysisRecordResponse,

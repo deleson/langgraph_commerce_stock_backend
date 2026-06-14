@@ -1,3 +1,9 @@
+"""用户记忆与用户画像 Schema。
+
+用户记忆用于沉淀用户风险偏好、关注市场、研究习惯和历史上下文。
+所有记忆都必须按 user_id 隔离，不能跨用户泄露。
+"""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -48,6 +54,8 @@ UserProfileStatus = Literal[
 
 
 class UserMemorySourceSnapshot(BaseModel):
+    """用户记忆来源快照。"""
+
     source_type: UserMemorySourceType
     source_id: int | None = Field(default=None, ge=1)
     source_ref: str | None = Field(default=None, max_length=120)
@@ -55,6 +63,8 @@ class UserMemorySourceSnapshot(BaseModel):
 
 
 class UserMemoryCreate(BaseModel):
+    """创建用户记忆的数据结构。"""
+
     user_id: int = Field(gt=0)
 
     memory_type: UserMemoryType
@@ -109,6 +119,8 @@ class UserMemoryCreate(BaseModel):
 
 
 class UserMemoryUpdate(BaseModel):
+    """更新用户记忆的数据结构。"""
+
     status: UserMemoryStatus | None = None
     confidence: UserMemoryConfidence | None = None
 
@@ -153,6 +165,8 @@ class UserMemoryUpdate(BaseModel):
 
 
 class UserMemoryResponse(BaseModel):
+    """用户记忆响应体。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -182,6 +196,8 @@ class UserMemoryResponse(BaseModel):
 
 
 class UserMemoryListQuery(BaseModel):
+    """用户记忆列表查询条件。"""
+
     memory_type: UserMemoryType | None = None
     status: UserMemoryStatus | None = None
     confidence: UserMemoryConfidence | None = None
@@ -203,6 +219,8 @@ class UserMemoryListQuery(BaseModel):
 
 
 class UserMemoryListResponse(BaseModel):
+    """用户记忆列表响应。"""
+
     items: list[UserMemoryResponse]
     total: int
     limit: int
@@ -210,6 +228,8 @@ class UserMemoryListResponse(BaseModel):
 
 
 class UserProfileSummary(BaseModel):
+    """用户画像摘要。"""
+
     risk_preference: str | None = None
     preferred_markets: list[str] = Field(default_factory=list)
     frequent_symbols: list[str] = Field(default_factory=list)
@@ -224,6 +244,8 @@ class UserProfileSummary(BaseModel):
 
 
 class UserProfileCreate(BaseModel):
+    """创建用户画像的数据结构。"""
+
     user_id: int = Field(gt=0)
 
     status: UserProfileStatus = "active"
@@ -239,6 +261,8 @@ class UserProfileCreate(BaseModel):
 
 
 class UserProfileUpdate(BaseModel):
+    """更新用户画像的数据结构。"""
+
     status: UserProfileStatus | None = None
     profile_version: int | None = Field(default=None, ge=1)
 
@@ -252,6 +276,8 @@ class UserProfileUpdate(BaseModel):
 
 
 class UserProfileResponse(BaseModel):
+    """用户画像响应体。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -273,6 +299,8 @@ class UserProfileResponse(BaseModel):
 
 
 class UserProfileRefreshRequest(BaseModel):
+    """刷新用户画像请求体。"""
+
     include_inactive_memories: bool = False
     force_refresh: bool = False
     reason: str | None = Field(default=None, max_length=200)
@@ -287,6 +315,8 @@ class UserProfileRefreshRequest(BaseModel):
 
 
 class UserProfileRefreshResponse(BaseModel):
+    """刷新用户画像响应体。"""
+
     status: UserProfileStatus
     profile: UserProfileResponse | None = None
     refreshed: bool

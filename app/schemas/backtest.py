@@ -1,3 +1,9 @@
+"""单股历史回测 Schema。
+
+本文件定义单股回测请求、风控配置、模拟交易、资金曲线和绩效指标。
+回测只基于历史行情和规则模拟，不代表未来收益，也不构成投资建议。
+"""
+
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Literal
@@ -43,6 +49,8 @@ BacktestUnavailableReason = Literal[
 ]
 
 class BacktestRiskControlConfig(BaseModel):
+    """单股回测风控配置。"""
+
     commission_rate: float = Field(default=0.0, ge=0, le=0.1)
     min_commission: Decimal = Field(default=Decimal("0"), ge=0)
 
@@ -60,6 +68,8 @@ class BacktestRiskControlConfig(BaseModel):
     enable_max_drawdown_guard: bool = False
 
 class BacktestRequest(BaseModel):
+    """单股回测请求体。"""
+
     symbol: str = Field(min_length=1, max_length=20, examples=["600519"])
     market: MarketCode = Field(examples=["CN"])
     start_date: date
@@ -97,6 +107,8 @@ class BacktestRequest(BaseModel):
 
 
 class BacktestTrade(BaseModel):
+    """回测中的一笔模拟交易。"""
+
     sequence_no: int = Field(ge=1)
     action: BacktestTradeAction
     trade_date: date
@@ -132,6 +144,8 @@ class BacktestTrade(BaseModel):
     reason: str = Field(min_length=1, max_length=500)
 
 class BacktestDailyEquity(BaseModel):
+    """单日权益曲线节点。"""
+
     trade_date: date
     close_price: Decimal = Field(ge=0)
 
@@ -145,6 +159,8 @@ class BacktestDailyEquity(BaseModel):
 
 
 class BacktestSignalSnapshot(BaseModel):
+    """回测过程中某日策略信号和风控决策快照。"""
+
     trade_date: date
     decision: BacktestDecisionAction
 
@@ -163,6 +179,8 @@ class BacktestSignalSnapshot(BaseModel):
 
 
 class BacktestMetrics(BaseModel):
+    """单股回测绩效指标汇总。"""
+
     initial_cash: Decimal = Field(gt=0)
     final_equity: Decimal = Field(ge=0)
 
@@ -210,6 +228,8 @@ class BacktestMetrics(BaseModel):
 
 
 class BacktestInputSnapshot(BaseModel):
+    """回测输入参数和数据范围快照。"""
+
     candle_count: int = Field(ge=0)
     first_candle_date: date | None = None
     last_candle_date: date | None = None
@@ -227,6 +247,8 @@ class BacktestInputSnapshot(BaseModel):
 
 
 class BacktestResponse(BaseModel):
+    """单股回测响应体。"""
+
     symbol: str = Field(min_length=1, max_length=20)
     market: MarketCode
     start_date: date

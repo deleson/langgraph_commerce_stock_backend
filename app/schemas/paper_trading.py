@@ -1,3 +1,9 @@
+"""纸面交易 Schema。
+
+纸面交易只表示未来模拟盘：虚拟账户、虚拟订单、虚拟成交、模拟持仓和权益曲线。
+本模块的数据结构不会连接券商，也不会产生真实下单行为。
+"""
+
 from __future__ import annotations
 
 from datetime import date, datetime
@@ -16,17 +22,23 @@ PAPER_TRADING_DISCLAIMER = (
 
 
 class PaperTradingAccountStatus(StrEnum):
+    """纸面交易账户状态。"""
+
     ACTIVE = "active"
     PAUSED = "paused"
     CLOSED = "closed"
 
 
 class PaperTradingOrderSide(StrEnum):
+    """纸面交易订单方向。"""
+
     BUY = "buy"
     SELL = "sell"
 
 
 class PaperTradingOrderStatus(StrEnum):
+    """纸面交易订单状态。"""
+
     PENDING = "pending"
     FILLED = "filled"
     CANCELLED = "cancelled"
@@ -35,12 +47,16 @@ class PaperTradingOrderStatus(StrEnum):
 
 
 class PaperTradingSignalSource(StrEnum):
+    """生成纸面交易订单所依据的信号来源。"""
+
     STRATEGY_SIGNAL = "strategy_signal"
     QUANT_ALERT = "quant_alert"
     MANUAL = "manual"
 
 
 class PaperTradingTickSource(StrEnum):
+    """纸面交易 tick 的触发来源。"""
+
     MANUAL = "manual"
     API = "api"
     BACKGROUND_TASK = "background_task"
@@ -48,17 +64,23 @@ class PaperTradingTickSource(StrEnum):
 
 
 class PaperTradingTickStatus(StrEnum):
+    """纸面交易 tick 执行状态。"""
+
     COMPLETED = "completed"
     SKIPPED = "skipped"
     FAILED = "failed"
 
 class PaperTradingRunStatus(StrEnum):
+    """纸面交易运行记录状态。"""
+
     RUNNING = "running"
     COMPLETED = "completed"
     SKIPPED = "skipped"
     FAILED = "failed"
 
 class PaperTradingUnavailableReason(StrEnum):
+    """纸面交易 tick 或运行记录不可用原因。"""
+
     NO_ACCOUNT = "no_account"
     NO_WATCHLIST = "no_watchlist"
     NO_DATA = "no_data"
@@ -68,6 +90,8 @@ class PaperTradingUnavailableReason(StrEnum):
 
 
 class PaperTradingAccountCreate(BaseModel):
+    """创建纸面交易虚拟账户请求体。"""
+
     name: str = Field(default="默认纸面交易账户", min_length=1, max_length=120)
     initial_cash: Decimal = Field(default=Decimal("100000"), gt=0)
     currency: str = Field(default="CNY", min_length=3, max_length=8)
@@ -81,11 +105,15 @@ class PaperTradingAccountCreate(BaseModel):
 
 
 class PaperTradingAccountUpdate(BaseModel):
+    """更新纸面交易虚拟账户请求体。"""
+
     name: str | None = Field(default=None, min_length=1, max_length=120)
     status: PaperTradingAccountStatus | None = None
 
 
 class PaperTradingAccountResponse(BaseModel):
+    """纸面交易虚拟账户响应体。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -100,6 +128,8 @@ class PaperTradingAccountResponse(BaseModel):
     disclaimer: str = Field(default=PAPER_TRADING_DISCLAIMER, max_length=300)
 
 class PaperTradingAccountConfigBase(BaseModel):
+    """纸面交易账户配置基础字段。"""
+
     is_enabled: bool = True
     max_symbols_per_tick: int = Field(default=50, ge=1, le=500)
     allow_buy: bool = True
@@ -127,10 +157,14 @@ class PaperTradingAccountConfigBase(BaseModel):
 
 
 class PaperTradingAccountConfigCreate(PaperTradingAccountConfigBase):
+    """创建纸面交易账户配置的数据结构。"""
+
     pass
 
 
 class PaperTradingAccountConfigUpdate(BaseModel):
+    """更新纸面交易账户配置请求体。"""
+
     is_enabled: bool | None = None
     max_symbols_per_tick: int | None = Field(default=None, ge=1, le=500)
     allow_buy: bool | None = None
@@ -158,6 +192,8 @@ class PaperTradingAccountConfigUpdate(BaseModel):
 
 
 class PaperTradingAccountConfigResponse(PaperTradingAccountConfigBase):
+    """纸面交易账户配置响应体。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -168,6 +204,8 @@ class PaperTradingAccountConfigResponse(PaperTradingAccountConfigBase):
 
 
 class PaperTradingPositionResponse(BaseModel):
+    """纸面交易当前模拟持仓响应体。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -191,6 +229,8 @@ class PaperTradingPositionResponse(BaseModel):
 
 
 class PaperTradingOrderCreate(BaseModel):
+    """创建纸面交易虚拟订单的数据结构。"""
+
     account_id: int
     symbol: str = Field(min_length=1, max_length=32)
     market: MarketCode
@@ -210,6 +250,8 @@ class PaperTradingOrderCreate(BaseModel):
 
 
 class PaperTradingOrderResponse(BaseModel):
+    """纸面交易虚拟订单响应体。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -230,6 +272,8 @@ class PaperTradingOrderResponse(BaseModel):
 
 
 class PaperTradingTradeResponse(BaseModel):
+    """纸面交易虚拟成交响应体。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -246,6 +290,8 @@ class PaperTradingTradeResponse(BaseModel):
 
 
 class PaperTradingEquitySnapshotResponse(BaseModel):
+    """纸面交易权益快照响应体。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -261,6 +307,11 @@ class PaperTradingEquitySnapshotResponse(BaseModel):
 
 
 class PaperTradingTickRequest(BaseModel):
+    """推进一次纸面交易 tick 的请求体。
+
+    API 层会强制使用路径 account_id 和当前登录用户，避免用户伪造 target_user_id。
+    """
+
     account_id: int | None = None
     target_user_id: int | None = None
     source: PaperTradingTickSource = PaperTradingTickSource.MANUAL
@@ -270,6 +321,8 @@ class PaperTradingTickRequest(BaseModel):
 
 
 class PaperTradingTickItem(BaseModel):
+    """纸面交易 tick 中单只股票的处理结果。"""
+
     symbol: str = Field(min_length=1, max_length=32)
     market: MarketCode
     action: str = Field(max_length=32)
@@ -287,6 +340,8 @@ class PaperTradingTickItem(BaseModel):
 
 
 class PaperTradingTickInputSnapshot(BaseModel):
+    """纸面交易 tick 输入与统计快照。"""
+
     account_id: int | None = None
     scanned_count: int = Field(ge=0)
     order_count: int = Field(ge=0)
@@ -296,6 +351,8 @@ class PaperTradingTickInputSnapshot(BaseModel):
 
 
 class PaperTradingTickResponse(BaseModel):
+    """纸面交易 tick 响应体。"""
+
     status: PaperTradingTickStatus
     unavailable_reason: PaperTradingUnavailableReason | None = None
     account: PaperTradingAccountResponse | None = None
@@ -308,6 +365,8 @@ class PaperTradingTickResponse(BaseModel):
     disclaimer: str = Field(default=PAPER_TRADING_DISCLAIMER, max_length=300)
 
 class PaperTradingRunCreate(BaseModel):
+    """创建纸面交易运行记录的数据结构。"""
+
     account_id: int
     source: PaperTradingTickSource
     request_snapshot: dict[str, Any] = Field(default_factory=dict)
@@ -315,6 +374,8 @@ class PaperTradingRunCreate(BaseModel):
 
 
 class PaperTradingRunUpdate(BaseModel):
+    """更新纸面交易运行记录的数据结构。"""
+
     status: PaperTradingRunStatus
     unavailable_reason: PaperTradingUnavailableReason | None = None
     scanned_count: int = Field(default=0, ge=0)
@@ -332,6 +393,8 @@ class PaperTradingRunUpdate(BaseModel):
 
 
 class PaperTradingRunResponse(BaseModel):
+    """纸面交易运行记录响应体。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -356,6 +419,8 @@ class PaperTradingRunResponse(BaseModel):
 
 
 class PaperTradingRunDetailResponse(PaperTradingRunResponse):
+    """纸面交易运行记录详情响应体。"""
+
     request_snapshot: dict[str, Any] = Field(default_factory=dict)
     account_config_snapshot: dict[str, Any] = Field(default_factory=dict)
     signal_snapshot: dict[str, Any] = Field(default_factory=dict)
@@ -364,6 +429,8 @@ class PaperTradingRunDetailResponse(PaperTradingRunResponse):
     equity_snapshot: PaperTradingEquitySnapshotResponse | None = None
 
 class PaperTradingAccountDetailResponse(BaseModel):
+    """纸面交易账户详情聚合响应。"""
+
     account: PaperTradingAccountResponse
     config: PaperTradingAccountConfigResponse | None = None
     positions: list[PaperTradingPositionResponse] = Field(default_factory=list)
@@ -371,34 +438,48 @@ class PaperTradingAccountDetailResponse(BaseModel):
     latest_run: PaperTradingRunResponse | None = None
 
 class PaperTradingListQuery(BaseModel):
+    """纸面交易列表接口通用分页查询。"""
+
     limit: int = Field(default=20, ge=1, le=100)
     offset: int = Field(default=0, ge=0)
 
 
 class PaperTradingAccountListResponse(BaseModel):
+    """纸面交易账户列表响应。"""
+
     total: int = Field(ge=0)
     items: list[PaperTradingAccountResponse]
 
 
 class PaperTradingPositionListResponse(BaseModel):
+    """纸面交易持仓列表响应。"""
+
     total: int = Field(ge=0)
     items: list[PaperTradingPositionResponse]
 
 
 class PaperTradingOrderListResponse(BaseModel):
+    """纸面交易订单列表响应。"""
+
     total: int = Field(ge=0)
     items: list[PaperTradingOrderResponse]
 
 
 class PaperTradingTradeListResponse(BaseModel):
+    """纸面交易成交列表响应。"""
+
     total: int = Field(ge=0)
     items: list[PaperTradingTradeResponse]
 
 
 class PaperTradingEquitySnapshotListResponse(BaseModel):
+    """纸面交易权益快照列表响应。"""
+
     total: int = Field(ge=0)
     items: list[PaperTradingEquitySnapshotResponse]
 
 class PaperTradingRunListResponse(BaseModel):
+    """纸面交易运行记录列表响应。"""
+
     total: int = Field(ge=0)
     items: list[PaperTradingRunResponse]

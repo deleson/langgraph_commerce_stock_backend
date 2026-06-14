@@ -1,3 +1,9 @@
+"""量化提醒 Schema。
+
+量化提醒基于历史行情、数据质量、技术指标和策略信号规则触发。
+提醒只作为研究线索，不构成投资建议，也不会执行真实交易。
+"""
+
 from __future__ import annotations
 
 from datetime import date, datetime
@@ -11,11 +17,15 @@ from app.schemas.market_data import MarketCode
 
 
 class QuantAlertRuleStatus(StrEnum):
+    """量化提醒规则状态。"""
+
     ACTIVE = "active"
     INACTIVE = "inactive"
 
 
 class QuantAlertRuleType(StrEnum):
+    """量化提醒规则类型。"""
+
     STRATEGY_SIGNAL = "strategy_signal"
     STRONG_STRATEGY_SIGNAL = "strong_strategy_signal"
     STRATEGY_SCORE_THRESHOLD = "strategy_score_threshold"
@@ -25,6 +35,8 @@ class QuantAlertRuleType(StrEnum):
 
 
 class QuantAlertTriggerDirection(StrEnum):
+    """阈值类提醒的触发方向。"""
+
     ABOVE = "above"
     BELOW = "below"
     EQUAL = "equal"
@@ -32,24 +44,32 @@ class QuantAlertTriggerDirection(StrEnum):
 
 
 class QuantAlertSeverity(StrEnum):
+    """量化提醒严重程度。"""
+
     INFO = "info"
     WARNING = "warning"
     CRITICAL = "critical"
 
 
 class QuantAlertEventStatus(StrEnum):
+    """量化提醒事件处理状态。"""
+
     TRIGGERED = "triggered"
     ACKNOWLEDGED = "acknowledged"
     IGNORED = "ignored"
 
 
 class QuantAlertScanStatus(StrEnum):
+    """量化提醒扫描结果状态。"""
+
     COMPLETED = "completed"
     FAILED = "failed"
     SKIPPED = "skipped"
 
 
 class QuantAlertScanSource(StrEnum):
+    """量化提醒扫描触发来源。"""
+
     MANUAL = "manual"
     API = "api"
     BACKGROUND_TASK = "background_task"
@@ -57,6 +77,8 @@ class QuantAlertScanSource(StrEnum):
 
 
 class QuantAlertUnavailableReason(StrEnum):
+    """量化提醒扫描不可用原因。"""
+
     EMPTY_WATCHLIST = "empty_watchlist"
     NO_ACTIVE_RULES = "no_active_rules"
     NO_DATA = "no_data"
@@ -65,6 +87,8 @@ class QuantAlertUnavailableReason(StrEnum):
 
 
 class QuantAlertRuleCreate(BaseModel):
+    """创建量化提醒规则请求体。"""
+
     name: str = Field(min_length=1, max_length=120)
     rule_type: QuantAlertRuleType
     market: MarketCode | None = None
@@ -101,6 +125,8 @@ class QuantAlertRuleCreate(BaseModel):
 
 
 class QuantAlertRuleUpdate(BaseModel):
+    """更新量化提醒规则请求体。"""
+
     name: str | None = Field(default=None, min_length=1, max_length=120)
     status: QuantAlertRuleStatus | None = None
     severity: QuantAlertSeverity | None = None
@@ -113,6 +139,8 @@ class QuantAlertRuleUpdate(BaseModel):
 
 
 class QuantAlertRuleResponse(BaseModel):
+    """量化提醒规则响应体。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -134,6 +162,8 @@ class QuantAlertRuleResponse(BaseModel):
 
 
 class QuantAlertRuleListQuery(BaseModel):
+    """量化提醒规则列表查询条件。"""
+
     rule_type: QuantAlertRuleType | None = None
     status: QuantAlertRuleStatus | None = None
     market: MarketCode | None = None
@@ -152,11 +182,15 @@ class QuantAlertRuleListQuery(BaseModel):
 
 
 class QuantAlertRuleListResponse(BaseModel):
+    """量化提醒规则列表响应。"""
+
     total: int = Field(ge=0)
     items: list[QuantAlertRuleResponse]
 
 
 class QuantAlertTriggerSnapshot(BaseModel):
+    """量化提醒触发时的输入和结果快照。"""
+
     rule_type: QuantAlertRuleType
     symbol: str
     market: str
@@ -174,6 +208,8 @@ class QuantAlertTriggerSnapshot(BaseModel):
 
 
 class QuantAlertEventCreate(BaseModel):
+    """创建量化提醒事件的数据结构。"""
+
     user_id: int
     rule_id: int | None = None
     rule_type: QuantAlertRuleType
@@ -198,11 +234,15 @@ class QuantAlertEventCreate(BaseModel):
 
 
 class QuantAlertEventUpdate(BaseModel):
+    """更新量化提醒事件状态的数据结构。"""
+
     status: QuantAlertEventStatus | None = None
     notification_id: int | None = None
 
 
 class QuantAlertEventResponse(BaseModel):
+    """量化提醒事件响应体。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -225,6 +265,8 @@ class QuantAlertEventResponse(BaseModel):
 
 
 class QuantAlertEventListQuery(BaseModel):
+    """量化提醒事件列表查询条件。"""
+
     rule_type: QuantAlertRuleType | None = None
     status: QuantAlertEventStatus | None = None
     severity: QuantAlertSeverity | None = None
@@ -251,11 +293,18 @@ class QuantAlertEventListQuery(BaseModel):
 
 
 class QuantAlertEventListResponse(BaseModel):
+    """量化提醒事件列表响应。"""
+
     total: int = Field(ge=0)
     items: list[QuantAlertEventResponse]
 
 
 class QuantAlertScanRequest(BaseModel):
+    """执行量化提醒扫描请求体。
+
+    target_user_id 仅供调度器和后台任务使用，API 层会强制使用当前登录用户。
+    """
+
     target_user_id: int | None = Field(
         default=None,
         description="Only background scheduler should set this. API layer uses current user.",
@@ -295,6 +344,8 @@ class QuantAlertScanRequest(BaseModel):
 
 
 class QuantAlertScanItem(BaseModel):
+    """单只股票扫描结果。"""
+
     symbol: str
     market: str
     scanned: bool = True
@@ -305,6 +356,8 @@ class QuantAlertScanItem(BaseModel):
 
 
 class QuantAlertScanInputSnapshot(BaseModel):
+    """量化提醒扫描输入快照。"""
+
     source: QuantAlertScanSource
     target_user_id: int
     symbol_count: int = Field(default=0, ge=0)
@@ -315,6 +368,8 @@ class QuantAlertScanInputSnapshot(BaseModel):
 
 
 class QuantAlertScanResponse(BaseModel):
+    """量化提醒扫描响应体。"""
+
     status: QuantAlertScanStatus
     unavailable_reason: QuantAlertUnavailableReason | None = None
     summary: str

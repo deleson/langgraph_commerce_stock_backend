@@ -1,3 +1,9 @@
+"""AI 用量、额度和成本审计 Schema。
+
+本文件定义 AI 调用日志、额度账户、日/月汇总和额度预检查结构。
+额度检查只判断是否允许调用，不会直接触发 LLM 请求。
+"""
+
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any, Literal
@@ -37,6 +43,8 @@ AIUsageSummaryPeriod = Literal[
 
 
 class AIUsageLogCreate(BaseModel):
+    """创建 AI 调用日志的数据结构。"""
+
     user_id: int = Field(gt=0)
 
     feature: AIUsageFeature
@@ -73,6 +81,8 @@ class AIUsageLogCreate(BaseModel):
 
 
 class AIUsageLogResponse(BaseModel):
+    """AI 调用日志响应体。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -107,6 +117,8 @@ class AIUsageLogResponse(BaseModel):
 
 
 class AIQuotaAccountCreate(BaseModel):
+    """创建用户 AI 额度账户的数据结构。"""
+
     user_id: int = Field(gt=0)
 
     daily_call_limit: int = Field(default=50, ge=0)
@@ -125,6 +137,8 @@ class AIQuotaAccountCreate(BaseModel):
 
 
 class AIQuotaAccountUpdate(BaseModel):
+    """更新用户 AI 额度账户的数据结构。"""
+
     daily_call_limit: int | None = Field(default=None, ge=0)
     monthly_call_limit: int | None = Field(default=None, ge=0)
 
@@ -141,6 +155,8 @@ class AIQuotaAccountUpdate(BaseModel):
 
 
 class AIQuotaAccountResponse(BaseModel):
+    """用户 AI 额度账户响应体。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -165,6 +181,8 @@ class AIQuotaAccountResponse(BaseModel):
 
 
 class AIUsageSummaryCreate(BaseModel):
+    """创建或更新 AI 用量汇总的数据结构。"""
+
     user_id: int = Field(gt=0)
 
     period_type: AIUsageSummaryPeriod
@@ -191,6 +209,8 @@ class AIUsageSummaryCreate(BaseModel):
 
 
 class AIUsageSummaryResponse(BaseModel):
+    """AI 用量汇总响应体。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -217,6 +237,8 @@ class AIUsageSummaryResponse(BaseModel):
 
 
 class AIQuotaRemaining(BaseModel):
+    """当前额度剩余量。"""
+
     daily_calls_remaining: int | None = None
     monthly_calls_remaining: int | None = None
 
@@ -228,6 +250,8 @@ class AIQuotaRemaining(BaseModel):
 
 
 class AIQuotaSummaryResponse(BaseModel):
+    """用户 AI 额度、今日用量、本月用量和剩余额度汇总。"""
+
     account: AIQuotaAccountResponse
 
     today: AIUsageSummaryResponse | None = None
@@ -239,6 +263,11 @@ class AIQuotaSummaryResponse(BaseModel):
 
 
 class AIQuotaCheckRequest(BaseModel):
+    """AI 额度预检查请求。
+
+    该结构用于调用 LLM 前估算调用次数、token 和成本是否超限。
+    """
+
     user_id: int = Field(gt=0)
 
     feature: AIUsageFeature
@@ -261,6 +290,8 @@ class AIQuotaCheckRequest(BaseModel):
 
 
 class AIQuotaCheckResult(BaseModel):
+    """AI 额度预检查结果。"""
+
     allowed: bool
 
     reason: str | None = Field(default=None, max_length=500)
@@ -274,6 +305,8 @@ class AIQuotaCheckResult(BaseModel):
 
 
 class AIUsageQuery(BaseModel):
+    """AI 用量日志查询条件。"""
+
     feature: AIUsageFeature | None = None
     status: AIUsageStatus | None = None
 
@@ -290,6 +323,8 @@ class AIUsageQuery(BaseModel):
 
 
 class AIUsageLogListResponse(BaseModel):
+    """AI 用量日志列表响应。"""
+
     items: list[AIUsageLogResponse] = Field(default_factory=list)
     total: int = Field(ge=0)
     limit: int = Field(ge=1)

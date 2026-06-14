@@ -1,3 +1,9 @@
+"""每日简报 Schema。
+
+每日简报基于自选股、行情、数据质量、技术指标、策略信号和候选评分生成。
+AI 只用于润色和解释确定性结果，不能修改价格、评分和信号结论。
+"""
+
 from __future__ import annotations
 
 from datetime import date, datetime
@@ -9,12 +15,16 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 class DailyReportStatus(StrEnum):
+    """每日简报生成状态。"""
+
     GENERATED = "generated"
     FALLBACK = "fallback"
     FAILED = "failed"
 
 
 class DailyReportSource(StrEnum):
+    """每日简报触发来源。"""
+
     MANUAL = "manual"
     API = "api"
     BACKGROUND_TASK = "background_task"
@@ -22,6 +32,8 @@ class DailyReportSource(StrEnum):
 
 
 class DailyReportSectionType(StrEnum):
+    """每日简报章节类型。"""
+
     OVERVIEW = "overview"
     MARKET_MOVEMENT = "market_movement"
     TECHNICAL_STATUS = "technical_status"
@@ -32,6 +44,8 @@ class DailyReportSectionType(StrEnum):
 
 
 class DailyReportAIStatus(StrEnum):
+    """每日简报 AI 润色状态。"""
+
     NOT_USED = "not_used"
     SUCCESS = "success"
     QUOTA_BLOCKED = "quota_blocked"
@@ -41,6 +55,8 @@ class DailyReportAIStatus(StrEnum):
 
 
 class DailyReportUnavailableReason(StrEnum):
+    """每日简报不可用原因。"""
+
     EMPTY_WATCHLIST = "empty_watchlist"
     NO_DATA = "no_data"
     DATA_ERROR = "data_error"
@@ -48,6 +64,8 @@ class DailyReportUnavailableReason(StrEnum):
 
 
 class DailyReportGenerateRequest(BaseModel):
+    """生成每日简报请求体。"""
+
     report_date: date | None = Field(
         default=None,
         description="Report date. Defaults to today in service layer when omitted.",
@@ -91,6 +109,11 @@ class DailyReportGenerateRequest(BaseModel):
 
 
 class DailyReportTaskPayload(DailyReportGenerateRequest):
+    """每日简报后台任务 payload。
+
+    target_user_id 仅供调度器和后台任务使用，普通 API 调用应以当前登录用户为准。
+    """
+
     target_user_id: int | None = Field(
         default=None,
         description="Target user id for scheduler/background task. API layer should use current_user instead.",
@@ -98,6 +121,8 @@ class DailyReportTaskPayload(DailyReportGenerateRequest):
 
 
 class DailyReportListQuery(BaseModel):
+    """每日简报列表查询条件。"""
+
     start_date: date | None = None
     end_date: date | None = None
     status: DailyReportStatus | None = None
@@ -113,6 +138,8 @@ class DailyReportListQuery(BaseModel):
 
 
 class DailyReportSection(BaseModel):
+    """每日简报中的单个章节。"""
+
     section_type: DailyReportSectionType
     title: str = Field(min_length=1, max_length=100)
     summary: str = Field(default="", max_length=2000)
@@ -121,6 +148,8 @@ class DailyReportSection(BaseModel):
 
 
 class DailyReportStockSnapshot(BaseModel):
+    """每日简报中的单只股票摘要快照。"""
+
     symbol: str = Field(min_length=1, max_length=32)
     market: str = Field(min_length=1, max_length=16)
     name: str | None = Field(default=None, max_length=100)
@@ -135,6 +164,8 @@ class DailyReportStockSnapshot(BaseModel):
 
 
 class DailyReportInputSnapshot(BaseModel):
+    """每日简报生成输入快照。"""
+
     report_date: date
     source: DailyReportSource
     watchlist_count: int = Field(default=0, ge=0)
@@ -147,6 +178,8 @@ class DailyReportInputSnapshot(BaseModel):
 
 
 class DailyReportCreate(BaseModel):
+    """创建每日简报记录的数据结构。"""
+
     user_id: int
     report_date: date
     status: DailyReportStatus
@@ -174,6 +207,8 @@ class DailyReportCreate(BaseModel):
 
 
 class DailyReportUpdate(BaseModel):
+    """更新每日简报记录的数据结构。"""
+
     status: DailyReportStatus | None = None
     source: DailyReportSource | None = None
     summary: str | None = Field(default=None, max_length=4000)
@@ -196,6 +231,8 @@ class DailyReportUpdate(BaseModel):
 
 
 class DailyReportResponse(BaseModel):
+    """每日简报详情响应体。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -225,17 +262,23 @@ class DailyReportResponse(BaseModel):
 
 
 class DailyReportListResponse(BaseModel):
+    """每日简报列表响应。"""
+
     total: int = Field(ge=0)
     items: list[DailyReportResponse]
 
 
 class DailyReportTodayResponse(BaseModel):
+    """今日日报查询响应。"""
+
     exists: bool
     report: DailyReportResponse | None = None
     message: str | None = None
 
 
 class DailyReportGenerationResponse(BaseModel):
+    """每日简报生成接口响应。"""
+
     report: DailyReportResponse
     created: bool = Field(
         description="Whether a new report was created. False means an existing report was reused.",

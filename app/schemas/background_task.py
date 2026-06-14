@@ -1,3 +1,9 @@
+"""后台任务 Schema。
+
+本文件定义后台任务提交、payload、状态和查询响应。
+API 只负责创建和查询任务，真正执行由 Celery Worker 分发到具体处理器。
+"""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -52,6 +58,8 @@ BackgroundTaskSource = Literal[
 
 
 class MarketDataSyncTaskPayload(BaseModel):
+    """行情同步后台任务 payload。"""
+
     symbol: str = Field(..., min_length=1, max_length=32)
     market: MarketCode = "US"
     timeframe: CandleTimeframe = "1d"
@@ -68,6 +76,8 @@ class MarketDataSyncTaskPayload(BaseModel):
         return value.strip().upper()
 
 class StockAnalysisAsyncTaskPayload(BaseModel):
+    """异步个股分析后台任务 payload。"""
+
     symbol: str = Field(..., min_length=1, max_length=20)
     market: MarketCode = "US"
     analysis_type: Literal["stock_basic"] = "stock_basic"
@@ -88,26 +98,28 @@ class StockAnalysisAsyncTaskPayload(BaseModel):
         return value
 
 class UserProfileRefreshTaskPayload(UserProfileRefreshRequest):
-    """Payload for refreshing current user's profile in a background task."""
+    """刷新当前用户画像的后台任务 payload。"""
 
     pass
 
 class UserMemoryEmbeddingRebuildTaskPayload(UserMemoryEmbeddingRebuildRequest):
-    """Payload for rebuilding current user's memory embeddings in background."""
+    """重建当前用户记忆向量的后台任务 payload。"""
 
     pass
 
 class QuantAlertScanTaskPayload(QuantAlertScanRequest):
-    """Payload for running current user's quant alert scan in background."""
+    """执行当前用户量化提醒扫描的后台任务 payload。"""
 
     pass
 
 class PaperTradingTickTaskPayload(PaperTradingTickRequest):
-    """Payload for running current user's paper trading tick in background."""
+    """执行当前用户纸面交易 tick 的后台任务 payload。"""
 
     pass
 
 class BackgroundTaskCreateRequest(BaseModel):
+    """提交后台任务请求体。"""
+
     task_type: BackgroundTaskType
     payload: dict[str, Any] = Field(default_factory=dict)
     priority: BackgroundTaskPriority = "normal"
@@ -124,6 +136,8 @@ class BackgroundTaskCreateRequest(BaseModel):
 
 
 class BackgroundTaskSubmitResponse(BaseModel):
+    """后台任务提交成功后的响应体。"""
+
     task_id: int
     task_type: BackgroundTaskType
     status: BackgroundTaskStatus
@@ -132,6 +146,8 @@ class BackgroundTaskSubmitResponse(BaseModel):
 
 
 class BackgroundTaskResponse(BaseModel):
+    """后台任务详情响应体。"""
+
     id: int
     user_id: int | None = None
     task_type: BackgroundTaskType
@@ -155,6 +171,8 @@ class BackgroundTaskResponse(BaseModel):
 
 
 class BackgroundTaskListQuery(BaseModel):
+    """后台任务列表查询条件。"""
+
     task_type: BackgroundTaskType | None = None
     status: BackgroundTaskStatus | None = None
     limit: int = Field(default=20, ge=1, le=100)
@@ -162,6 +180,8 @@ class BackgroundTaskListQuery(BaseModel):
 
 
 class BackgroundTaskListResponse(BaseModel):
+    """后台任务列表响应。"""
+
     items: list[BackgroundTaskResponse]
     total: int
     limit: int

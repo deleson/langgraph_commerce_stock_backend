@@ -1,3 +1,9 @@
+"""用户记忆向量与检索 Schema。
+
+记忆向量用于把用户历史上下文转成可检索结构，供 AI 分析和 ReAct 追问补充背景。
+检索结果只用于上下文增强，不构成投资建议。
+"""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -48,6 +54,8 @@ UserMemoryRetrievalUnavailableReason = Literal[
 
 
 class UserMemoryEmbeddingCreate(BaseModel):
+    """创建用户记忆向量的数据结构。"""
+
     user_id: int = Field(gt=0)
     memory_id: int = Field(gt=0)
 
@@ -87,6 +95,8 @@ class UserMemoryEmbeddingCreate(BaseModel):
 
 
 class UserMemoryEmbeddingUpdate(BaseModel):
+    """更新用户记忆向量的数据结构。"""
+
     status: UserMemoryEmbeddingStatus | None = None
 
     embedding_provider: UserMemoryEmbeddingProvider | None = None
@@ -120,6 +130,8 @@ class UserMemoryEmbeddingUpdate(BaseModel):
 
 
 class UserMemoryEmbeddingResponse(BaseModel):
+    """用户记忆向量响应体。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -150,6 +162,8 @@ class UserMemoryEmbeddingResponse(BaseModel):
 
 
 class UserMemoryEmbeddingListQuery(BaseModel):
+    """用户记忆向量列表查询条件。"""
+
     status: UserMemoryEmbeddingStatus | None = None
     memory_type: UserMemoryType | None = None
     source_type: UserMemorySourceType | None = None
@@ -162,6 +176,8 @@ class UserMemoryEmbeddingListQuery(BaseModel):
 
 
 class UserMemoryEmbeddingListResponse(BaseModel):
+    """用户记忆向量列表响应。"""
+
     items: list[UserMemoryEmbeddingResponse]
     total: int
     limit: int
@@ -169,6 +185,8 @@ class UserMemoryEmbeddingListResponse(BaseModel):
 
 
 class UserMemoryRetrievalRequest(BaseModel):
+    """用户记忆相似检索请求体。"""
+
     query: str = Field(min_length=1, max_length=1000)
 
     top_k: int = Field(default=5, ge=1, le=10)
@@ -212,6 +230,8 @@ class UserMemoryRetrievalRequest(BaseModel):
 
 
 class UserMemoryRetrievalItem(BaseModel):
+    """用户记忆检索命中的单条结果。"""
+
     memory_id: int
     memory_type: UserMemoryType
     confidence: UserMemoryConfidence
@@ -233,6 +253,8 @@ class UserMemoryRetrievalItem(BaseModel):
 
 
 class UserMemoryRetrievalInputSnapshot(BaseModel):
+    """用户记忆检索输入快照。"""
+
     query: str
     top_k: int
     min_similarity_score: float | None = None
@@ -244,6 +266,8 @@ class UserMemoryRetrievalInputSnapshot(BaseModel):
 
 
 class UserMemoryRetrievalResponse(BaseModel):
+    """用户记忆检索响应体。"""
+
     status: UserMemoryRetrievalStatus
     unavailable_reason: UserMemoryRetrievalUnavailableReason | None = None
 
@@ -257,6 +281,8 @@ class UserMemoryRetrievalResponse(BaseModel):
 
 
 class UserMemoryEmbeddingRebuildRequest(BaseModel):
+    """重建用户记忆向量请求体。"""
+
     memory_ids: list[int] = Field(default_factory=list, max_length=100)
     force_rebuild: bool = False
     only_failed: bool = False
@@ -295,6 +321,8 @@ class UserMemoryEmbeddingRebuildRequest(BaseModel):
 
 
 class UserMemoryEmbeddingStatsResponse(BaseModel):
+    """用户记忆向量统计响应体。"""
+
     user_id: int
 
     total_memories: int = Field(ge=0)

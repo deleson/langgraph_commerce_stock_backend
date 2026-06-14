@@ -1,3 +1,9 @@
+"""候选股票 AI 解释 Schema。
+
+AI 解释只基于确定性候选评分结果做中文说明和对比，
+不能修改 score、grade、rank，也不构成投资建议。
+"""
+
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -41,6 +47,8 @@ StockCandidateAIResearchPriorityLevel = Literal[
 
 
 class StockCandidateAIExplanationRequest(BaseModel):
+    """候选股票 AI 解释请求体。"""
+
     candidate_request: StockCandidateRequest = Field(
         description=(
             "Original deterministic stock candidate scoring request. "
@@ -92,6 +100,8 @@ class StockCandidateAIExplanationRequest(BaseModel):
 
 
 class StockCandidateAIExplanationItem(BaseModel):
+    """单只候选股票的 AI 解释结果。"""
+
     symbol: str = Field(min_length=1, max_length=20)
     market: MarketCode
     name: str | None = Field(default=None, max_length=100)
@@ -123,6 +133,8 @@ class StockCandidateAIExplanationItem(BaseModel):
 
 
 class StockCandidateAIComparisonItem(BaseModel):
+    """候选股票之间的 AI 对比结果。"""
+
     symbol: str = Field(min_length=1, max_length=20)
     market: MarketCode
 
@@ -137,6 +149,8 @@ class StockCandidateAIComparisonItem(BaseModel):
 
 
 class StockCandidateAIResearchPriorityItem(BaseModel):
+    """AI 生成的研究优先级项。"""
+
     priority_rank: int = Field(ge=1)
     priority_level: StockCandidateAIResearchPriorityLevel
 
@@ -154,6 +168,8 @@ class StockCandidateAIResearchPriorityItem(BaseModel):
 
 
 class StockCandidateAIRiskSummary(BaseModel):
+    """候选股票池整体风险摘要。"""
+
     overall_risk_level: StockCandidateAIResearchPriorityLevel = Field(
         description="High means risk is high, not research priority high.",
     )
@@ -167,6 +183,8 @@ class StockCandidateAIRiskSummary(BaseModel):
 
 
 class StockCandidateAIExplanationInputSnapshot(BaseModel):
+    """候选 AI 解释输入快照。"""
+
     universe_source: StockCandidateUniverseSource
     requested_top_n: int = Field(ge=1)
     candidate_count: int = Field(ge=0)
@@ -182,6 +200,8 @@ class StockCandidateAIExplanationInputSnapshot(BaseModel):
 
 
 class StockCandidateAIExplanationResponse(BaseModel):
+    """候选股票 AI 解释响应体。"""
+
     status: StockCandidateAIExplanationStatus = "available"
     unavailable_reason: StockCandidateAIExplanationUnavailableReason | None = None
 

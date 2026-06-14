@@ -1,3 +1,9 @@
+"""候选股票评分 Schema。
+
+候选评分基于数据质量、技术指标、策略信号、风险和用户偏好等规则维度。
+结果只表示研究优先级，不是荐股，也不承诺未来收益。
+"""
+
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -59,6 +65,8 @@ StockCandidateScoreDimension = Literal[
 
 
 class StockCandidateSymbol(BaseModel):
+    """候选股票池中的单只股票。"""
+
     symbol: str = Field(min_length=1, max_length=20, examples=["600519"])
     market: MarketCode = Field(examples=["CN"])
 
@@ -71,6 +79,8 @@ class StockCandidateSymbol(BaseModel):
 
 
 class StockCandidateRequest(BaseModel):
+    """候选股票评分请求体。"""
+
     universe_source: StockCandidateUniverseSource = Field(
         default="manual",
         description="Candidate universe source: manual symbols or current user's watchlist.",
@@ -121,6 +131,8 @@ class StockCandidateRequest(BaseModel):
 
 
 class StockCandidateScoreRuleResult(BaseModel):
+    """候选评分中单个维度的规则结果。"""
+
     dimension: StockCandidateScoreDimension
     score_delta: int = Field(ge=-100, le=100)
     reason: str = Field(min_length=1, max_length=300)
@@ -128,6 +140,8 @@ class StockCandidateScoreRuleResult(BaseModel):
 
 
 class StockCandidateScoreBreakdown(BaseModel):
+    """候选评分拆解。"""
+
     formula_version: str = Field(
         default="candidate_scoring_v1",
         min_length=1,
@@ -155,6 +169,8 @@ class StockCandidateScoreBreakdown(BaseModel):
     rule_results: list[StockCandidateScoreRuleResult] = Field(default_factory=list)
 
 class StockCandidateDataQualitySnapshot(BaseModel):
+    """候选股票评分使用的数据质量快照。"""
+
     status: StockCandidateStatus = "available"
     candle_count: int = Field(default=0, ge=0)
     is_empty: bool = False
@@ -165,6 +181,8 @@ class StockCandidateDataQualitySnapshot(BaseModel):
 
 
 class StockCandidateStrategySignalSnapshot(BaseModel):
+    """候选股票评分使用的策略信号快照。"""
+
     status: str = Field(default="unavailable", max_length=30)
     signal: StrategySignalAction | None = None
     strength: StrategySignalStrength | None = None
@@ -173,6 +191,8 @@ class StockCandidateStrategySignalSnapshot(BaseModel):
 
 
 class StockCandidateItem(BaseModel):
+    """单只候选股票评分结果。"""
+
     symbol: str = Field(min_length=1, max_length=20)
     market: MarketCode
     name: str | None = Field(default=None, max_length=100)
@@ -200,6 +220,8 @@ class StockCandidateItem(BaseModel):
 
 
 class StockCandidateInputSnapshot(BaseModel):
+    """候选评分输入参数和股票池统计快照。"""
+
     universe_source: StockCandidateUniverseSource
     requested_symbol_count: int = Field(ge=0)
     evaluated_symbol_count: int = Field(ge=0)
@@ -217,6 +239,8 @@ class StockCandidateInputSnapshot(BaseModel):
 
 
 class StockCandidateResponse(BaseModel):
+    """候选股票评分响应体。"""
+
     status: StockCandidateStatus = "available"
     unavailable_reason: StockCandidateUnavailableReason | None = None
 

@@ -1,3 +1,9 @@
+"""市场数据落库与 Provider 标准化 Schema。
+
+本文件描述股票基础信息、K 线、查询条件和 Provider 返回 K 线的统一结构。
+注意：Schema 中保留的 provider 字面值不等于当前业务层一定全部启用。
+"""
+
 from datetime import datetime
 from decimal import Decimal
 from typing import Literal
@@ -19,6 +25,8 @@ AdjustType = Literal["none", "qfq", "hfq"]
 
 
 class MarketSymbolCreate(BaseModel):
+    """创建或 upsert 股票基础信息的数据结构。"""
+
     symbol: str = Field(min_length=1, max_length=20)
     market: MarketCode
     name: str = Field(min_length=1, max_length=100)
@@ -51,6 +59,8 @@ class MarketSymbolCreate(BaseModel):
 
 
 class MarketSymbolUpdate(BaseModel):
+    """更新股票基础信息的数据结构。"""
+
     name: str | None = Field(default=None, min_length=1, max_length=100)
     currency: str | None = Field(default=None, min_length=1, max_length=10)
     exchange: str | None = Field(default=None, max_length=30)
@@ -74,6 +84,8 @@ class MarketSymbolUpdate(BaseModel):
 
 
 class MarketSymbolDB(BaseModel):
+    """从数据库读取股票基础信息后的响应结构。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -90,6 +102,8 @@ class MarketSymbolDB(BaseModel):
 
 
 class MarketCandleCreate(BaseModel):
+    """创建或 upsert 单根 K 线的数据结构。"""
+
     symbol_id: int | None = None
     symbol: str = Field(min_length=1, max_length=20)
     market: MarketCode
@@ -130,6 +144,8 @@ class MarketCandleCreate(BaseModel):
 
 
 class MarketCandleDB(BaseModel):
+    """数据库 K 线记录响应结构。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -152,6 +168,8 @@ class MarketCandleDB(BaseModel):
 
 
 class MarketCandleQuery(BaseModel):
+    """查询 K 线序列的条件结构。"""
+
     symbol: str = Field(min_length=1, max_length=20)
     market: MarketCode
     timeframe: CandleTimeframe = "1d"
@@ -168,6 +186,11 @@ class MarketCandleQuery(BaseModel):
 
 
 class MarketProviderCandle(BaseModel):
+    """外部行情 Provider 返回 K 线后的标准化结构。
+
+    Provider 适配器先把原始数据转换为该结构，再交给同步服务做质量检查和落库。
+    """
+
     symbol: str
     market: MarketCode
     timeframe: CandleTimeframe = "1d"

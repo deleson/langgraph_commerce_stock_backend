@@ -1,3 +1,9 @@
+"""策略信号 Schema。
+
+策略信号是基于技术指标和数据质量的确定性规则结果，
+不是 AI 自由荐股，也不构成投资建议或收益承诺。
+"""
+
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -35,6 +41,8 @@ StrategyRuleDirection = Literal[
 
 
 class StrategySignalRequest(BaseModel):
+    """策略信号查询请求体。"""
+
     symbol: str = Field(min_length=1, max_length=20, examples=["AAPL"])
     market: MarketCode = Field(examples=["US"])
     timeframe: CandleTimeframe = "1d"
@@ -52,6 +60,8 @@ class StrategySignalRequest(BaseModel):
 
 
 class StrategyRuleResult(BaseModel):
+    """单个策略规则维度的评分明细。"""
+
     rule_name: StrategyRuleName
     direction: StrategyRuleDirection
     score_delta: int = Field(ge=-100, le=100)
@@ -61,11 +71,19 @@ class StrategyRuleResult(BaseModel):
 
 
 class StrategySignalInputSnapshot(BaseModel):
+    """生成策略信号时使用的输入快照。"""
+
     technical_indicators: TechnicalIndicatorResponse | None = None
     data_quality: MarketDataQualityReport | None = None
 
 
 class StrategySignalResponse(BaseModel):
+    """策略信号响应体。
+
+    signal / strength / score 只表示当前规则系统的研究信号，
+    下游纸面交易也只把它作为虚拟模拟依据。
+    """
+
     symbol: str = Field(min_length=1, max_length=20)
     market: MarketCode
     timeframe: CandleTimeframe

@@ -1,3 +1,14 @@
+"""个股分析 ReAct 追问业务服务。
+
+本 Service 是 ReAct 图外层的业务编排者：
+1. 先校验 analysis_thread_id 是否属于当前用户；
+2. 读取历史会话、用户画像和相关记忆；
+3. 调用 ReAct LangGraph 执行“推理 - 工具 - 最终回答”；
+4. 保存用户消息、工具 Observation、助手回答和 AnalysisReactTrace。
+
+注意：用户只能基于已有分析线程追问，不能绕过主分析直接让 ReAct 任意查数据。
+"""
+
 import logging
 from datetime import UTC, datetime
 from typing import Any
@@ -26,10 +37,10 @@ from app.schemas.user_memory_embedding import UserMemoryRetrievalRequest
 logger = logging.getLogger(__name__)
 
 class StockAnalysisReactService:
-    """Coordinate ReAct follow-up analysis for an existing stock analysis record.
+    """既有分析线程上的 ReAct 追问服务。
 
-    ReAct follow-up must start from an existing AnalysisRecord.
-    This protects the business rule: users analyze first, then ask follow-up questions.
+    ReAct 追问必须从已有 AnalysisRecord 开始。
+    这能保证所有工具调用都绑定当前用户和当前分析线程。
     """
 
     def __init__(self, db: AsyncSession) -> None:
@@ -46,6 +57,12 @@ class StockAnalysisReactService:
         user: User,
         payload: StockAnalysisReactFollowUpRequest,
     ) -> StockAnalysisReactFollowUpResponse:
+        """执行一次 ReAct 追问。
+
+        该方法是 API 到 ReAct 图的统一入口：
+        它负责线程归属校验、上下文准备、图执行和追问结果持久化。
+        """
+
         record = await self.analysis_record_repo.get_latest_by_thread_id_for_user(
             thread_id=payload.analysis_thread_id,
             user_id=user.id,

@@ -1,3 +1,14 @@
+"""个股 AI 主分析业务服务。
+
+Router 层只接收 HTTP 请求和当前用户；本 Service 负责：
+1. 读取用户偏好、数据质量、技术指标、策略信号、用户画像和相关记忆；
+2. 构造 StockAnalysisState 并调用主分析 LangGraph；
+3. 保存 analysis_records、通知和用户记忆；
+4. 返回 StockAnalysisResponse 给 API。
+
+这里是 API 和 Graph 的连接层。真正的图节点逻辑在 app/graphs/nodes.py。
+"""
+
 import logging
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -51,7 +62,10 @@ from app.services.user_memory_retrieval_service import UserMemoryRetrievalServic
 logger = logging.getLogger(__name__)
 
 class StockAnalysisService:
-    """Coordinate stock analysis graph execution, persistence, and notification."""
+    """同步版本个股分析服务。
+
+    保留给早期兼容路径；当前主要生产 API 使用 AsyncStockAnalysisService。
+    """
 
     def __init__(self, db: Session) -> None:
         self.db = db
@@ -163,7 +177,12 @@ class StockAnalysisService:
 
 
 class AsyncStockAnalysisService:
-    """Coordinate async stock analysis graph execution, persistence, and notification."""
+    """异步个股主分析编排服务。
+
+    该类是当前 API 的主要入口：
+    它不直接写 Prompt，也不直接解析 LLM，而是准备图上下文并调用 LangGraph。
+    Graph 返回后，再由 Service 负责落库、通知和记忆抽取。
+    """
 
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
@@ -184,6 +203,12 @@ class AsyncStockAnalysisService:
         user: User,
         payload: StockAnalysisRequest,
     ) -> StockAnalysisResponse:
+        """执行一次个股主分析。
+
+        分析过程会先准备后端确定性上下文，再交给主分析图。
+        即使数据不可用或 AI 额度不足，图也会返回安全降级结果并保存记录。
+        """
+
         preference = await self.user_preference_service.get_or_create_my_preference(user)
         thread_id = self._resolve_thread_id(
             user_id=user.id,

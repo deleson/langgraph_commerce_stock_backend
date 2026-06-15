@@ -1,3 +1,9 @@
+"""ReAct 图条件路由。
+
+这里只根据 agent_reason_node 写入的 next_action 和 tool_call 返回下一条边。
+工具是否允许调用会在这里做一次白名单检查；真正执行仍在 tool_execution 节点中完成。
+"""
+
 from app.graphs.react_states import StockAnalysisReactState
 from app.graphs.react_tools import is_react_tool_allowed
 
@@ -5,10 +11,10 @@ from app.graphs.react_tools import is_react_tool_allowed
 def route_react_action(
     state: StockAnalysisReactState,
 ) -> str:
-    """Route the ReAct graph by next_action and selected tool.
+    """根据 next_action 和工具白名单选择 ReAct 下一节点。
 
-    This function does not execute tools.
-    It only returns a route name for LangGraph conditional edges.
+    该函数不执行工具，只返回 LangGraph conditional edge 的路由名称。
+    如果模型选择了未授权工具，统一进入 error / final_answer 安全路径。
     """
 
     next_action = state.get("next_action")

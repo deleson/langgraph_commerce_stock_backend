@@ -1,3 +1,12 @@
+"""ReAct 工具真实执行服务。
+
+app/graphs/react_tools.py 只定义工具白名单和给 LLM 看的描述；
+本文件才是真正执行工具的地方。
+
+每个工具都会走项目已有 Service / Repository，而不是让 LLM 直接访问数据库。
+这保证了用户隔离、参数限制、数据裁剪和金融安全边界仍然由后端控制。
+"""
+
 from datetime import UTC, datetime
 from typing import Any
 
@@ -36,10 +45,10 @@ from app.services.stock_candidate_ai_explanation_query_service import (
 from app.services.stock_candidate_query_service import StockCandidateQueryService
 
 class StockAnalysisReactToolService:
-    """Business tool executor used by the stock analysis ReAct graph.
+    """个股分析 ReAct 图使用的业务工具执行器。
 
-    This service wraps project business capabilities as safe ReAct tools.
-    It does not let the LLM access database objects directly.
+    它把项目已有能力包装成安全工具：
+    行情、技术指标、数据质量、偏好、自选股、回测和候选评分都通过后端服务执行。
     """
 
     MAX_STOCK_CANDIDATE_OBSERVATION_ITEMS = 10
@@ -75,6 +84,11 @@ class StockAnalysisReactToolService:
         analysis_thread_id: str,
         user_id: int,
     ) -> ReactObservation:
+        """读取当前用户自己的分析记录。
+
+        通过 analysis_thread_id + user_id 查询，避免用户猜测线程 id 读取他人分析。
+        """
+
         record = await self.analysis_record_repo.get_latest_by_thread_id_for_user(
             thread_id=analysis_thread_id,
             user_id=user_id,
@@ -115,6 +129,12 @@ class StockAnalysisReactToolService:
         adjust_type: AdjustType = "none",
         source: MarketDataSource | None = None,
     ) -> ReactObservation:
+        """读取行情概览工具。
+
+        该工具聚合 quote、K 线、技术指标、数据质量和同步状态，
+        但会受 limit、source、adjust_type 等参数控制。
+        """
+
         normalized_symbol = symbol.strip().upper()
 
         overview = await self.market_service.get_overview(
@@ -162,6 +182,8 @@ class StockAnalysisReactToolService:
         adjust_type: AdjustType = "none",
         source: MarketDataSource | None = None,
     ) -> ReactObservation:
+        """读取技术指标工具。"""
+
         normalized_symbol = symbol.strip().upper()
 
         indicators = await self.technical_indicator_query_service.get_summary(
@@ -200,6 +222,11 @@ class StockAnalysisReactToolService:
         min_required: int = 35,
         stale_after_days: int | None = None,
     ) -> ReactObservation:
+        """读取数据质量报告工具。
+
+        用于回答“这次分析数据是否可靠”，帮助 ReAct 明确空数据、数量不足和过旧风险。
+        """
+
         normalized_symbol = symbol.strip().upper()
 
         report = await self.market_data_quality_report_service.get_quality_report(
@@ -235,6 +262,11 @@ class StockAnalysisReactToolService:
         *,
         user_id: int,
     ) -> ReactObservation:
+        """读取当前用户偏好工具。
+
+        工具只读取当前 user_id 对应的偏好，不接受外部传入其他用户身份。
+        """
+
         preference = await self.user_preference_repo.get_by_user_id(user_id)
 
         return ReactObservation(
@@ -253,6 +285,11 @@ class StockAnalysisReactToolService:
         user_id: int,
         limit: int = 50,
     ) -> ReactObservation:
+        """读取当前用户自选股工具。
+
+        自选股是用户私有上下文，必须通过 user_id 隔离，并限制返回数量。
+        """
+
         items = await self.watchlist_repo.list_by_user_id(user_id)
         safe_limit = max(0, min(limit, 50))
         limited_items = items[:safe_limit]
@@ -291,6 +328,12 @@ class StockAnalysisReactToolService:
         enforce_data_quality: bool = True,
         data_quality_stale_after_days: int | None = None,
     ) -> ReactObservation:
+        """执行裁剪版单股回测工具。
+
+        ReAct 只需要历史表现摘要，因此这里默认不返回完整交易列表和每日权益曲线，
+        避免 Observation 过大。回测结果只代表历史，不代表未来收益。
+        """
+
         normalized_symbol = symbol.strip().upper()
 
         request = BacktestRequest(
@@ -358,6 +401,12 @@ class StockAnalysisReactToolService:
         enforce_data_quality: bool = True,
         data_quality_stale_after_days: int | None = None,
     ) -> ReactObservation:
+        """执行候选股票评分工具。
+
+        候选评分是确定性研究排序，不是荐股。
+        可选 AI 解释也只能解释 score / grade / rank，不能修改评分事实。
+        """
+
         user = await self.user_repo.get_by_id(user_id)
         if user is None:
             raise NotFoundException(

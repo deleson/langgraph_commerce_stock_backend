@@ -1,3 +1,15 @@
+"""个股分析 ReAct 追问 LangGraph 图结构。
+
+ReAct 图的核心循环是：
+agent_reason 判断下一步是否需要工具；
+tool_execution 执行后端白名单工具并产生 Observation；
+Observation 回到 agent_reason；
+最后进入 final_answer 生成回答。
+
+这个图不会让 AI 任意访问数据库。工具执行必须通过 request-scoped
+StockAnalysisReactToolService，并且工具内部继续做 user_id 隔离。
+"""
+
 from functools import lru_cache
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -22,10 +34,10 @@ if TYPE_CHECKING:
 
 @lru_cache
 def get_stock_analysis_react_checkpointer() -> MemorySaver:
-    """Return the in-memory checkpointer for ReAct graph runs.
+    """返回 ReAct 图的内存 checkpoint。
 
-    The checkpointer can be shared, but the graph itself is built with a
-    request-scoped tool service.
+    checkpointer 可以共享；但图本身依赖每次请求的 tool_service，
+    因此不能把完整 ReAct graph 做全局缓存。
     """
 
     return MemorySaver()
@@ -34,10 +46,10 @@ def get_stock_analysis_react_checkpointer() -> MemorySaver:
 def get_stock_analysis_react_graph(
     tool_service: "StockAnalysisReactToolService",
 ):
-    """Build a ReAct graph for one request-scoped tool service.
+    """为一次请求构建 ReAct 图。
 
-    The tool service holds database access and user-scoped business logic,
-    so this graph should not be globally cached.
+    tool_service 持有数据库 Session 和当前请求范围内的业务能力，
+    这样工具执行时仍然受后端用户隔离和参数限制保护。
     """
 
     graph_builder = StateGraph(StockAnalysisReactState)
@@ -80,11 +92,10 @@ async def arun_stock_analysis_react_graph(
     tool_service: "StockAnalysisReactToolService",
     react_graph_checkpoint_id: str | None = None,
 ) -> StockAnalysisReactState:
-    """Run the async ReAct graph.
+    """执行异步 ReAct 图。
 
-    analysis_thread_id is the business conversation id shared with the
-    analysis record. react_graph_checkpoint_id is only for this ReAct graph's
-    LangGraph checkpoint.
+    analysis_thread_id 是业务分析线程 id；
+    react_graph_checkpoint_id 只是本次 ReAct 图运行的 checkpoint id。
     """
 
     graph = get_stock_analysis_react_graph(tool_service)
@@ -104,6 +115,8 @@ def _build_react_graph_config(
     *,
     react_graph_checkpoint_id: str | None,
 ) -> dict:
+    """生成 ReAct 图 checkpoint 配置。"""
+
     resolved_checkpoint_id = (
         react_graph_checkpoint_id
         or initial_state.get("react_graph_checkpoint_id")
@@ -120,6 +133,8 @@ def _build_react_graph_config(
 def _build_default_react_checkpoint_id(
     initial_state: StockAnalysisReactState,
 ) -> str:
+    """当调用方未提供 checkpoint id 时，为本次 ReAct 运行生成默认 id。"""
+
     analysis_thread_id = initial_state.get("analysis_thread_id")
     if not analysis_thread_id:
         raise ValueError("analysis_thread_id is required for ReAct graph")
@@ -131,6 +146,11 @@ def _prepare_initial_react_state(
     initial_state: StockAnalysisReactState,
     config: dict,
 ) -> StockAnalysisReactState:
+    """补齐 ReAct 初始 state 的默认值。
+
+    max_iterations 控制工具调用循环上限，避免模型反复调用工具导致成本失控。
+    """
+
     checkpoint_id = config["configurable"]["thread_id"]
 
     prepared_state: StockAnalysisReactState = {

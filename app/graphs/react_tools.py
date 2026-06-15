@@ -1,3 +1,10 @@
+"""ReAct 工具白名单定义。
+
+这里定义的是“AI 可以请求哪些工具”，不是工具的真实执行逻辑。
+真实执行在 StockAnalysisReactToolService 中完成，并且每个工具仍然要走后端
+Service / Repository 的用户隔离、参数限制和数据裁剪。
+"""
+
 from dataclasses import dataclass
 
 from app.schemas.stock_analysis_react import ReactToolName
@@ -5,10 +12,10 @@ from app.schemas.stock_analysis_react import ReactToolName
 
 @dataclass(frozen=True)
 class ReactToolDefinition:
-    """Static definition for a ReAct tool.
+    """ReAct 工具的静态说明。
 
-    This class only describes what a tool is.
-    It does not execute the tool.
+    它只描述工具名称、用途和输入字段，不执行工具。
+    这样可以把“模型可见的工具说明”和“后端真实执行逻辑”分开。
     """
 
     name: ReactToolName
@@ -133,6 +140,8 @@ DEFAULT_REACT_TOOLS: tuple[ReactToolName, ...] = (
 )
 
 def get_default_react_tools() -> list[ReactToolName]:
+    """返回默认允许的 ReAct 工具列表。"""
+
     return list(DEFAULT_REACT_TOOLS)
 
 
@@ -140,18 +149,27 @@ def is_react_tool_allowed(
     tool_name: str,
     allowed_tools: list[ReactToolName],
 ) -> bool:
+    """检查工具是否同时存在于请求允许列表和系统定义表中。"""
+
     return tool_name in allowed_tools and tool_name in REACT_TOOL_DEFINITIONS
 
 
 def get_react_tool_definition(
     tool_name: ReactToolName,
 ) -> ReactToolDefinition:
+    """读取指定 ReAct 工具的静态定义。"""
+
     return REACT_TOOL_DEFINITIONS[tool_name]
 
 
 def format_react_tool_descriptions(
     allowed_tools: list[ReactToolName],
 ) -> str:
+    """把工具定义格式化给 LLM。
+
+    LLM 只能根据这些描述选择工具；是否真正执行还要经过后端白名单和参数校验。
+    """
+
     descriptions: list[str] = []
 
     for tool_name in allowed_tools:

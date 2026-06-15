@@ -1,3 +1,14 @@
+"""ReAct 追问图节点实现。
+
+ReAct 图分三类节点：
+1. agent_reason：让 LLM 判断是否需要调用工具；
+2. tool_execution：执行后端白名单工具并生成 Observation / Trace；
+3. final_answer：基于上下文和 Observation 生成最终回答。
+
+本文件同时负责 ReAct 的 AI 额度检查、用量记录、工具输入裁剪和失败 fallback。
+注意：ReAct 不是让 AI 自由操作系统，工具调用必须经过白名单和后端 Tool Service。
+"""
+
 import json
 import logging
 from typing import Any
@@ -62,10 +73,10 @@ REACT_FINAL_ANSWER_ESTIMATED_COMPLETION_TOKENS = 1200
 async def agent_reason_node(
     state: StockAnalysisReactState,
 ) -> StockAnalysisReactState:
-    """Ask the LLM to choose the next ReAct action.
+    """让 LLM 判断下一步 ReAct 动作。
 
-    This node only decides what to do next.
-    It does not execute tools.
+    该节点只决定 tool_call / final_answer / error，不执行工具。
+    如果达到 max_iterations，会直接进入最终回答，避免循环调用工具造成成本失控。
     """
 
     allowed_tools = state.get("allowed_tools") or get_default_react_tools()
@@ -255,6 +266,12 @@ def _build_agent_reason_messages(
     state: StockAnalysisReactState,
     allowed_tools: list[str],
 ) -> list[SystemMessage | HumanMessage]:
+    """构造 ReAct 推理 Prompt。
+
+    Prompt 会把可用工具、当前问题、主分析上下文、历史会话和 Observation 提供给模型，
+    但模型只能输出受约束的 JSON 动作。
+    """
+
     tool_descriptions = format_react_tool_descriptions(allowed_tools)
     compact_state = _build_compact_reason_context(state)
 
@@ -501,10 +518,10 @@ def _build_iteration_limit_answer(
 def create_react_tool_execution_node(
     tool_service: "StockAnalysisReactToolService",
 ):
-    """Create a ReAct tool execution node with request-scoped dependencies.
+    """创建绑定当前请求 Tool Service 的工具执行节点。
 
-    The returned node can be registered into LangGraph.
-    The database session stays inside tool_service, not inside graph state.
+    返回的节点会注册到 LangGraph。
+    数据库 Session 留在 tool_service 中，不写入 graph state，避免把连接对象传给 LLM 上下文。
     """
 
     async def react_tool_execution_node(
@@ -523,6 +540,11 @@ async def _execute_react_tool(
     state: StockAnalysisReactState,
     tool_service: "StockAnalysisReactToolService",
 ) -> StockAnalysisReactState:
+    """执行一次 ReAct 工具调用并生成 Observation / Trace。
+
+    成功和失败都会写入 trace，方便后续审计模型为什么调用了某个工具。
+    """
+
     tool_call = state.get("tool_call")
 
     if tool_call is None:
@@ -600,6 +622,12 @@ async def _call_react_tool(
     tool_call: ReactToolCall,
     tool_input: dict[str, Any],
 ) -> ReactObservation:
+    """根据工具名调用后端 Tool Service。
+
+    这里是工具白名单到真实业务服务的分发层。
+    所有 symbol、market、limit 等输入都会被默认值和上限保护。
+    """
+
     tool_name = tool_call.tool_name
 
     if tool_name == "get_analysis_record":
@@ -854,10 +882,10 @@ def _get_required_int(
 async def final_answer_node(
     state: StockAnalysisReactState,
 ) -> StockAnalysisReactState:
-    """Build the final user-facing answer from ReAct context and observations.
+    """基于 ReAct 上下文和 Observation 生成最终回答。
 
-    If a previous node already produced final_answer, this node keeps it.
-    Otherwise it asks the LLM to summarize the available context.
+    如果前面节点已经生成 final_answer，这里直接保留；
+    否则会再次检查额度并调用 LLM 总结。失败时返回 fallback，不让异常暴露给用户。
     """
 
     existing_answer = truncate_text(

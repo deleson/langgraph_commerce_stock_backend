@@ -1,3 +1,10 @@
+"""ReAct 工具输入输出的安全裁剪工具。
+
+ReAct Observation 会回流给 LLM，如果不限制长度和嵌套深度，
+一次工具调用可能把过大的行情、回测或候选结果塞进上下文，导致成本失控或响应过慢。
+本文件只做数据裁剪和格式安全处理，不改变业务含义。
+"""
+
 from typing import Any
 
 
@@ -26,6 +33,8 @@ def clamp_int(
     min_value: int,
     max_value: int,
 ) -> int:
+    """把外部输入限制在指定整数范围内。"""
+
     try:
         parsed = int(value)
     except (TypeError, ValueError):
@@ -39,6 +48,8 @@ def truncate_text(
     *,
     max_length: int = MAX_REACT_STRING_LENGTH,
 ) -> str:
+    """截断过长文本，避免 Observation 或错误信息撑爆上下文。"""
+
     text = str(value)
 
     if len(text) <= max_length:
@@ -50,6 +61,8 @@ def truncate_text(
 def safe_error_message(
     exc: Exception,
 ) -> str:
+    """把异常转成可记录、可返回的安全短消息。"""
+
     message = str(exc).strip() or exc.__class__.__name__
     return truncate_text(
         f"{exc.__class__.__name__}: {message}",
@@ -62,6 +75,11 @@ def sanitize_for_react(
     *,
     depth: int = 0,
 ) -> Any:
+    """递归裁剪 ReAct 上下文。
+
+    dict / list / Pydantic Model 都会被限制长度、数量和嵌套深度。
+    """
+
     if depth >= MAX_REACT_NESTING_DEPTH:
         return truncate_text(value)
 
@@ -109,6 +127,8 @@ def sanitize_for_react(
 def sanitize_tool_input(
     tool_input: dict[str, Any],
 ) -> dict[str, Any]:
+    """清洗工具输入，保证 tool_input 至少是 dict。"""
+
     payload = sanitize_for_react(tool_input)
 
     if isinstance(payload, dict):
@@ -120,6 +140,8 @@ def sanitize_tool_input(
 def sanitize_tool_output(
     tool_output: Any,
 ) -> dict[str, Any] | list[Any] | str | None:
+    """清洗工具输出，保证 Observation 中只保存有限大小的安全结构。"""
+
     payload = sanitize_for_react(tool_output)
 
     if payload is None or isinstance(payload, dict | list | str):

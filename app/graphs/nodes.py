@@ -1,3 +1,16 @@
+"""个股主分析图节点实现。
+
+本文件中的每个函数都是 LangGraph 的一个节点或辅助函数。
+主分析链路的核心原则是：
+
+1. 先检查数据质量，再决定是否进入 AI；
+2. 让 LLM 只基于后端准备好的行情、指标、策略信号、用户画像和记忆上下文分析；
+3. 额度不足、数据不可用、LLM 异常时返回安全降级结果；
+4. 所有 AI 调用都记录用量，便于成本控制和审计。
+
+注意：这里的 buy / sell / risk 等内容都是研究辅助，不构成投资建议。
+"""
+
 import json
 import logging
 from datetime import UTC, datetime
@@ -34,6 +47,12 @@ STOCK_ANALYSIS_ESTIMATED_COMPLETION_TOKENS = 1000
 
 
 def load_market_data_node(state: StockAnalysisState) -> StockAnalysisState:
+    """加载主分析所需的行情快照。
+
+    当前节点仍使用 MockMarketDataService 获取基础快照；
+    真实 K 线、数据质量、技术指标和策略信号由 Service 层提前写入 state。
+    """
+
     symbol = state.get("symbol")
     market = state.get("market")
 
@@ -52,6 +71,12 @@ def load_market_data_node(state: StockAnalysisState) -> StockAnalysisState:
 
 
 def calculate_indicators_node(state: StockAnalysisState) -> StockAnalysisState:
+    """基于行情快照计算早期基础指标。
+
+    该节点服务于主分析图兼容路径；更完整的 MA、RSI、MACD 等指标来自
+    TechnicalIndicatorQueryService 并通过 load_technical_indicators_node 注入上下文。
+    """
+
     market_snapshot = state.get("market_snapshot")
 
     if market_snapshot is None:
@@ -65,6 +90,11 @@ def calculate_indicators_node(state: StockAnalysisState) -> StockAnalysisState:
 
 
 def load_technical_indicators_node(state: StockAnalysisState) -> StockAnalysisState:
+    """把 Service 层准备好的技术指标写入图 metadata。
+
+    节点本身不重新计算指标，只整理上下文和 warning，供后续 LLM Prompt 使用。
+    """
+
     technical_indicators = state.get("technical_indicators")
     metadata = state.get("metadata", {})
 
@@ -125,6 +155,14 @@ def _build_technical_indicator_warnings(state: StockAnalysisState) -> list[str]:
 
 
 def check_data_quality_node(state: StockAnalysisState) -> StockAnalysisState:
+    """检查行情数据质量并写入图路由。
+
+    数据质量是主分析图的第一道门：
+    数据可用才走 normal；
+    数据有风险但仍可参考时走 degraded；
+    数据为空、不足、过旧或错误时走 unavailable / error。
+    """
+
     quality_context = state.get("quality_context")
 
     if quality_context is None:
@@ -171,6 +209,12 @@ def check_data_quality_node(state: StockAnalysisState) -> StockAnalysisState:
 
 
 def prepare_degraded_context_node(state: StockAnalysisState) -> StockAnalysisState:
+    """准备降级分析上下文。
+
+    degraded 不代表完全不可用，而是提醒后续 LLM：
+    当前数据存在数量不足、过旧、同步异常等风险，回答必须更谨慎。
+    """
+
     quality_context = state.get("quality_context")
     degraded_reason = _resolve_degraded_reason(state)
 
@@ -210,6 +254,11 @@ def prepare_degraded_context_node(state: StockAnalysisState) -> StockAnalysisSta
 
 
 def build_data_unavailable_result_node(state: StockAnalysisState) -> StockAnalysisState:
+    """构造数据不可用时的安全结果。
+
+    这里不会调用 LLM，避免在没有可靠行情和指标时让 AI 编造分析。
+    """
+
     reason = _resolve_unavailable_reason(state)
     warnings = _resolve_unavailable_warnings(state)
 
@@ -432,6 +481,12 @@ def _join_messages(messages: list[str]) -> str:
 
 
 def analyze_with_llm_node(state: StockAnalysisState) -> StockAnalysisState:
+    """同步 LLM 分析节点。
+
+    保留给早期同步调用路径。真实生产 API 主要使用异步版本，
+    但两者都遵循同一 Prompt 和结构化解析规则。
+    """
+
     market_snapshot = state.get("market_snapshot")
     indicators = state.get("indicators")
 
@@ -470,6 +525,12 @@ def analyze_with_llm_node(state: StockAnalysisState) -> StockAnalysisState:
 
 
 async def analyze_with_llm_node_async(state: StockAnalysisState) -> StockAnalysisState:
+    """异步 LLM 分析节点。
+
+    这是主分析生产链路的 AI 节点：先做额度预检查，再调用 DeepSeek，
+    成功时记录 success 用量，失败时记录 failed 并返回降级结果。
+    """
+
     market_snapshot = state.get("market_snapshot")
     indicators = state.get("indicators")
 
@@ -571,6 +632,8 @@ async def _check_stock_analysis_ai_quota(
     user_id: int,
     messages: list[SystemMessage | HumanMessage],
 ) -> tuple[bool, str | None, AIUsageTokenEstimate, AIUsageCostEstimate]:
+    """在调用 DeepSeek 前预估 token 和成本，并检查当前用户额度。"""
+
     token_service = AIUsageTokenService()
     settings = get_settings()
 
@@ -617,6 +680,11 @@ async def _record_stock_analysis_ai_success(
     completion_text: str,
     started_at: datetime,
 ):
+    """记录主分析 LLM 成功调用，用于额度、成本和审计。
+
+    记录失败只写日志，不影响已经生成的分析结果返回给用户。
+    """
+
     try:
         async with AsyncSessionLocal() as db:
             repo = AsyncAIUsageRepository(db)
@@ -653,6 +721,11 @@ async def _record_stock_analysis_ai_failed(
     error_message: str,
     started_at: datetime,
 ) -> None:
+    """记录主分析 LLM 调用失败。
+
+    失败记录用于后续排查模型、网络或解析问题；图本身会返回降级结果。
+    """
+
     try:
         async with AsyncSessionLocal() as db:
             repo = AsyncAIUsageRepository(db)
@@ -688,6 +761,8 @@ async def _record_stock_analysis_ai_blocked(
     estimated_tokens: AIUsageTokenEstimate,
     estimated_cost: AIUsageCostEstimate,
 ) -> None:
+    """记录额度不足导致的 blocked 调用。"""
+
     try:
         async with AsyncSessionLocal() as db:
             repo = AsyncAIUsageRepository(db)
@@ -720,6 +795,11 @@ def _build_ai_quota_blocked_result_state(
     estimated_tokens: AIUsageTokenEstimate,
     estimated_cost: AIUsageCostEstimate,
 ) -> StockAnalysisState:
+    """构造 AI 额度不足时的用户可读结果。
+
+    额度不足时不调用 DeepSeek，也不会生成伪分析，只返回明确的安全提示。
+    """
+
     message_service = AIQuotaMessageService()
 
     metadata = {
@@ -784,6 +864,11 @@ def _build_llm_error_result_state(
     state: StockAnalysisState,
     reason: str,
 ) -> StockAnalysisState:
+    """构造 LLM 异常时的安全降级结果。
+
+    这里会保留错误原因供日志和审计使用，但用户侧只看到谨慎的降级分析。
+    """
+
     metadata = {
         **state.get("metadata", {}),
         "llm_error_analysis": {
@@ -856,6 +941,12 @@ def _build_stock_analysis_messages(
     user_profile_context: dict[str, Any] | None = None,
     relevant_memories_context: dict[str, Any] | None = None,
 ) -> list[SystemMessage | HumanMessage]:
+    """构造主分析 Prompt。
+
+    Prompt 明确要求模型只基于后端提供的上下文回答：
+    不编造新闻、财报、实时行情和外部事实，也不能承诺收益或命令用户交易。
+    """
+
     system_prompt = """
     你是一名谨慎、客观的股票分析助手，服务对象是中文用户。
     

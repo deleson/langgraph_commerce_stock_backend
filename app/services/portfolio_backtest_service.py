@@ -1,3 +1,10 @@
+"""组合历史回测核心服务。
+
+本服务在多资产共同交易日上模拟组合建仓、持仓估值、按目标权重调仓、生成组合
+资金曲线和绩效指标。它不连接券商，不真实下单；组合回测结果只用于历史研究，
+不代表未来收益。
+"""
+
 from decimal import Decimal
 import math
 
@@ -19,7 +26,7 @@ from app.services.portfolio_backtest_data_service import (
 
 
 class PortfolioBacktestService:
-    """Run portfolio backtests with shared cash and multi-asset equity snapshots."""
+    """共享现金账户下的多资产组合回测引擎。"""
     TRADING_DAYS_PER_YEAR = 252
 
     def __init__(
@@ -35,6 +42,8 @@ class PortfolioBacktestService:
         self,
         request: PortfolioBacktestRequest,
     ) -> PortfolioBacktestResponse:
+        """运行一次完整组合回测。"""
+
         data = await self.data_service.get_candles_for_portfolio_backtest(request)
 
         candle_by_symbol_and_date = self._build_candle_by_symbol_and_date(
@@ -106,6 +115,12 @@ class PortfolioBacktestService:
         data: PortfolioBacktestCandleData,
         candle_by_symbol_and_date: dict[str, dict],
     ) -> dict:
+        """根据目标权重完成组合初始建仓。
+
+        cash_deploy_ratio 控制初始投入比例，target_weight 决定每个资产的目标资金。
+        这里使用首个共同交易日的 open_price 模拟建仓。
+        """
+
         first_trade_date = data.common_trade_dates[0]
         cash = request.initial_cash
         deploy_cash = request.initial_cash * Decimal(str(request.cash_deploy_ratio))
@@ -213,6 +228,12 @@ class PortfolioBacktestService:
         entry_price_by_symbol: dict[str, Decimal],
         trades: list[PortfolioBacktestTrade],
     ) -> list[PortfolioBacktestDailyEquity]:
+        """生成组合每日权益曲线。
+
+        每日权益由现金和所有资产持仓市值组成；actual_weight 需要在 total_equity
+        计算后重建，表示每个资产当天在组合中的真实占比。
+        """
+
         daily_equity: list[PortfolioBacktestDailyEquity] = []
         previous_total_equity: Decimal | None = None
         equity_high_watermark = request.initial_cash
@@ -361,6 +382,12 @@ class PortfolioBacktestService:
         trade_day_index: int,
         common_trade_dates,
     ) -> bool:
+        """判断当前交易日是否需要触发调仓。
+
+        daily / weekly / monthly / interval 都是第一版固定频率调仓规则；
+        最后一个交易日不调仓，因为没有下一交易日可用于模拟成交。
+        """
+
         if request.rebalance_frequency == "none":
             return False
 
@@ -404,6 +431,12 @@ class PortfolioBacktestService:
         positions_by_symbol: dict[str, int],
         candle_by_symbol_and_date: dict[str, dict],
     ) -> Decimal:
+        """按指定日期开盘价计算组合持仓市值。
+
+        调仓执行发生在开盘价，因此调仓前后的组合权益也用同一交易日 open_price
+        估值，保持撮合价格和估值口径一致。
+        """
+
         market_value = Decimal("0")
 
         for symbol_key, quantity in positions_by_symbol.items():
@@ -423,6 +456,8 @@ class PortfolioBacktestService:
         buy_quantity: int,
         buy_price: Decimal,
     ) -> Decimal:
+        """买入后重算加权平均持仓成本。"""
+
         if current_quantity <= 0 or current_entry_price is None:
             return buy_price
 
@@ -473,6 +508,12 @@ class PortfolioBacktestService:
         candle_by_symbol_and_date: dict[str, dict],
         trades: list[PortfolioBacktestTrade],
     ) -> Decimal:
+        """执行一次组合调仓。
+
+        先卖出超配资产，再买入低配资产。这样做可以先释放现金，再用于买入，
+        减少因为现金不足导致的低配资产无法补仓。
+        """
+
         target_values = self._build_target_values(
             request=request,
             portfolio_equity=portfolio_equity,
@@ -750,6 +791,12 @@ class PortfolioBacktestService:
         daily_equity: list[PortfolioBacktestDailyEquity],
         trades: list[PortfolioBacktestTrade],
     ) -> PortfolioBacktestMetrics:
+        """计算组合回测绩效指标。
+
+        指标包含收益、波动、最大回撤、夏普、换手率、现金/仓位比例、手续费和滑点。
+        这些指标用于复盘组合历史表现，不代表未来收益。
+        """
+
         final_equity = (
             daily_equity[-1].total_equity
             if daily_equity
@@ -900,6 +947,11 @@ class PortfolioBacktestService:
         trades: list[PortfolioBacktestTrade],
         daily_equity: list[PortfolioBacktestDailyEquity],
     ) -> float | None:
+        """计算组合换手率。
+
+        当前只统计 rebalance 交易金额，衡量调仓带来的交易活跃度和潜在成本压力。
+        """
+
         average_total_equity = self._calculate_average_total_equity(daily_equity)
 
         if average_total_equity is None or average_total_equity <= 0:
@@ -937,6 +989,8 @@ class PortfolioBacktestService:
         commission_rate: float,
         min_commission: Decimal,
     ) -> Decimal:
+        """计算组合交易手续费，逻辑与单股回测保持一致。"""
+
         if trade_value <= 0 or commission_rate <= 0:
             return Decimal("0")
 
@@ -954,6 +1008,11 @@ class PortfolioBacktestService:
         action: str,
         slippage_rate: float,
     ) -> tuple[Decimal, Decimal, str]:
+        """应用组合回测滑点。
+
+        买入成交价上调、卖出成交价下调，用于模拟真实交易中可能出现的成交劣化。
+        """
+
         if raw_price <= 0 or slippage_rate <= 0:
             return raw_price, Decimal("0"), "next_open"
 
@@ -978,6 +1037,11 @@ class PortfolioBacktestService:
         commission_rate: float,
         min_commission: Decimal,
     ) -> tuple[int, Decimal, Decimal]:
+        """在目标资金和手续费约束下计算可买数量。
+
+        组合调仓时不能只看目标市值，还要预留手续费，否则会出现现金不足。
+        """
+
         available_cash = min(cash, target_cash)
 
         if available_cash <= 0 or execution_price <= 0:

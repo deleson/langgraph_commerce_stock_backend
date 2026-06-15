@@ -1,3 +1,9 @@
+"""候选股票评分查询编排服务。
+
+本服务把“股票池构建、用户偏好读取、候选上下文加载、确定性评分、排序过滤、
+响应组装”串起来。它不直接计算技术指标，也不直接写评分规则。
+"""
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
@@ -18,11 +24,9 @@ from app.services.watchlist_service import AsyncWatchlistService
 
 
 class StockCandidateQueryService:
-    """Orchestrate stock candidate recommendation flow.
+    """候选股票评分 API 的业务编排层。
 
-    This service does not calculate indicators and does not score directly.
-    It connects universe loading, user preference, candidate data loading,
-    scoring, ranking, and response assembly.
+    这里的 candidate 表示“研究候选优先级”，不是荐股，也不是买卖建议。
     """
 
     def __init__(
@@ -46,6 +50,12 @@ class StockCandidateQueryService:
         request: StockCandidateRequest,
         user: User,
     ) -> StockCandidateResponse:
+        """执行一次候选评分。
+
+        流程是：构建股票池 -> 读取候选上下文 -> 读取用户风险偏好 -> 评分 ->
+        排名过滤 -> 组装响应。
+        """
+
         universe = await self._build_universe(
             request=request,
             user=user,
@@ -146,6 +156,12 @@ class StockCandidateQueryService:
         request: StockCandidateRequest,
         user: User,
     ) -> list[StockCandidateUniverseItem]:
+        """构建候选股票池。
+
+        manual 来自请求体显式传入；watchlist 来自当前用户自选股。这里必须使用
+        当前 user 查询，不能让请求体指定其他用户股票池。
+        """
+
         if request.universe_source == "manual":
             return [
                 StockCandidateUniverseItem(
@@ -178,6 +194,8 @@ class StockCandidateQueryService:
         candidate_count: int,
         excluded_count: int,
     ) -> StockCandidateInputSnapshot:
+        """记录候选评分输入快照，便于前端展示和后续审计。"""
+
         return StockCandidateInputSnapshot(
             universe_source=request.universe_source,
             requested_symbol_count=requested_symbol_count,

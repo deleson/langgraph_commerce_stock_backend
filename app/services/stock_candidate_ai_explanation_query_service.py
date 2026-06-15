@@ -1,3 +1,11 @@
+"""候选股票 AI 解释查询编排服务。
+
+这一层连接“确定性候选评分”和“AI 中文解释”：
+API 调用进来后，先由 StockCandidateQueryService 计算候选结果，
+再由 StockCandidateAIExplanationService 基于这个结果做解释。
+这样可以保证 AI 解释永远站在后端确定性评分之上，而不是让 AI 自己选股。
+"""
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
@@ -13,13 +21,11 @@ from app.services.stock_candidate_query_service import StockCandidateQueryServic
 
 
 class StockCandidateAIExplanationQueryService:
-    """Orchestrate stock candidate scoring and AI explanation.
+    """编排候选评分和候选 AI 解释。
 
-    This service keeps the future API router thin:
-    - first run deterministic stock candidate scoring
-    - then generate AI explanation based on that scoring result
-
-    It does not score stocks directly and does not build prompts directly.
+    Router 只负责接收 HTTP 请求和当前用户；
+    本 Service 负责先跑确定性候选评分，再把评分结果交给 AI 解释服务。
+    它本身不直接打分，也不直接拼 Prompt。
     """
 
     def __init__(
@@ -43,6 +49,12 @@ class StockCandidateAIExplanationQueryService:
         request: StockCandidateAIExplanationRequest,
         user: User,
     ) -> StockCandidateAIExplanationResponse:
+        """执行候选 AI 解释主流程。
+
+        先强制候选评分返回 score_breakdown、strategy_signal、data_quality，
+        因为 AI 解释必须基于这些可审计字段，而不能只拿一个总分自由发挥。
+        """
+
         candidate_request = self._build_candidate_request_for_ai(request)
 
         candidate_result = await self.candidate_query_service.run_stock_candidates(
@@ -60,7 +72,12 @@ class StockCandidateAIExplanationQueryService:
         self,
         request: StockCandidateAIExplanationRequest,
     ) -> StockCandidateRequest:
-        """Force the candidate result to include fields needed by AI explanation."""
+        """强制打开 AI 解释所需的候选评分详情字段。
+
+        include_score_breakdown 用于解释分数来源；
+        include_strategy_signal 用于解释规则信号；
+        include_data_quality 用于解释数据可信度和风险。
+        """
 
         return request.candidate_request.model_copy(
             update={

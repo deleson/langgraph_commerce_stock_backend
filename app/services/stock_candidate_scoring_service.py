@@ -1,3 +1,9 @@
+"""候选股票确定性评分服务。
+
+本服务把候选股票上下文转换成 score / grade / rank 所需的确定性评分结果。
+它不读取数据库、不调用 AI，也不承诺收益；score 只表示当前候选池中的研究优先级。
+"""
+
 from app.schemas.stock_candidate import (
     StockCandidateDataQualitySnapshot,
     StockCandidateItem,
@@ -9,12 +15,14 @@ from app.services.stock_candidate_data_service import StockCandidateDataItem
 
 
 class StockCandidateScoringService:
-    """Score candidate stocks using deterministic quant-style rules.
+    """基于固定规则给候选股票评分。
 
-    This service does not load data and does not call AI.
-    It only converts StockCandidateDataItem into StockCandidateItem.
+    评分由数据质量、趋势、动量、RSI、MACD、波动率、成交量、流动性、策略信号、
+    回测表现、综合风险和用户偏好共同组成。
     """
 
+    # 候选评分从 50 分中性基准开始，各维度规则只做加减分。最终分数会被限制在
+    # 0 到 100，避免单一维度把结果推到不可解释区间。
     BASE_SCORE = 50
 
     DATA_QUALITY_AVAILABLE_SCORE = 5
@@ -166,6 +174,12 @@ class StockCandidateScoringService:
         include_strategy_signal: bool = True,
         include_data_quality: bool = True,
     ) -> StockCandidateItem:
+        """为单只股票生成候选评分。
+
+        如果数据不可评分，直接返回 excluded；否则逐个维度打分，合成 raw_score，
+        再生成 final_score、grade、reasons、risks 和 score_breakdown。
+        """
+
         if self._is_unscorable(data_item):
             return self._build_excluded_candidate(
                 data_item=data_item,
@@ -195,6 +209,8 @@ class StockCandidateScoringService:
             rule_results=rule_results,
         )
 
+        # raw_score 保留所有维度相加后的原始分数，final_score 再限制到 0-100。
+        # 这样既能解释每个维度贡献，也能保证对外响应分数稳定。
         raw_score = (
                 self.BASE_SCORE
                 + data_quality_score
@@ -281,6 +297,12 @@ class StockCandidateScoringService:
         *,
         top_n: int,
     ) -> tuple[list[StockCandidateItem], list[StockCandidateItem]]:
+        """按分数、等级、策略信号和股票代码排序，并切分入选/排除列表。
+
+        score 低于 MIN_CANDIDATE_SCORE 的股票会被排除；超过 top_n 的股票不是不可用，
+        只是本次没有进入优先研究列表。
+        """
+
         eligible_candidates: list[StockCandidateItem] = []
         excluded_candidates: list[StockCandidateItem] = []
 
@@ -378,6 +400,11 @@ class StockCandidateScoringService:
         self,
         candidate: StockCandidateItem,
     ) -> tuple[int, int, int, str]:
+        """候选排序键。
+
+        先看 final_score，再看 grade，再看策略信号优先级，最后用 symbol 保证排序稳定。
+        """
+
         return (
             candidate.score,
             self.GRADE_PRIORITY.get(candidate.grade, 0),
@@ -439,6 +466,12 @@ class StockCandidateScoringService:
         include_data_quality: bool,
         include_strategy_signal: bool,
     ) -> StockCandidateItem:
+        """构建不可评分股票结果。
+
+        不可评分不代表股票本身一定差，而是当前系统缺少足够可靠的数据或指标，
+        因此不能进入候选优先级排序。
+        """
+
         excluded_reason = self._build_excluded_reason(data_item)
 
         return StockCandidateItem(
@@ -495,6 +528,12 @@ class StockCandidateScoringService:
         data_item: StockCandidateDataItem,
         rule_results: list[StockCandidateScoreRuleResult],
     ) -> int:
+        """数据质量维度评分。
+
+        数据质量可用才小幅加分；数据不足或过旧会明显扣分，因为后续所有指标、
+        策略信号和候选解释都依赖这批 K 线。
+        """
+
         data_quality = data_item.data_quality
         if data_quality is None:
             score = self.DATA_QUALITY_LIMITED_SCORE
@@ -524,6 +563,12 @@ class StockCandidateScoringService:
             data_item: StockCandidateDataItem,
             rule_results: list[StockCandidateScoreRuleResult],
     ) -> int:
+        """趋势维度评分。
+
+        趋势分由均线方向、短期均线排列、中期确认和 EMA 动能确认组成。
+        趋势只是候选优先级的一部分，不直接等同于买入建议。
+        """
+
         moving_average = data_item.technical_indicators.summary.moving_average
 
         score = 0
@@ -644,6 +689,13 @@ class StockCandidateScoringService:
             data_item: StockCandidateDataItem,
             rule_results: list[StockCandidateScoreRuleResult],
     ) -> int:
+        """评估价格动量是否支持候选优先级。
+
+        动量维度关注 5 日、10 日、20 日价格变化方向：
+        短中长期同时为正时，说明上涨动能更一致；同时为负时，说明下行压力更明确。
+        这里仍然只是候选评分，不会把短期上涨直接解释成买入建议。
+        """
+
         momentum = data_item.technical_indicators.summary.momentum
 
         score = 0
@@ -775,6 +827,13 @@ class StockCandidateScoringService:
             data_item: StockCandidateDataItem,
             rule_results: list[StockCandidateScoreRuleResult],
     ) -> int:
+        """评估 RSI 所反映的超买、超卖和短期修复风险。
+
+        RSI 过低可能意味着超卖修复观察价值，但也可能来自持续下跌；
+        RSI 过高可能意味着强势延续，也可能意味着追高和回撤风险。
+        因此本维度既会加分，也会把极端区间写入 warnings。
+        """
+
         rsi = data_item.technical_indicators.summary.rsi
         primary_rsi = self._select_candidate_primary_rsi(rsi)
 
@@ -874,6 +933,13 @@ class StockCandidateScoringService:
             data_item: StockCandidateDataItem,
             rule_results: list[StockCandidateScoreRuleResult],
     ) -> int:
+        """评估 MACD 所反映的趋势动能结构。
+
+        MACD 维度同时看 signal、histogram、DIF/DEA 和 0 轴位置。
+        单个 MACD 项并不直接决定候选结论，只有与趋势、动量、风险等维度合并后，
+        才会影响最终候选优先级。
+        """
+
         macd = data_item.technical_indicators.summary.macd
 
         score = 0
@@ -986,6 +1052,13 @@ class StockCandidateScoringService:
         data_item: StockCandidateDataItem,
         rule_results: list[StockCandidateScoreRuleResult],
     ) -> int:
+        """评估波动率对候选研究优先级的影响。
+
+        低波动通常意味着价格波动更可控，因此可以轻微加分；
+        高波动不代表股票一定不好，但会提高研究和持仓管理难度，
+        所以在候选评分里会体现为风险扣分。
+        """
+
         volatility = data_item.technical_indicators.summary.volatility
 
         if volatility.level == "low":
@@ -1016,6 +1089,12 @@ class StockCandidateScoringService:
             data_item: StockCandidateDataItem,
             rule_results: list[StockCandidateScoreRuleResult],
     ) -> int:
+        """评估成交量相对均量的确认作用。
+
+        温和放量可以提高信号可信度，明显或极端放量则需要同时提示风险；
+        缩量会降低价格信号的确认度。这里不把放量简单等同于利好。
+        """
+
         volume = data_item.technical_indicators.summary.volume_factor
         volume_ratio = volume.volume_ratio
 
@@ -1062,6 +1141,13 @@ class StockCandidateScoringService:
             data_item: StockCandidateDataItem,
             rule_results: list[StockCandidateScoreRuleResult],
     ) -> int:
+        """评估候选股票的流动性风险。
+
+        流动性维度主要关注 20 日均量和成交量比例。
+        如果成交极低或均量异常，价格信号可能缺少有效成交支撑，
+        因此需要降低候选优先级并写入风险提示。
+        """
+
         volume = data_item.technical_indicators.summary.volume_factor
 
         score = 0
@@ -1105,6 +1191,13 @@ class StockCandidateScoringService:
             data_item: StockCandidateDataItem,
             rule_results: list[StockCandidateScoreRuleResult],
     ) -> int:
+        """把策略信号作为候选评分的一项综合确认。
+
+        StrategySignalService 已经把趋势、RSI、MACD、动量、波动率和成交量合成为
+        buy / hold / observe / sell。候选评分在这里复用该结果，但仍然会限制 warnings 数量，
+        避免一个维度把响应撑得过大。
+        """
+
         strategy_signal = data_item.strategy_signal
 
         if strategy_signal is None or strategy_signal.status != "available":
@@ -1179,6 +1272,12 @@ class StockCandidateScoringService:
             data_item: StockCandidateDataItem,
             rule_results: list[StockCandidateScoreRuleResult],
     ) -> int:
+        """预留历史回测表现维度。
+
+        当前候选评分接口默认不批量跑回测，原因是回测需要明确时间区间、成本参数和风控规则，
+        直接在候选列表里隐式触发会让接口变慢，也容易让用户误解为收益承诺。
+        """
+
         score = 0
 
         rule_results.append(
@@ -1279,6 +1378,13 @@ class StockCandidateScoringService:
             data_item: StockCandidateDataItem,
             rule_results: list[StockCandidateScoreRuleResult],
     ) -> int:
+        """汇总数据、技术指标和策略信号带来的综合风险扣分。
+
+        这个维度不是单独寻找机会，而是负责“降温”：
+        例如数据过旧、高波动、多项技术指标转弱、强 sell 信号等，
+        都会在这里统一转成风险分和 warnings。
+        """
+
         score = 0
         reasons: list[str] = []
         warnings: list[str] = []
@@ -1382,6 +1488,13 @@ class StockCandidateScoringService:
         risk_preference: str,
         rule_results: list[StockCandidateScoreRuleResult],
     ) -> int:
+        """根据用户风险偏好微调候选优先级。
+
+        conservative 会更严格惩罚高波动和 sell 信号；
+        aggressive 会更关注趋势和动量，但仍然不会忽略高波动与 sell 风险。
+        这一步只改变研究排序偏好，不代表系统替用户做交易决策。
+        """
+
         normalized_preference = self._normalize_risk_preference(risk_preference)
 
         if normalized_preference == "conservative":
@@ -1731,6 +1844,8 @@ class StockCandidateScoringService:
         self,
         score: int,
     ) -> str:
+        """把 0-100 分转换为 A/B/C/D 等级，便于 API 和前端展示。"""
+
         if score >= 80:
             return "A"
 

@@ -1,3 +1,9 @@
+"""单股回测查询编排服务。
+
+Router 不直接执行回测，本服务负责在 API 请求进入核心回测前先做数据质量门控，
+再调用 BacktestService。这样数据质量检查、不可用响应和回测计算可以保持清晰分层。
+"""
+
 from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,10 +17,10 @@ from app.services.market_data_quality_report_service import (
 
 
 class BacktestQueryService:
-    """Orchestrate backtest queries for API and future tools.
+    """单股回测 API 与核心回测引擎之间的编排层。
 
-    This service keeps routers thin and gives later steps a stable place to add
-    data-quality gates, persistence, user isolation, and AI explanation hooks.
+    它不写交易撮合公式，也不直接访问 market_candles；这些分别由 BacktestService
+    和数据/质量服务负责。
     """
 
     def __init__(
@@ -34,6 +40,12 @@ class BacktestQueryService:
         self,
         request: BacktestRequest,
     ) -> BacktestResponse:
+        """执行一次单股回测请求。
+
+        如果 enforce_data_quality=True，则数据为空、数量不足、过旧或有错误时，
+        直接返回 unavailable，避免用不可靠 K 线生成看似完整的回测结果。
+        """
+
         quality_report = await self.quality_report_service.get_quality_report(
             symbol=request.symbol,
             market=request.market,
@@ -66,6 +78,8 @@ class BacktestQueryService:
         request: BacktestRequest,
         quality_report: MarketDataQualityReport,
     ) -> BacktestResponse | None:
+        """根据数据质量报告决定是否跳过回测。"""
+
         if quality_report.is_empty:
             return self._build_unavailable_response(
                 request=request,

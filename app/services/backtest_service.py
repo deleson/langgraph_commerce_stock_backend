@@ -1,3 +1,10 @@
+"""单股历史回测核心服务。
+
+本服务基于历史 K 线和确定性策略信号，模拟买入、卖出、持仓、现金变化、
+资金曲线和绩效指标。它不连接券商，不真实下单；回测结果只用于研究历史表现，
+不代表未来收益，也不构成投资建议。
+"""
+
 from datetime import UTC, datetime, date
 from decimal import Decimal
 import math
@@ -25,11 +32,10 @@ from app.services.technical_indicator_service import TechnicalIndicatorService
 
 
 class BacktestService:
-    """Run the first version of strategy-signal backtests.
+    """单股策略回测引擎。
 
-    Step 5 focuses on the backtest loop and daily signal generation.
-    Trade execution, position accounting, and detailed metrics are added
-    in later stage-six steps.
+    核心流程是：读取 K 线 -> 逐日生成策略信号 -> 用下一根 K 线开盘价模拟成交 ->
+    更新现金和持仓 -> 生成每日权益 -> 计算绩效与风险指标。
     """
 
     MIN_SIGNAL_WINDOW = 35
@@ -55,6 +61,12 @@ class BacktestService:
         self,
         request: BacktestRequest,
     ) -> BacktestResponse:
+        """运行一次完整单股回测。
+
+        注意：这里所有计算都基于历史数据回放。即使 metrics 表现较好，也只能说明
+        这套规则在该历史区间表现如何，不能推导未来一定有效。
+        """
+
         candle_data = await self.data_service.get_candles_for_backtest(request)
         candles = candle_data.candles
 
@@ -115,6 +127,12 @@ class BacktestService:
         request: BacktestRequest,
         candles: list[MarketCandle],
     ) -> list[BacktestSignalSnapshot]:
+        """逐日生成策略信号快照。
+
+        每一天只使用“当天及以前”的 K 线窗口计算技术指标，避免把未来行情提前
+        用进信号里。样本少于 MIN_SIGNAL_WINDOW 时跳过，是为了避免指标不稳定。
+        """
+
         snapshots: list[BacktestSignalSnapshot] = []
 
         for index in range(len(candles)):
@@ -218,6 +236,12 @@ class BacktestService:
         candles: list[MarketCandle],
         signal_snapshots: list[BacktestSignalSnapshot],
     ) -> list[BacktestTrade]:
+        """根据策略信号和风控规则模拟交易撮合。
+
+        撮合顺序是：先计算账户当前回撤，再应用止损、止盈、最大回撤保护和冷却期；
+        只有最终 decision 仍然是 buy / sell 时才生成模拟交易。
+        """
+
         trades: list[BacktestTrade] = []
         cash = request.initial_cash
         position_quantity = 0
@@ -232,6 +256,8 @@ class BacktestService:
 
             current_candle = candles[index]
             next_candle = candles[next_index]
+            # 信号在当前 K 线收盘后生成，成交使用下一根 K 线开盘价，避免同日信号
+            # 直接按已知收盘价成交带来的未来函数问题。
             raw_price = next_candle.open_price
 
             if raw_price <= 0:
@@ -285,6 +311,7 @@ class BacktestService:
                 if position_quantity > 0:
                     continue
 
+                # 买入滑点会抬高成交价，用来模拟真实交易中可能出现的成交劣化。
                 execution_price, slippage_amount, execution_price_type = (
                     self._apply_slippage(
                         raw_price=raw_price,
@@ -374,6 +401,7 @@ class BacktestService:
                 if position_quantity <= 0:
                     continue
 
+                # 卖出滑点会降低成交价，用来模拟卖出时可能低于原始报价成交。
                 execution_price, slippage_amount, execution_price_type = (
                     self._apply_slippage(
                         raw_price=raw_price,
@@ -464,6 +492,13 @@ class BacktestService:
         candles: list[MarketCandle],
         trades: list[BacktestTrade],
     ) -> list[BacktestDailyEquity]:
+        """生成每日资金曲线。
+
+        total_equity = cash + position_market_value；
+        daily_return 按相邻两日 total_equity 计算；
+        drawdown 按历史权益高点回撤计算。
+        """
+
         result: list[BacktestDailyEquity] = []
         trades_by_date = self._group_trades_by_date(trades)
 
@@ -533,6 +568,12 @@ class BacktestService:
         daily_equity: list[BacktestDailyEquity],
         signal_snapshots: list[BacktestSignalSnapshot],
     ) -> BacktestMetrics:
+        """汇总回测绩效指标。
+
+        指标覆盖收益、波动、夏普、最大回撤、交易胜率、盈亏比、手续费、滑点和
+        风控触发次数。它们用于复盘策略历史表现，不用于承诺未来收益。
+        """
+
         final_equity = (
             daily_equity[-1].total_equity
             if daily_equity
@@ -1092,6 +1133,12 @@ class BacktestService:
         price: Decimal,
         position_size_ratio: float,
     ) -> int:
+        """按仓位比例计算可买整数股数。
+
+        这里不会使用全部现金，而是使用 position_size_ratio 控制单次买入规模，
+        用于模拟基础仓位管理。
+        """
+
         available_cash = cash * Decimal(str(position_size_ratio))
         return int(available_cash // price)
 
@@ -1102,6 +1149,12 @@ class BacktestService:
         commission_rate: float,
         min_commission: Decimal,
     ) -> Decimal:
+        """计算模拟交易手续费。
+
+        commission_rate 表示按成交金额计费，min_commission 表示最低手续费。
+        这只是回测成本近似，不等同于任一真实券商的完整收费规则。
+        """
+
         if trade_value <= 0 or commission_rate <= 0:
             return Decimal("0")
 
@@ -1119,6 +1172,12 @@ class BacktestService:
         action: str,
         slippage_rate: float,
     ) -> tuple[Decimal, Decimal, BacktestExecutionPriceType]:
+        """应用滑点。
+
+        买入时成交价上调，卖出时成交价下调，用来模拟真实成交可能相对理论价格
+        变差。滑点会进入成本统计，避免回测结果过于理想化。
+        """
+
         if raw_price <= 0:
             return raw_price, Decimal("0"), "next_open"
 
@@ -1147,6 +1206,12 @@ class BacktestService:
         position_quantity: int,
         open_buy_trade: BacktestTrade | None,
     ) -> BacktestSignalSnapshot:
+        """应用止损规则。
+
+        当已有持仓且当前收盘价跌破买入价按 stop_loss_rate 计算出的触发价时，
+        将原始决策改写为 stop_loss，并在下一根 K 线开盘价模拟卖出。
+        """
+
         risk_control = request.risk_control
 
         if not risk_control.enable_stop_loss:
@@ -1200,6 +1265,12 @@ class BacktestService:
         position_quantity: int,
         open_buy_trade: BacktestTrade | None,
     ) -> BacktestSignalSnapshot:
+        """应用止盈规则。
+
+        止盈不会覆盖止损：如果同一天已经被止损规则改写，就保持 stop_loss。
+        这是为了让风险保护优先于收益兑现。
+        """
+
         if snapshot.decision == "stop_loss":
             return snapshot
 
@@ -1256,6 +1327,12 @@ class BacktestService:
         position_quantity: int,
         current_drawdown: float,
     ) -> BacktestSignalSnapshot:
+        """应用最大回撤保护。
+
+        当账户权益相对历史高点回撤超过阈值，并且当前为空仓准备买入时，
+        将 buy 改写为 drawdown_guard，避免在账户回撤较深时继续扩大风险。
+        """
+
         risk_control = request.risk_control
 
         if not risk_control.enable_max_drawdown_guard:
@@ -1327,6 +1404,12 @@ class BacktestService:
         position_quantity: int,
         cooldown_days_left: int,
     ) -> BacktestSignalSnapshot:
+        """应用卖出后的冷却期。
+
+        冷却期只拦截空仓状态下的新 buy 信号，不影响已持仓状态。它用于避免策略
+        在刚卖出后立刻反复追入，降低频繁交易风险。
+        """
+
         if snapshot.decision == "drawdown_guard":
             return snapshot
 

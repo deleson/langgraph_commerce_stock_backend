@@ -1,3 +1,10 @@
+"""组合回测查询编排服务。
+
+本服务负责在组合回测核心计算前，对组合内每个资产分别生成数据质量报告。
+当 enforce_data_quality=True 时，只要组合内任一资产不可用，就返回 unavailable，
+避免用部分缺失数据生成不可靠的组合回测结果。
+"""
+
 from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,10 +22,9 @@ from app.services.portfolio_backtest_service import PortfolioBacktestService
 
 
 class PortfolioBacktestQueryService:
-    """Orchestrate portfolio backtest queries for API and future tools.
+    """组合回测 API 与组合回测引擎之间的编排层。
 
-    This service keeps routers thin and centralizes data-quality gates before
-    running the portfolio backtest engine.
+    它不直接计算调仓和组合权益，只负责质量门控、调用核心服务和合并 warnings。
     """
 
     def __init__(
@@ -40,6 +46,8 @@ class PortfolioBacktestQueryService:
         self,
         request: PortfolioBacktestRequest,
     ) -> PortfolioBacktestResponse:
+        """执行一次组合回测请求。"""
+
         quality_reports = await self._build_quality_reports(request)
 
         if request.enforce_data_quality:
@@ -63,6 +71,8 @@ class PortfolioBacktestQueryService:
         self,
         request: PortfolioBacktestRequest,
     ) -> list[MarketDataQualityReport]:
+        """为组合内每个资产生成数据质量报告。"""
+
         reports: list[MarketDataQualityReport] = []
 
         for asset in request.assets:
@@ -86,6 +96,8 @@ class PortfolioBacktestQueryService:
         request: PortfolioBacktestRequest,
         quality_reports: list[MarketDataQualityReport],
     ) -> PortfolioBacktestResponse | None:
+        """只要任一资产数据质量不满足要求，就阻止组合回测继续执行。"""
+
         if any(report.is_empty for report in quality_reports):
             return self._build_unavailable_response(
                 request=request,

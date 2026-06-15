@@ -1,3 +1,10 @@
+"""组合回测数据读取与对齐服务。
+
+组合回测不是简单把多只股票分别回测后相加，而是需要在同一批交易日上同时估值。
+本服务负责读取每个资产的 K 线，并求出所有资产共同存在的交易日，供组合权益、
+调仓和持仓快照使用。
+"""
+
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 
@@ -14,6 +21,12 @@ from app.schemas.portfolio_backtest import (
 
 @dataclass(frozen=True)
 class PortfolioBacktestCandleData:
+    """组合回测的数据包。
+
+    candles_by_symbol 保存每个资产的 K 线；common_trade_dates 是所有资产共有的
+    交易日；input_snapshot 和 warnings 用于复盘本次组合回测输入。
+    """
+
     candles_by_symbol: dict[str, list[MarketCandle]]
     common_trade_dates: list[date]
     input_snapshot: PortfolioBacktestInputSnapshot
@@ -21,7 +34,7 @@ class PortfolioBacktestCandleData:
 
 
 class PortfolioBacktestDataService:
-    """Load and align market candles for portfolio backtests."""
+    """为组合回测读取并对齐多资产 K 线。"""
 
     def __init__(
         self,
@@ -36,6 +49,12 @@ class PortfolioBacktestDataService:
         self,
         request: PortfolioBacktestRequest,
     ) -> PortfolioBacktestCandleData:
+        """读取组合内所有资产 K 线，并计算共同交易日。
+
+        source / adjust_type 必须保持一致，避免不同数据口径的资产被放进同一次
+        组合回测中比较。
+        """
+
         start_at = self._date_to_start_datetime(request.start_date)
         end_at = self._date_to_end_datetime(request.end_date)
 
@@ -115,6 +134,12 @@ class PortfolioBacktestDataService:
         self,
         candles_by_symbol: dict[str, list[MarketCandle]],
     ) -> list[date]:
+        """计算所有资产共同存在的交易日。
+
+        组合权益必须在同一天同时知道每只资产价格；如果某只资产缺少该日期价格，
+        第一版会跳过这个日期，避免估值失真。
+        """
+
         date_sets: list[set[date]] = []
 
         for candles in candles_by_symbol.values():
@@ -223,6 +248,8 @@ class PortfolioBacktestDataService:
         self,
         candles: list[MarketCandle],
     ) -> list[MarketCandle]:
+        """按时间升序返回 K 线，保证组合回测逐日推进。"""
+
         return sorted(candles, key=lambda candle: candle.candle_time)
 
     def _date_to_start_datetime(

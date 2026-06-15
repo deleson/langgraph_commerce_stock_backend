@@ -1,3 +1,9 @@
+"""候选股票评分数据准备服务。
+
+候选评分不是凭空打分：它需要先为每只候选股票收集数据质量报告、技术指标和策略
+信号。本服务只负责加载这些上下文，不负责计算分数，也不调用 AI。
+"""
+
 from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,6 +28,8 @@ from app.services.technical_indicator_query_service import (
 
 @dataclass(frozen=True)
 class StockCandidateUniverseItem:
+    """候选股票池中的单个标的。"""
+
     symbol: str
     market: MarketCode
     name: str | None = None
@@ -29,6 +37,12 @@ class StockCandidateUniverseItem:
 
 @dataclass
 class StockCandidateDataItem:
+    """候选评分前的数据上下文。
+
+    data_quality / technical_indicators / strategy_signal 是后续评分维度的输入；
+    warnings / errors 用于记录单只股票读取过程中的问题。
+    """
+
     symbol: str
     market: MarketCode
     name: str | None = None
@@ -42,13 +56,9 @@ class StockCandidateDataItem:
 
 
 class StockCandidateDataService:
-    """Load candidate stock data before scoring.
+    """候选评分的数据加载层。
 
-    This service does not score stocks.
-    It only loads data needed by the later scoring service:
-    - data quality report;
-    - technical indicators;
-    - strategy signal.
+    它不直接给股票排名，只负责把评分所需材料准备好。
     """
 
     def __init__(
@@ -86,6 +96,12 @@ class StockCandidateDataService:
         stale_after_days: int | None = None,
         include_strategy_signal: bool = True,
     ) -> list[StockCandidateDataItem]:
+        """批量读取候选股票上下文。
+
+        单只股票读取失败不会中断整个候选池，而是把错误写入该股票的 errors，
+        让评分层决定是否排除。
+        """
+
         results: list[StockCandidateDataItem] = []
 
         for candidate in candidates:
@@ -190,6 +206,12 @@ class StockCandidateDataService:
         data_quality: MarketDataQualityReport,
         enforce_data_quality: bool,
     ) -> bool:
+        """判断是否跳过技术指标和策略信号读取。
+
+        数据为空或存在硬错误时必定跳过；如果 enforce_data_quality=True，
+        数据不足或过旧也会跳过，避免后续评分建立在不可靠数据上。
+        """
+
         if data_quality.is_empty:
             return True
 

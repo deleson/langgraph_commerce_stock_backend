@@ -1,3 +1,13 @@
+"""候选股票 AI 解释服务。
+
+本文件只负责把已经计算好的候选评分结果转换成更容易理解的中文解释。
+重要边界：
+1. AI 不重新打分；
+2. AI 不修改 score / grade / rank；
+3. AI 不补充外部新闻、财报或公告；
+4. AI 输出失败、格式错误或包含禁用投资表达时，回退到确定性解释。
+"""
+
 import json
 import logging
 from datetime import UTC, datetime
@@ -44,11 +54,15 @@ CANDIDATE_AI_EXPLANATION_FEATURE: AIUsageFeature = "candidate_ai_explanation"
 CANDIDATE_AI_EXPLANATION_ESTIMATED_COMPLETION_TOKENS = 1800
 
 class StockCandidateAIExplanationService:
-    """Generate AI explanations for deterministic stock candidate results.
+    """为确定性候选评分结果生成 AI 中文解释。
 
-    This service does not score stocks and does not query the database.
-    It only trims StockCandidateResponse, calls the LLM, parses the result,
-    and falls back to deterministic text when the LLM is unavailable.
+    这个 Service 不查数据库、不重新计算候选分数，也不决定股票好坏。
+    它的职责是：
+    1. 裁剪 StockCandidateResponse，避免把过大的上下文直接塞给 LLM；
+    2. 调用 LLM 生成面向用户的中文解释；
+    3. 校验 AI 是否篡改 score / grade / rank；
+    4. 校验 AI 是否出现禁止性投资表达；
+    5. 失败时返回确定性 fallback，保证 API 可用。
     """
 
     MAX_REASONS = 5
@@ -103,7 +117,13 @@ class StockCandidateAIExplanationService:
         candidate_result: StockCandidateResponse,
         user_id: int,
     ) -> StockCandidateAIExplanationResponse:
-        """Generate an AI explanation from an existing candidate scoring result."""
+        """基于已有候选评分结果生成 AI 解释。
+
+        主流程是：先检查候选评分是否可用，再构造 AI 上下文和 Prompt；
+        调用前先做额度检查，调用后解析 JSON 并做安全校验。
+        如果额度不足、LLM 失败、JSON 解析失败或安全校验失败，会返回 fallback，
+        而不是让异常直接暴露给用户。
+        """
 
         input_snapshot = self._build_input_snapshot(
             request=request,
@@ -235,6 +255,12 @@ class StockCandidateAIExplanationService:
         self,
         ai_context: dict[str, Any],
     ) -> list[SystemMessage | HumanMessage]:
+        """构造 LLM 消息。
+
+        SystemMessage 写清安全边界和输出格式，HumanMessage 提供候选评分上下文。
+        这样可以把“规则”和“数据”分开，降低 AI 混淆职责的概率。
+        """
+
         system_prompt = self._build_system_prompt()
         human_prompt = self._build_human_prompt(ai_context)
 
@@ -244,6 +270,8 @@ class StockCandidateAIExplanationService:
         ]
 
     def _build_system_prompt(self) -> str:
+        """构造系统提示词，约束 AI 只能做解释，不能做交易建议。"""
+
         return (
             "你是一个中文股票研究助理，负责解释系统已经计算好的量化候选股票结果。\n"
             "你的任务是把候选评分、评分拆解、策略信号、数据质量、风险提示解释得更清楚。\n"
@@ -254,6 +282,8 @@ class StockCandidateAIExplanationService:
         )
 
     def _build_human_prompt(self, ai_context: dict[str, Any]) -> str:
+        """构造用户提示词，把候选评分上下文以 JSON 形式交给 LLM。"""
+
         style = str(ai_context.get("explanation_style") or "balanced")
         return (
             "请根据下面的候选评分上下文，生成 AI 候选解释结果。\n\n"
@@ -364,6 +394,13 @@ class StockCandidateAIExplanationService:
         candidate_result: StockCandidateResponse,
         input_snapshot: StockCandidateAIExplanationInputSnapshot,
     ) -> StockCandidateAIExplanationResponse:
+        """解析并校验 LLM 返回的 JSON。
+
+        这里会先按 Schema 转换成 StockCandidateAIExplanationResponse，
+        再校验 AI 是否篡改候选股票身份、分数、等级、排序，
+        最后校验是否出现“保证收益、必涨、满仓”等禁止表达。
+        """
+
         payload = self._load_json_content(raw_content)
 
         response = StockCandidateAIExplanationResponse(
@@ -412,6 +449,12 @@ class StockCandidateAIExplanationService:
         response: StockCandidateAIExplanationResponse,
         candidate_result: StockCandidateResponse,
     ) -> None:
+        """校验 AI 输出没有偏离原始候选评分结果。
+
+        候选解释可以换一种中文说法，但不能新增不存在的候选股票，
+        也不能把原始 score / grade / rank 改成更好看的结果。
+        """
+
         source_map = self._build_source_candidate_map(candidate_result)
 
         for item in response.candidate_explanations:
@@ -472,6 +515,8 @@ class StockCandidateAIExplanationService:
         rank: int | None,
         source: StockCandidateItem,
     ) -> None:
+        """校验单只候选股票的核心身份和评分字段没有被 AI 篡改。"""
+
         if score != source.score:
             raise ValueError(
                 f"AI response changed score for {symbol}/{market}: {score} != {source.score}"
@@ -491,6 +536,12 @@ class StockCandidateAIExplanationService:
         self,
         response: StockCandidateAIExplanationResponse,
     ) -> None:
+        """扫描 AI 输出中的禁止性投资表达。
+
+        一旦出现“稳赚、保证收益、必须买入”等表达，视为安全校验失败，
+        上层会走 fallback，避免把不合规内容返回给用户。
+        """
+
         for text in self._iter_ai_response_texts(response):
             forbidden_phrase = self._find_forbidden_phrase(text)
             if forbidden_phrase is not None:
@@ -542,6 +593,12 @@ class StockCandidateAIExplanationService:
         return None
 
     def _load_json_content(self, raw_content: str) -> dict[str, Any]:
+        """从 LLM 原始文本中提取 JSON 对象。
+
+        有些模型会额外包一层 Markdown 代码块，这里只做最小清理；
+        如果仍然不是合法 JSON，就交给 fallback 流程处理。
+        """
+
         content = raw_content.strip()
 
         if content.startswith("```json"):
@@ -568,6 +625,12 @@ class StockCandidateAIExplanationService:
         candidate_result: StockCandidateResponse,
         candidates: list[StockCandidateItem],
     ) -> dict[str, Any]:
+        """构造喂给 AI 的候选解释上下文。
+
+        上下文只包含后端确定性评分、质量报告、策略信号和风险提示；
+        不包含任何未校验的外部事实，防止 AI 自由发挥成新闻分析。
+        """
+
         return {
             "task": "explain_stock_candidates",
             "language": "zh-CN",
@@ -630,6 +693,8 @@ class StockCandidateAIExplanationService:
         self,
         candidate: StockCandidateItem,
     ) -> dict[str, Any]:
+        """裁剪单只候选股票上下文，保留 AI 解释真正需要的字段。"""
+
         return {
             "symbol": candidate.symbol,
             "market": candidate.market,
@@ -659,6 +724,12 @@ class StockCandidateAIExplanationService:
         self,
         candidates: list[StockCandidateItem],
     ) -> list[dict[str, Any]]:
+        """构造候选之间的横向对比上下文。
+
+        对比只基于候选评分结果内部已有字段，例如分数、等级、策略信号、数据质量和维度得分。
+        这里不会让 AI 自己寻找外部理由，避免解释跑偏。
+        """
+
         if len(candidates) <= 1:
             return []
 
@@ -1028,6 +1099,8 @@ class StockCandidateAIExplanationService:
         user_id: int,
         messages: list[SystemMessage | HumanMessage],
     ) -> tuple[bool, str | None, AIUsageTokenEstimate, AIUsageCostEstimate]:
+        """在调用 LLM 前预估 token 和成本，并检查用户额度。"""
+
         token_service = AIUsageTokenService()
         settings = get_settings()
 
@@ -1078,6 +1151,11 @@ class StockCandidateAIExplanationService:
         completion_text: str,
         started_at: datetime,
     ):
+        """记录候选 AI 解释成功用量。
+
+        用量记录失败不应影响主业务响应，所以这里捕获异常后只写日志。
+        """
+
         try:
             async with AsyncSessionLocal() as db:
                 repo = AsyncAIUsageRepository(db)
@@ -1113,6 +1191,8 @@ class StockCandidateAIExplanationService:
         error_message: str,
         started_at: datetime,
     ) -> None:
+        """记录候选 AI 解释失败用量，便于后续排查 LLM 或解析问题。"""
+
         try:
             async with AsyncSessionLocal() as db:
                 repo = AsyncAIUsageRepository(db)
@@ -1146,6 +1226,8 @@ class StockCandidateAIExplanationService:
         estimated_tokens: AIUsageTokenEstimate,
         estimated_cost: AIUsageCostEstimate,
     ) -> None:
+        """记录因额度不足被阻止的候选 AI 解释请求。"""
+
         try:
             async with AsyncSessionLocal() as db:
                 repo = AsyncAIUsageRepository(db)
@@ -1173,6 +1255,8 @@ class StockCandidateAIExplanationService:
         request: StockCandidateAIExplanationRequest,
         candidate_result: StockCandidateResponse,
     ) -> dict[str, Any]:
+        """构造 AI 用量日志中的业务上下文，方便按候选解释场景追踪成本。"""
+
         return {
             "source": "stock_candidate_ai_explanation",
             "universe_source": request.candidate_request.universe_source,
@@ -1195,6 +1279,12 @@ class StockCandidateAIExplanationService:
         input_snapshot: StockCandidateAIExplanationInputSnapshot,
         quota_reason: str,
     ) -> StockCandidateAIExplanationResponse:
+        """构造额度不足响应。
+
+        如果请求允许 fallback，则返回确定性解释；否则返回 unavailable。
+        这样前端可以根据 status 明确区分“AI 没用上”和“完全不可用”。
+        """
+
         fallback_reason = (
             AIQuotaMessageService().build_candidate_ai_blocked_fallback_reason(
                 quota_reason
@@ -1229,6 +1319,8 @@ class StockCandidateAIExplanationService:
         unavailable_reason: StockCandidateAIExplanationUnavailableReason,
         exc: Exception,
     ) -> StockCandidateAIExplanationResponse:
+        """构造 LLM 调用、解析或安全校验异常后的响应。"""
+
         fallback_reason = self._safe_exception_message(exc)
 
         if request.allow_fallback:
@@ -1270,6 +1362,12 @@ class StockCandidateAIExplanationService:
         unavailable_reason: StockCandidateAIExplanationUnavailableReason,
         fallback_reason: str,
     ) -> StockCandidateAIExplanationResponse:
+        """生成确定性降级解释。
+
+        fallback 不依赖 LLM，只基于候选评分中的 reasons、risks、score_breakdown、
+        data_quality 和 strategy_signal 生成可读解释，保证 AI 不可用时业务仍可验收。
+        """
+
         explanations = [
             self._build_fallback_explanation(candidate)
             for candidate in candidates
@@ -1341,6 +1439,8 @@ class StockCandidateAIExplanationService:
         self,
         candidate: StockCandidateItem,
     ) -> StockCandidateAIExplanationItem:
+        """为单只候选股票生成确定性解释。"""
+
         strengths = self._trim_text_list(candidate.reasons, limit=3)
         risks = self._trim_text_list(candidate.risks, limit=3)
 
@@ -1365,6 +1465,8 @@ class StockCandidateAIExplanationService:
         self,
         candidate: StockCandidateItem,
     ) -> list[str]:
+        """生成后续研究关注点，强调“研究动作”而不是“交易动作”。"""
+
         focus = [
             "查看主要加分维度是否具有持续性。",
             "确认主要风险项是否可以接受。",
@@ -1386,6 +1488,8 @@ class StockCandidateAIExplanationService:
         self,
         candidates: list[StockCandidateItem],
     ) -> list[StockCandidateAIComparisonItem]:
+        """在 AI 不可用时，基于分数和维度结果生成候选横向对比。"""
+
         if len(candidates) <= 1:
             return []
 

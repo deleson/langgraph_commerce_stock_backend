@@ -5,6 +5,16 @@ param(
     [switch]$SkipCompile
 )
 
+# 阶段九通用回归脚本。
+#
+# 这个脚本只用于本地或 CI 的测试环境：
+# 1. 强制 APP_ENV_FILE=.env.test；
+# 2. 校验数据库地址包含 langgraph_commerce_test；
+# 3. 按分组运行 pytest；
+# 4. 可选执行 compileall。
+#
+# 注意：不要把这个脚本指向开发库或生产库运行。
+
 $ErrorActionPreference = "Stop"
 
 $env:APP_ENV_FILE = ".env.test"
@@ -26,52 +36,31 @@ if ($LASTEXITCODE -ne 0) {
     throw "Test environment check failed."
 }
 
+# 每个 Target 对应一组测试文件。
+# 这样日常开发可以先跑小分组，阶段验收时再跑 api 或 all。
 $pytestArgs = @()
 
-switch ($Target) {
-    "smoke" {
-        $pytestArgs = @("tests/test_smoke.py", "-q")
-    }
-    "fixtures" {
-        $pytestArgs = @("tests/test_fixtures.py", "-q")
-    }
-    "auth" {
-        $pytestArgs = @("tests/api/test_auth_users_api.py", "-q")
-    }
-    "context" {
-        $pytestArgs = @("tests/api/test_user_context_api.py", "-q")
-    }
-    "market" {
-        $pytestArgs = @("tests/api/test_market_data_api.py", "-q")
-    }
-    "ai" {
-        $pytestArgs = @("tests/api/test_stock_analysis_mock_llm_api.py", "-q")
-    }
-    "react" {
-        $pytestArgs = @("tests/api/test_stock_analysis_react_api.py", "-q")
-    }
-    "research" {
-        $pytestArgs = @("tests/api/test_research_strategy_api.py", "-q")
-    }
-    "tasks" {
-        $pytestArgs = @("tests/api/test_background_tasks_api.py", "-q")
-    }
-    "active" {
-        $pytestArgs = @("tests/api/test_active_services_paper_trading_api.py", "-q")
-    }
-    "isolation" {
-        $pytestArgs = @("tests/api/test_user_isolation_api.py", "-q")
-    }
-    "api" {
-        $pytestArgs = @("tests/api", "-q")
-    }
-    "all" {
-        $pytestArgs = @("tests", "-q")
-    }
+if ($Target -eq "smoke") { $pytestArgs = @("tests/test_smoke.py", "-q") }
+if ($Target -eq "fixtures") { $pytestArgs = @("tests/test_fixtures.py", "-q") }
+if ($Target -eq "auth") { $pytestArgs = @("tests/api/test_auth_users_api.py", "-q") }
+if ($Target -eq "context") { $pytestArgs = @("tests/api/test_user_context_api.py", "-q") }
+if ($Target -eq "market") { $pytestArgs = @("tests/api/test_market_data_api.py", "-q") }
+if ($Target -eq "ai") { $pytestArgs = @("tests/api/test_stock_analysis_mock_llm_api.py", "-q") }
+if ($Target -eq "react") { $pytestArgs = @("tests/api/test_stock_analysis_react_api.py", "-q") }
+if ($Target -eq "research") { $pytestArgs = @("tests/api/test_research_strategy_api.py", "-q") }
+if ($Target -eq "tasks") { $pytestArgs = @("tests/api/test_background_tasks_api.py", "-q") }
+if ($Target -eq "active") { $pytestArgs = @("tests/api/test_active_services_paper_trading_api.py", "-q") }
+if ($Target -eq "isolation") { $pytestArgs = @("tests/api/test_user_isolation_api.py", "-q") }
+if ($Target -eq "api") { $pytestArgs = @("tests/api", "-q") }
+if ($Target -eq "all") { $pytestArgs = @("tests", "-q") }
+
+if (-not $pytestArgs) {
+    throw "Unknown test target: $Target"
 }
 
 Write-Host ""
 Write-Host "Running pytest..."
+Write-Host "pytest args: $($pytestArgs -join ' ')"
 uv run pytest @pytestArgs
 
 if ($LASTEXITCODE -ne 0) {

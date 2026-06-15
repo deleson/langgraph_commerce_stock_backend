@@ -1,3 +1,9 @@
+"""量化测试数据工厂验证。
+
+这些测试确认固定 K 线工厂可以生成上涨、下跌、横盘、缺失日期、放量和多资产数据，
+并能写入测试库供 Repository、指标、回测和纸面交易测试复用。
+"""
+
 from app.repositories.market_repo import AsyncMarketRepository
 from app.schemas.market_data import MarketCandleQuery
 from tests.fixtures.quant_data import (

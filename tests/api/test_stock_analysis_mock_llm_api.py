@@ -1,3 +1,9 @@
+"""个股 AI 主分析与普通追问 Mock LLM 测试。
+
+本文件通过 FakeChatModel 替代真实 DeepSeek，验证主分析图、分析记录、
+通知和普通追问链路，不消耗真实 LLM 额度。
+"""
+
 import json
 from collections.abc import AsyncGenerator
 from types import SimpleNamespace

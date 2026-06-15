@@ -1,3 +1,9 @@
+"""纸面交易资金、持仓和权益一致性测试。
+
+验证虚拟成交如何更新模拟现金、持仓成本、市值、浮盈亏和权益快照。
+纸面交易只服务于模拟研究，不代表真实账户资金变化。
+"""
+
 from datetime import UTC, date, datetime
 from decimal import Decimal, ROUND_DOWN
 

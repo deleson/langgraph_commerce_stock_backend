@@ -1,3 +1,9 @@
+"""公共 pytest fixture 验证。
+
+本文件确认 conftest.py 中的测试数据库、测试客户端、测试用户和认证头可以正常工作。
+它是后续 API / Service 测试的地基。
+"""
+
 from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession

@@ -1,3 +1,9 @@
+"""单股回测资金曲线专项测试。
+
+验证按时间顺序推进、模拟买卖、现金、持仓、市值、每日收益和最终权益。
+历史回测只验证历史规则表现，不代表未来收益。
+"""
+
 from datetime import UTC, datetime
 from decimal import Decimal
 

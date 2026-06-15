@@ -1,3 +1,9 @@
+"""后台任务 API 测试。
+
+通过 mock Celery send_task 验证任务提交、查询、列表、取消、投递失败和用户隔离。
+本文件不启动真实 Celery Worker。
+"""
+
 from types import SimpleNamespace
 
 import pytest

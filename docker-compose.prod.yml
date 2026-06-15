@@ -1,3 +1,9 @@
+# 单机生产 Docker Compose 编排文件。
+#
+# 当前生产形态是：postgres / redis / api / worker / beat / nginx 在同一台云服务器上运行，
+# 并通过 Docker 内部网络互相访问。公网只暴露 nginx 的 80 端口。
+
+# Docker 默认 json-file 日志会不断增长；这里限制单个文件和保留数量，避免服务器磁盘被日志占满。
 x-logging: &default-logging
   driver: json-file
   options:
@@ -6,6 +12,7 @@ x-logging: &default-logging
 
 services:
   postgres:
+    # 生产 PostgreSQL 数据库，只在 Docker 内网暴露 5432，不映射到公网宿主机端口。
     image: postgres:16
     container_name: langgraph_commerce_postgres_prod
     restart: unless-stopped
@@ -25,6 +32,7 @@ services:
     logging: *default-logging
 
   redis:
+    # Redis 用于缓存、Celery Broker 和 Celery Result Backend，同样不直接暴露公网端口。
     image: redis:7
     container_name: langgraph_commerce_redis_prod
     restart: unless-stopped
@@ -41,6 +49,7 @@ services:
     logging: *default-logging
 
   api:
+    # FastAPI 后端服务。它只 expose 8000 给 Docker 内网，由 nginx 反向代理对外访问。
     build:
       context: .
       dockerfile: Dockerfile
@@ -67,6 +76,7 @@ services:
     logging: *default-logging
 
   worker:
+    # Celery Worker 执行耗时后台任务，例如行情同步、日报、量化提醒和纸面交易 tick。
     build:
       context: .
       dockerfile: Dockerfile
@@ -91,6 +101,7 @@ services:
     logging: *default-logging
 
   beat:
+    # Celery Beat 是定时任务调度器，只负责按配置提交任务，不直接处理业务。
     build:
       context: .
       dockerfile: Dockerfile
@@ -115,6 +126,7 @@ services:
     logging: *default-logging
 
   nginx:
+    # Nginx 是唯一公网入口，用户访问 80 端口后由它转发到 api:8000。
     image: nginx:1.27-alpine
     container_name: langgraph_commerce_nginx_prod
     restart: unless-stopped
@@ -129,9 +141,11 @@ services:
     logging: *default-logging
 
 volumes:
+  # volume 是容器重建后的数据持久化，不等于备份；生产仍需要 pg_dump 备份方案。
   postgres_data:
   redis_data:
 
 networks:
+  # 内部网络让服务可以通过服务名 postgres / redis / api 互相访问。
   langgraph_commerce_prod:
     driver: bridge

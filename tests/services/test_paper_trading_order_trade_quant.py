@@ -1,3 +1,9 @@
+"""纸面交易订单与成交专项测试。
+
+验证 buy / sell 信号如何生成虚拟订单和虚拟成交。
+本文件不测试真实资金、不连接券商，也不真实下单。
+"""
+
 from datetime import UTC, datetime
 from decimal import Decimal
 

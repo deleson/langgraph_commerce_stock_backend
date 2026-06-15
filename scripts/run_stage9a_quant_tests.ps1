@@ -20,6 +20,12 @@ param(
     [switch]$SkipCompile
 )
 
+# 阶段九-A量化专项回归脚本。
+#
+# 本脚本聚焦量化链路：测试数据工厂、Market Repository、数据质量、
+# 技术指标、策略信号、单股回测、组合回测、候选评分和纸面交易。
+# 它使用固定测试数据，不调用真实行情源，也不调用真实 LLM。
+
 $ErrorActionPreference = "Stop"
 
 $env:APP_ENV_FILE = ".env.test"
@@ -41,73 +47,53 @@ if ($LASTEXITCODE -ne 0) {
     throw "Test environment check failed. Please confirm APP_ENV_FILE=.env.test and database points to langgraph_commerce_test."
 }
 
+# 量化专项测试按业务链路拆分，便于定位公式、数据质量或纸面交易问题。
 $pytestArgs = @()
 
-switch ($Target) {
-    "fixtures" {
-        $pytestArgs = @("tests/test_quant_data_fixtures.py", "-q")
-    }
-    "market-repo" {
-        $pytestArgs = @("tests/repositories/test_market_repository_quant.py", "-q")
-    }
-    "data-quality" {
-        $pytestArgs = @("tests/services/test_market_data_quality_quant.py", "-q")
-    }
-    "technical" {
-        $pytestArgs = @("tests/services/test_technical_indicator_quant.py", "-q")
-    }
-    "signal" {
-        $pytestArgs = @("tests/services/test_strategy_signal_quant.py", "-q")
-    }
-    "backtest-equity" {
-        $pytestArgs = @("tests/services/test_backtest_equity_curve_quant.py", "-q")
-    }
-    "backtest-metrics" {
-        $pytestArgs = @("tests/services/test_backtest_performance_metrics_quant.py", "-q")
-    }
-    "backtest-risk" {
-        $pytestArgs = @("tests/services/test_backtest_risk_control_quant.py", "-q")
-    }
-    "portfolio" {
-        $pytestArgs = @("tests/services/test_portfolio_backtest_quant.py", "-q")
-    }
-    "candidates" {
-        $pytestArgs = @("tests/services/test_stock_candidate_scoring_quant.py", "-q")
-    }
-    "paper-order" {
-        $pytestArgs = @("tests/services/test_paper_trading_order_trade_quant.py", "-q")
-    }
-    "paper-equity" {
-        $pytestArgs = @("tests/services/test_paper_trading_position_equity_quant.py", "-q")
-    }
-    "paper" {
-        $pytestArgs = @(
-            "tests/services/test_paper_trading_order_trade_quant.py",
-            "tests/services/test_paper_trading_position_equity_quant.py",
-            "-q"
-        )
-    }
-    "all" {
-        $pytestArgs = @(
-            "tests/test_quant_data_fixtures.py",
-            "tests/repositories/test_market_repository_quant.py",
-            "tests/services/test_market_data_quality_quant.py",
-            "tests/services/test_technical_indicator_quant.py",
-            "tests/services/test_strategy_signal_quant.py",
-            "tests/services/test_backtest_equity_curve_quant.py",
-            "tests/services/test_backtest_performance_metrics_quant.py",
-            "tests/services/test_backtest_risk_control_quant.py",
-            "tests/services/test_portfolio_backtest_quant.py",
-            "tests/services/test_stock_candidate_scoring_quant.py",
-            "tests/services/test_paper_trading_order_trade_quant.py",
-            "tests/services/test_paper_trading_position_equity_quant.py",
-            "-q"
-        )
-    }
+if ($Target -eq "fixtures") { $pytestArgs = @("tests/test_quant_data_fixtures.py", "-q") }
+if ($Target -eq "market-repo") { $pytestArgs = @("tests/repositories/test_market_repository_quant.py", "-q") }
+if ($Target -eq "data-quality") { $pytestArgs = @("tests/services/test_market_data_quality_quant.py", "-q") }
+if ($Target -eq "technical") { $pytestArgs = @("tests/services/test_technical_indicator_quant.py", "-q") }
+if ($Target -eq "signal") { $pytestArgs = @("tests/services/test_strategy_signal_quant.py", "-q") }
+if ($Target -eq "backtest-equity") { $pytestArgs = @("tests/services/test_backtest_equity_curve_quant.py", "-q") }
+if ($Target -eq "backtest-metrics") { $pytestArgs = @("tests/services/test_backtest_performance_metrics_quant.py", "-q") }
+if ($Target -eq "backtest-risk") { $pytestArgs = @("tests/services/test_backtest_risk_control_quant.py", "-q") }
+if ($Target -eq "portfolio") { $pytestArgs = @("tests/services/test_portfolio_backtest_quant.py", "-q") }
+if ($Target -eq "candidates") { $pytestArgs = @("tests/services/test_stock_candidate_scoring_quant.py", "-q") }
+if ($Target -eq "paper-order") { $pytestArgs = @("tests/services/test_paper_trading_order_trade_quant.py", "-q") }
+if ($Target -eq "paper-equity") { $pytestArgs = @("tests/services/test_paper_trading_position_equity_quant.py", "-q") }
+if ($Target -eq "paper") {
+    $pytestArgs = @(
+        "tests/services/test_paper_trading_order_trade_quant.py",
+        "tests/services/test_paper_trading_position_equity_quant.py",
+        "-q"
+    )
+}
+if ($Target -eq "all") {
+    $pytestArgs = @(
+        "tests/test_quant_data_fixtures.py",
+        "tests/repositories/test_market_repository_quant.py",
+        "tests/services/test_market_data_quality_quant.py",
+        "tests/services/test_technical_indicator_quant.py",
+        "tests/services/test_strategy_signal_quant.py",
+        "tests/services/test_backtest_equity_curve_quant.py",
+        "tests/services/test_backtest_performance_metrics_quant.py",
+        "tests/services/test_backtest_risk_control_quant.py",
+        "tests/services/test_portfolio_backtest_quant.py",
+        "tests/services/test_stock_candidate_scoring_quant.py",
+        "tests/services/test_paper_trading_order_trade_quant.py",
+        "tests/services/test_paper_trading_position_equity_quant.py",
+        "-q"
+    )
+}
+
+if (-not $pytestArgs) {
+    throw "Unknown quant test target: $Target"
 }
 
 Write-Host ""
 Write-Host "Running pytest..."
+Write-Host "pytest args: $($pytestArgs -join ' ')"
 uv run pytest @pytestArgs
 
 if ($LASTEXITCODE -ne 0) {

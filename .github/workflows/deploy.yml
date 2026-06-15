@@ -1,11 +1,14 @@
 name: Deploy Backend To Production
 
 on:
+  # main 分支更新后自动运行 CI；CI 通过后再部署生产服务器。
   push:
     branches:
       - main
+  # 保留手动触发入口，便于修复服务器状态后重新部署。
   workflow_dispatch:
 
+# 防止多个生产部署并发执行，避免两个 docker compose 流程互相覆盖。
 concurrency:
   group: production-deploy
   cancel-in-progress: false
@@ -16,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
 
     services:
+      # GitHub Actions CI 使用临时 PostgreSQL 测试库，不连接生产数据库。
       postgres:
         image: postgres:16
         env:
@@ -30,6 +34,7 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
+      # Redis 只服务本次 CI 的缓存和 Celery 相关测试。
       redis:
         image: redis:7
         ports:
@@ -60,6 +65,7 @@ jobs:
 
       - name: Prepare test environment
         run: |
+          # CI 内复制测试环境模板，确保 pytest 使用 .env.test。
           cp .env.test.example .env.test
           echo "APP_ENV_FILE=.env.test" >> "$GITHUB_ENV"
           echo "UV_CACHE_DIR=.uv-cache" >> "$GITHUB_ENV"
@@ -70,6 +76,7 @@ jobs:
 
       - name: Check test settings
         run: |
+          # 部署前先检查测试环境是否真的指向 langgraph_commerce_test。
           uv run python -c "from app.core.config import get_settings; s=get_settings(); assert s.app_env == 'test'; assert 'langgraph_commerce_test' in s.database_url; assert 'langgraph_commerce_test' in s.database_async_url; print(s.app_env); print(s.database_url); print(s.database_async_url)"
 
       - name: Run database migrations
@@ -96,6 +103,7 @@ jobs:
 
       - name: Setup SSH key
         run: |
+          # PROD_SSH_KEY 是 GitHub Secret 中保存的部署私钥，不能写入仓库。
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
           echo "${{ secrets.PROD_SSH_KEY }}" > ~/.ssh/prod_deploy_key
@@ -104,6 +112,8 @@ jobs:
 
       - name: Deploy on server
         run: |
+          # 部署动作发生在生产服务器上：
+          # 拉取最新 main、构建镜像、执行迁移、启动 compose、重启 nginx 避免反向代理旧 api 容器地址。
           ssh -i ~/.ssh/prod_deploy_key \
             "${{ secrets.PROD_USER }}@${{ secrets.PROD_HOST }}" \
             "cd '${{ secrets.PROD_DEPLOY_PATH }}' && \
@@ -118,6 +128,7 @@ jobs:
 
       - name: Health check
         run: |
+          # 只有公网健康检查通过，才认为本次 CD 成功。
           for i in {1..30}; do
             echo "Health check attempt $i..."
             if curl --fail --show-error --silent --connect-timeout 5 --max-time 10 "http://${{ secrets.PROD_HOST }}/api/v1/system/health"; then
@@ -133,6 +144,7 @@ jobs:
       - name: Print server logs on failure
         if: failure()
         run: |
+          # 失败时拉取 api / nginx 日志，方便从 GitHub Actions 页面直接定位问题。
           ssh -i ~/.ssh/prod_deploy_key \
             "${{ secrets.PROD_USER }}@${{ secrets.PROD_HOST }}" \
             "cd '${{ secrets.PROD_DEPLOY_PATH }}' && \

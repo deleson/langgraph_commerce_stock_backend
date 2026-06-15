@@ -1,3 +1,9 @@
+"""数据质量专项测试。
+
+验证空数据、数量不足、过旧、重复、非法价格和 source 隔离等场景。
+数据质量门控是 AI 分析、策略信号和纸面交易的前置安全边界。
+"""
+
 from datetime import UTC, datetime
 from decimal import Decimal
 

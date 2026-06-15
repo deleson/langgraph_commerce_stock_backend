@@ -1,3 +1,9 @@
+"""ReAct 工具追问 API 测试。
+
+本文件使用 FakeReactChatModel 验证工具选择、Observation、Trace 和会话消息落库。
+测试重点是工具白名单和用户隔离，不调用真实 DeepSeek。
+"""
+
 import json
 from types import SimpleNamespace
 

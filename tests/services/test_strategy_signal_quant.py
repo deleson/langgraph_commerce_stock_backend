@@ -1,3 +1,9 @@
+"""策略信号专项测试。
+
+验证确定性规则如何结合趋势、RSI、MACD、动量、波动率、成交量和数据质量。
+signal=buy / sell 只是研究信号，不构成真实交易建议。
+"""
+
 from datetime import UTC, datetime
 
 import pandas as pd

@@ -1,3 +1,12 @@
+"""量化专项测试数据工厂。
+
+阶段九-A 的量化测试不依赖真实行情波动，而是用固定、可复现、可手算的小样本 K 线。
+本文件负责生成上涨、下跌、横盘、放量、缺失日期、过旧数据和多资产数据，
+让技术指标、策略信号、回测、候选评分和纸面交易测试都有稳定输入。
+
+这些数据只用于测试，不代表真实股票走势，也不用于证明策略未来收益。
+"""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -18,6 +27,8 @@ MONEY_QUANT = Decimal("0.0001")
 
 
 def quant_decimal(value: str | int | float | Decimal) -> Decimal:
+    """统一测试金额精度，避免 Decimal 断言受浮点误差影响。"""
+
     return Decimal(str(value)).quantize(MONEY_QUANT)
 
 
@@ -30,6 +41,8 @@ def build_market_symbol_payload(
     exchange: str = "NASDAQ",
     source: str = "mock",
 ) -> MarketSymbolCreate:
+    """构造测试股票基础信息。"""
+
     normalized_symbol = symbol.upper()
 
     return MarketSymbolCreate(
@@ -60,6 +73,8 @@ def build_candle_payload(
     adjust_type: str = "none",
     symbol_id: int | None = None,
 ) -> MarketCandleCreate:
+    """构造单根测试 K 线。"""
+
     return MarketCandleCreate(
         symbol_id=symbol_id,
         symbol=symbol,
@@ -94,6 +109,12 @@ def build_trend_candles(
     adjust_type: str = "none",
     symbol_id: int | None = None,
 ) -> list[MarketCandleCreate]:
+    """构造趋势型 K 线序列。
+
+    trend=up / down / flat 分别用于测试上涨、下跌和横盘场景。
+    K 线按时间升序返回，这是指标计算和回测避免未来函数的基础。
+    """
+
     if count <= 0:
         raise ValueError("count must be positive")
 
@@ -143,6 +164,8 @@ def build_uptrend_candles(
     count: int = 40,
     symbol_id: int | None = None,
 ) -> list[MarketCandleCreate]:
+    """构造稳定上涨趋势 K 线。"""
+
     return build_trend_candles(
         symbol=symbol,
         count=count,
@@ -159,6 +182,8 @@ def build_downtrend_candles(
     count: int = 40,
     symbol_id: int | None = None,
 ) -> list[MarketCandleCreate]:
+    """构造稳定下跌趋势 K 线。"""
+
     return build_trend_candles(
         symbol=symbol,
         count=count,
@@ -175,6 +200,8 @@ def build_flat_candles(
     count: int = 40,
     symbol_id: int | None = None,
 ) -> list[MarketCandleCreate]:
+    """构造横盘震荡 K 线。"""
+
     return build_trend_candles(
         symbol=symbol,
         count=count,
@@ -191,6 +218,8 @@ def build_volume_spike_candles(
     count: int = 40,
     symbol_id: int | None = None,
 ) -> list[MarketCandleCreate]:
+    """构造最后一根成交量放大的 K 线序列。"""
+
     candles = build_trend_candles(
         symbol=symbol,
         count=count,

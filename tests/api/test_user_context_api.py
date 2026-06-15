@@ -1,3 +1,8 @@
+"""用户上下文 API 测试。
+
+覆盖自选股、用户偏好和通知中心，重点验证当前用户只能访问自己的上下文数据。
+"""
+
 from uuid import uuid4
 
 from httpx import AsyncClient

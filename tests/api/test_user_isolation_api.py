@@ -1,3 +1,9 @@
+"""统一用户隔离 API 测试。
+
+本文件集中验证日报、量化提醒、纸面交易、后台任务等跨用户访问统一返回 404，
+防止通过猜测资源 id 读取其他用户数据。
+"""
+
 from types import SimpleNamespace
 
 import pytest

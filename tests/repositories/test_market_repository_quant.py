@@ -1,3 +1,9 @@
+"""Market Repository 量化专项测试。
+
+验证股票与 K 线的 upsert、唯一约束、source / adjust_type 隔离和基础数据库约束。
+这些测试保护行情数据入口，避免后续指标和回测混用错误口径数据。
+"""
+
 from decimal import Decimal
 
 import pytest

@@ -1,3 +1,9 @@
+"""行情、数据质量、技术指标和策略信号 API 测试。
+
+测试环境使用 mock provider，重点验证 API 链路和响应结构，
+不依赖真实行情实时波动。
+"""
+
 from httpx import AsyncClient
 
 

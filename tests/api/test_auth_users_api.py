@@ -1,3 +1,9 @@
+"""认证与当前用户 API 测试。
+
+覆盖注册、登录、刷新 token、退出登录、当前用户查询和资料更新。
+本文件不调用真实 LLM，也不依赖真实行情源。
+"""
+
 from collections.abc import Callable
 from uuid import uuid4
 

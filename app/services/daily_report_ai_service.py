@@ -1,5 +1,15 @@
 from __future__ import annotations
 
+"""每日简报 AI 润色服务。
+
+本文件负责在确定性日报已经生成之后，调用 LLM 做中文表达增强。
+安全边界：
+1. AI 只能润色日报，不负责重新计算行情、信号、候选评分；
+2. AI 不能修改价格、评分、等级、风险事实；
+3. AI 输出包含禁用投资表达或 JSON 解析失败时，回退到原确定性日报；
+4. AI 调用前后都记录额度和用量，便于成本审计。
+"""
+
 import json
 from dataclasses import dataclass
 from typing import Any
@@ -44,11 +54,10 @@ class DailyReportAIResult:
 
 
 class DailyReportAIService:
-    """Generate an AI-polished daily report from deterministic report data.
+    """为确定性日报结果提供可选 AI 润色。
 
-This service does not collect market data and does not write daily report rows.
-It checks AI quota before calling the LLM and records AI usage logs. It only calls the LLM and returns
-    an updated DailyReportCreate object.
+    这个 Service 不收集行情、不写 daily_reports 表，也不重新判断股票。
+    它只检查 AI 额度、调用 LLM、解析结果、校验安全表达，并返回更新后的 DailyReportCreate。
     """
 
     MAX_SECTION_COUNT = 10
@@ -100,6 +109,13 @@ It checks AI quota before calling the LLM and records AI usage logs. It only cal
         *,
         user_id: int,
     ) -> DailyReportAIResult:
+        """调用 LLM 增强日报表达。
+
+        输入 report 已经是完整可用的确定性日报。
+        如果额度不足、LLM 失败、解析失败或安全校验失败，
+        返回 fallback 结果，避免主动服务因 AI 不稳定而整体失败。
+        """
+
         if report.status == DailyReportStatus.FAILED:
             return DailyReportAIResult(
                 report=report,
@@ -292,6 +308,12 @@ It checks AI quota before calling the LLM and records AI usage logs. It only cal
         self,
         payload: dict[str, Any],
     ) -> None:
+        """校验 AI 润色结果没有出现不合规表达。
+
+        日报 AI 只能把确定性日报写得更易读，不能输出“保证收益、必涨、满仓”等表达。
+        一旦校验失败，上层会进入 fallback，返回原日报内容。
+        """
+
         summary = payload.get("summary")
         if not isinstance(summary, str) or not summary.strip():
             raise ValueError("AI daily report summary is required")
@@ -365,6 +387,12 @@ It checks AI quota before calling the LLM and records AI usage logs. It only cal
         ai_status: DailyReportAIStatus,
         error_message: str,
     ) -> DailyReportAIResult:
+        """构造 AI 不可用时的降级结果。
+
+        fallback 会保留原确定性日报，只补充 AI 状态和 warning，
+        确保日报主动服务不会因为 LLM 波动而不可用。
+        """
+
         fallback_report = report.model_copy(
             update={
                 "status": (
@@ -396,6 +424,8 @@ It checks AI quota before calling the LLM and records AI usage logs. It only cal
         user_id: int,
         messages: list[BaseMessage],
     ) -> tuple[bool, str | None, AIUsageTokenEstimate, AIUsageCostEstimate]:
+        """调用 LLM 前预估日报润色 token 和成本，并检查用户额度。"""
+
         token_service = AIUsageTokenService()
         settings = get_settings()
 

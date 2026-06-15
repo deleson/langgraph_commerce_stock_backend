@@ -1,5 +1,17 @@
 from __future__ import annotations
 
+"""Celery Worker 后台任务执行入口。
+
+本文件是生产环境异步任务的核心：
+1. API 或 Celery Beat 先创建 background_tasks 表记录；
+2. Celery Worker 收到 task_id；
+3. dispatch_background_task 根据 task_type 分发到具体处理器；
+4. 处理器执行行情同步、日报、量化提醒、纸面交易 tick 等长任务；
+5. 最终把 success / failed / retrying / result / error_message 回写数据库。
+
+这里的任务不是用户直接调用的 HTTP API，而是 Worker 内部执行函数。
+"""
+
 import asyncio
 from typing import Any
 
@@ -40,6 +52,8 @@ from app.services.paper_trading_query_service import PaperTradingQueryService
 
 @celery_app.task(name="background_tasks.smoke_test")
 def smoke_test() -> dict[str, str]:
+    """Worker 存活检查任务，用于生产部署和验收时确认 Celery 可执行。"""
+
     return {
         "status": "ok",
         "message": "celery worker is running",
@@ -53,6 +67,12 @@ _worker_event_loop: asyncio.AbstractEventLoop | None = None
 
 
 def _get_worker_event_loop() -> asyncio.AbstractEventLoop:
+    """为同步 Celery task 复用一个 asyncio event loop。
+
+    Celery 任务函数本身是同步入口，但项目业务 Service 大多是 async。
+    这里统一把 async 任务放到 Worker 进程内的 event loop 中执行。
+    """
+
     global _worker_event_loop
 
     if _worker_event_loop is None or _worker_event_loop.is_closed():
@@ -63,6 +83,12 @@ def _get_worker_event_loop() -> asyncio.AbstractEventLoop:
 
 @celery_app.task(name="background_tasks.dispatch_background_task")
 def dispatch_background_task(task_id: int) -> dict[str, object]:
+    """后台任务统一分发入口。
+
+    Celery 只接收 task_id，不直接接收完整 payload。
+    这样可以保证任务真实参数来自数据库记录，便于审计、重试和状态追踪。
+    """
+
     loop = _get_worker_event_loop()
     return loop.run_until_complete(_dispatch_background_task_async(task_id))
 
@@ -87,6 +113,12 @@ def submit_scheduled_paper_trading_ticks() -> dict[str, object]:
     return loop.run_until_complete(_submit_scheduled_paper_trading_ticks_async())
 
 async def _submit_scheduled_market_data_sync_async() -> dict[str, object]:
+    """由 Celery Beat 触发的行情同步提交器。
+
+    这里不直接同步行情，而是创建一条 market_data_sync 后台任务，
+    再交给 dispatch_background_task 统一执行。
+    """
+
     settings = get_settings()
 
     payload = MarketDataSyncTaskPayload(
@@ -136,6 +168,12 @@ async def _submit_scheduled_market_data_sync_async() -> dict[str, object]:
         }
 
 async def _submit_scheduled_daily_reports_async() -> dict[str, object]:
+    """由 Celery Beat 批量提交每日简报任务。
+
+    定时任务会按活跃用户分页创建 daily_report 后台任务。
+    这样每个用户的日报都有独立 task_id，失败、重试和结果都能单独追踪。
+    """
+
     settings = get_settings()
 
     submitted_count = 0
@@ -228,6 +266,8 @@ async def _submit_scheduled_daily_reports_async() -> dict[str, object]:
     }
 
 async def _submit_scheduled_alert_scans_async() -> dict[str, object]:
+    """由 Celery Beat 批量提交量化提醒扫描任务。"""
+
     settings = get_settings()
 
     submitted_count = 0
@@ -320,6 +360,12 @@ async def _submit_scheduled_alert_scans_async() -> dict[str, object]:
     }
 
 async def _submit_scheduled_paper_trading_ticks_async() -> dict[str, object]:
+    """由 Celery Beat 批量提交纸面交易 tick 任务。
+
+    纸面交易 tick 会读取用户自选股、策略信号并推进虚拟账户，
+    所以必须按用户拆分任务，不能用一个全局任务混在一起执行。
+    """
+
     settings = get_settings()
 
     submitted_count = 0
@@ -412,6 +458,12 @@ async def _submit_scheduled_paper_trading_ticks_async() -> dict[str, object]:
     }
 
 async def _dispatch_background_task_async(task_id: int) -> dict[str, object]:
+    """根据 background_tasks.task_type 分发到具体任务处理器。
+
+    任务执行前先 mark_running；执行成功后由具体处理器 mark_success；
+    参数非法、用户不存在等不可重试错误会直接 mark_failed。
+    """
+
     async with AsyncSessionLocal() as db:
         repository = AsyncBackgroundTaskRepository(db)
         task = await repository.get_task(task_id=task_id)
@@ -502,6 +554,12 @@ async def _run_stock_analysis_async_reserved_task(
     repository: AsyncBackgroundTaskRepository,
     task,
 ) -> dict[str, Any]:
+    """预留的异步个股分析任务处理器。
+
+    当前只完成 payload 校验和 AI 额度检查，不真正调用 DeepSeek 和主分析图。
+    保留这个处理器是为了让任务类型、额度逻辑和失败记录先稳定下来。
+    """
+
     try:
         payload = StockAnalysisAsyncTaskPayload.model_validate(task.payload)
 
@@ -663,6 +721,12 @@ async def _run_user_profile_refresh_task(
     task,
     db,
 ) -> dict[str, Any]:
+    """后台刷新用户画像。
+
+    用户画像依赖用户记忆和长期上下文，适合异步执行；
+    执行结果会写入 task.result，方便 API 查询任务状态。
+    """
+
     try:
         payload = UserProfileRefreshTaskPayload.model_validate(task.payload)
 
@@ -777,6 +841,12 @@ async def _run_user_memory_embedding_rebuild_task(
     task,
     db,
 ) -> dict[str, Any]:
+    """后台重建用户记忆向量。
+
+    向量生成可能调用外部模型或耗时较长，因此放到 Worker 执行。
+    task.user_id 是用户隔离边界，不能只依赖 payload 中的参数。
+    """
+
     try:
         payload = UserMemoryEmbeddingRebuildTaskPayload.model_validate(task.payload)
 
@@ -926,6 +996,12 @@ async def _run_daily_report_task(
     task,
     db,
 ) -> dict[str, Any]:
+    """执行单个用户的每日简报生成任务。
+
+    这个处理器复用 DailyReportQueryService，确保 API 手动生成和后台定时生成
+    走同一套日报数据收集、确定性报告、AI 润色和通知逻辑。
+    """
+
     try:
         payload = DailyReportTaskPayload.model_validate(task.payload)
 
@@ -1086,6 +1162,12 @@ async def _run_alert_scan_task(
     task,
     db,
 ) -> dict[str, Any]:
+    """执行单个用户的量化提醒扫描任务。
+
+    后台任务和 API 手动扫描复用 QuantAlertQueryService，
+    确保规则读取、数据收集、事件去重和通知创建只有一套实现。
+    """
+
     try:
         payload = QuantAlertScanTaskPayload.model_validate(task.payload)
 
@@ -1243,6 +1325,12 @@ async def _run_paper_trading_tick_task(
     task,
     db,
 ) -> dict[str, Any]:
+    """执行单个用户的纸面交易 tick 后台任务。
+
+    任务会强制解析目标用户，并把 source 映射成 background_task 或 scheduler。
+    真正的信号读取、订单、成交、持仓和权益快照仍然由 PaperTradingQueryService.run_tick 编排。
+    """
+
     try:
         payload = PaperTradingTickTaskPayload.model_validate(task.payload)
 
@@ -1408,6 +1496,12 @@ def _build_paper_trading_tick_task_result(
     account_id: int | None,
     tick_result,
 ) -> dict[str, Any]:
+    """构造写入 background_tasks.result 的纸面交易 tick 摘要。
+
+    result 中会保留 run_id、订单数、成交数、扫描数和运行记录路径，
+    方便前端从后台任务跳转到纸面交易运行详情。
+    """
+
     input_snapshot = tick_result.input_snapshot
     equity_snapshot = tick_result.equity_snapshot
 
@@ -1581,6 +1675,12 @@ async def _run_market_data_sync_task(
     task,
     db,
 ) -> dict[str, Any]:
+    """执行行情同步后台任务。
+
+    该处理器只负责把 MarketDataSyncTaskPayload 转交给 MarketDataSyncService，
+    成功或失败都会回写 background_tasks，便于生产环境排查 Provider 问题。
+    """
+
     try:
         payload = MarketDataSyncTaskPayload.model_validate(task.payload)
 
@@ -1687,6 +1787,12 @@ async def _mark_failed_or_retry(
     result: dict[str, Any],
     retryable: bool,
 ) -> tuple[object, bool]:
+    """根据任务重试配置把任务标记为 retrying 或 failed。
+
+    payload 校验失败、用户不存在等不可恢复错误不应重试；
+    外部服务异常、行情源波动等可恢复错误才允许进入 retrying。
+    """
+
     if retryable and _can_retry_task(task):
         retrying_task = await repository.mark_retrying(
             task=task,

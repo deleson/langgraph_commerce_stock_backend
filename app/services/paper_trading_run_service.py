@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+"""纸面交易 tick 运行记录服务。
+
+本文件负责记录一次 tick 的生命周期：
+开始、完成、跳过、失败，以及请求快照、配置快照、信号快照、执行快照和持仓快照。
+
+它不读取信号、不创建订单、不更新持仓、不生成权益快照，只负责审计记录。
+"""
+
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -30,11 +38,10 @@ from app.services.paper_trading_signal_service import PaperTradingSignalContext
 
 
 class PaperTradingRunService:
-    """Manage paper trading tick run records.
+    """管理纸面交易 tick 运行记录。
 
-    This service records the lifecycle and snapshots of a paper trading tick.
-    It does not collect signals, create orders, update positions, or create
-    equity snapshots.
+    PaperTradingRun 是纸面交易自动推进的审计线索：
+    后续可以通过 run detail 回看当时请求、配置、信号、订单和持仓更新依据。
     """
 
     WARNING_LIMIT = 50
@@ -62,6 +69,8 @@ class PaperTradingRunService:
         request: PaperTradingTickRequest,
         account_config_snapshot: dict[str, Any],
     ) -> PaperTradingRun:
+        """创建 running 状态的 tick 运行记录。"""
+
         if account.id is None:
             raise BadRequestException(message="paper trading account id is required")
 
@@ -84,6 +93,8 @@ class PaperTradingRunService:
         equity_result: PaperTradingEquitySnapshotResult | None = None,
         warnings: list[str] | None = None,
     ) -> PaperTradingRun:
+        """将运行记录标记为 completed，并写入各阶段快照和统计。"""
+
         finished_at = self._now()
         payload = PaperTradingRunUpdate(
             status=PaperTradingRunStatus.COMPLETED,
@@ -125,6 +136,12 @@ class PaperTradingRunService:
         warnings: list[str] | None = None,
         errors: list[str] | None = None,
     ) -> PaperTradingRun:
+        """将运行记录标记为 skipped。
+
+        例如账户未启用、无自选股、无行情数据、数据质量不可用等场景，
+        都应该记录为 skipped，而不是失败。
+        """
+
         finished_at = self._now()
         payload = PaperTradingRunUpdate(
             status=PaperTradingRunStatus.SKIPPED,
@@ -166,6 +183,8 @@ class PaperTradingRunService:
         signal_context: PaperTradingSignalContext | None = None,
         warnings: list[str] | None = None,
     ) -> PaperTradingRun:
+        """将运行记录标记为 failed，并保存错误信息。"""
+
         finished_at = self._now()
         payload = PaperTradingRunUpdate(
             status=PaperTradingRunStatus.FAILED,

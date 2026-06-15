@@ -1,5 +1,14 @@
 from __future__ import annotations
 
+"""每日简报确定性生成服务。
+
+本文件不调用 LLM，只根据 DailyReportDataContext 中已经收集好的数据，
+生成日报 summary、sections、股票快照、风险提示和免责声明。
+
+这里生成的是“确定性日报骨架”，AI 润色只能在这个结果上改写表达，
+不能修改价格、信号、评分和风险事实。
+"""
+
 from decimal import Decimal
 from typing import Any
 
@@ -19,6 +28,8 @@ from app.services.daily_report_data_service import (
 
 
 class DailyReportService:
+    """根据日报上下文生成确定性日报内容。"""
+
     DISCLAIMER = (
         "本每日简报仅基于历史行情、技术指标、策略信号和用户自选股生成，"
         "只作为研究参考，不构成投资建议，也不承诺未来收益。"
@@ -31,6 +42,12 @@ class DailyReportService:
         self,
         context: DailyReportDataContext,
     ) -> DailyReportCreate:
+        """生成不依赖 AI 的日报结果。
+
+        这一步是日报的事实来源：状态、风险、股票快照和候选评分都来自后端确定性数据。
+        后续即使用 AI，也只能润色这个 payload，而不是重新创造日报事实。
+        """
+
         stock_snapshots = self._build_stock_snapshots(context)
         sections = self._build_sections(
             context=context,

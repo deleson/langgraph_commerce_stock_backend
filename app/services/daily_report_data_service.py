@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+"""每日简报数据收集服务。
+
+本文件负责把生成日报所需的数据一次性收集成 DailyReportDataContext：
+自选股、用户偏好、市场概览、策略信号、候选评分、用户画像和相关记忆。
+
+它只做数据准备，不生成日报文案，也不调用 AI。
+"""
+
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
@@ -29,6 +37,8 @@ from app.services.watchlist_service import AsyncWatchlistService
 
 @dataclass(slots=True)
 class DailyReportStockDataItem:
+    """日报中单只自选股的数据快照。"""
+
     symbol: str
     market: str
     name: str | None = None
@@ -39,6 +49,12 @@ class DailyReportStockDataItem:
 
 @dataclass(slots=True)
 class DailyReportDataContext:
+    """日报生成上下文。
+
+    DailyReportService 会基于这个上下文生成确定性日报；
+    DailyReportAIService 也只会在这个上下文基础上润色，不额外编造信息。
+    """
+
     user_id: int
     report_date: date
     request: DailyReportGenerateRequest
@@ -53,6 +69,8 @@ class DailyReportDataContext:
 
 
 class DailyReportDataService:
+    """收集每日简报所需的用户与行情上下文。"""
+
     MAX_WARNING_COUNT = 30
     RELEVANT_MEMORY_TOP_K = 5
 
@@ -95,6 +113,13 @@ class DailyReportDataService:
         report_date: date,
         source: DailyReportSource,
     ) -> DailyReportDataContext:
+        """收集某个用户某一天的日报数据。
+
+        自选股是日报的核心股票池；用户画像和记忆是增强上下文；
+        候选评分用于提供研究优先级。任何单只股票读取失败只进入 warnings，
+        不应导致整个日报生成直接崩溃。
+        """
+
         warnings: list[str] = []
 
         watchlist_models = await self.watchlist_service.list_my_watchlist(user)
@@ -174,6 +199,11 @@ class DailyReportDataService:
         watchlist_items: list[dict[str, Any]],
         warnings: list[str],
     ) -> list[DailyReportStockDataItem]:
+        """逐只自选股读取市场概览和策略信号。
+
+        这里采用安全读取：某只股票失败只记录 warning，日报仍可基于其他股票继续生成。
+        """
+
         stock_items: list[DailyReportStockDataItem] = []
 
         for item in watchlist_items:

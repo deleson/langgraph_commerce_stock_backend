@@ -1,5 +1,14 @@
 from __future__ import annotations
 
+"""量化提醒规则触发判定服务。
+
+本文件只做确定性规则判断：
+根据已准备好的行情、技术指标、数据质量和策略信号，
+判断用户配置的提醒规则是否被触发。
+
+它不写数据库、不创建通知、不处理去重；这些由 QuantAlertScanService 负责。
+"""
+
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
@@ -18,6 +27,8 @@ from app.services.quant_alert_data_service import QuantAlertDataContext, QuantAl
 
 @dataclass(slots=True)
 class QuantAlertTriggeredCandidate:
+    """一条“准备创建提醒事件”的候选结果。"""
+
     rule: QuantAlertRule
     data_item: QuantAlertDataItem
     event_payload: QuantAlertEventCreate
@@ -44,11 +55,10 @@ class QuantAlertTriggerEvaluationResult:
 
 
 class QuantAlertTriggerService:
-    """Evaluates deterministic quant alert rules against prepared scan data.
+    """对准备好的扫描数据执行确定性提醒规则判定。
 
-    This service only decides whether a rule is triggered. It does not write
-    QuantAlertEvent rows, does not apply database deduplication, and does not
-    create notifications.
+    这个 Service 只回答“是否触发”，不负责落库和通知。
+    这样规则计算可以独立测试，也可以避免数据库副作用混入纯判断逻辑。
     """
 
     DEFAULT_STRATEGY_SIGNALS = {"buy", "sell"}
@@ -71,6 +81,8 @@ class QuantAlertTriggerService:
         rules: list[QuantAlertRule],
         triggered_at: datetime | None = None,
     ) -> QuantAlertTriggerEvaluationResult:
+        """评估一次扫描上下文中的所有股票和规则。"""
+
         triggered_at = triggered_at or datetime.now(UTC)
         warnings = list(context.warnings)
         items: list[QuantAlertTriggerEvaluationItem] = []
@@ -148,6 +160,12 @@ class QuantAlertTriggerService:
         rule: QuantAlertRule,
         triggered_at: datetime,
     ) -> QuantAlertTriggeredCandidate | None:
+        """根据 rule_type 分发到具体规则判断函数。
+
+        当前支持策略信号、强策略信号、策略分数阈值、价格涨跌幅、
+        成交量放大和数据质量提醒。
+        """
+
         rule_type = self._parse_rule_type(rule.rule_type)
 
         if rule_type == QuantAlertRuleType.STRATEGY_SIGNAL:

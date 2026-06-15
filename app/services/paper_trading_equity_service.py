@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+"""纸面交易权益快照服务。
+
+本文件负责把账户现金和当前持仓市值汇总成权益曲线快照。
+它不生成订单、不生成成交、不更新持仓，只做权益统计。
+"""
+
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from decimal import Decimal, ROUND_DOWN
@@ -18,6 +24,8 @@ from app.schemas.paper_trading import (
 
 @dataclass(slots=True)
 class PaperTradingEquityCalculation:
+    """一次权益快照的计算结果。"""
+
     account_id: int
     snapshot_date: date
     cash_balance: Decimal
@@ -39,10 +47,10 @@ class PaperTradingEquitySnapshotResult:
 
 
 class PaperTradingEquityService:
-    """Create or update paper trading equity snapshots.
+    """创建或更新纸面交易权益快照。
 
-    This service summarizes account cash and current position market value.
-    It does not create orders, trades, or positions.
+    total_equity = cash_balance + position_market_value。
+    daily_return、total_return、max_drawdown 都基于虚拟账户权益曲线计算。
     """
 
     MONEY_PRECISION = Decimal("0.0001")
@@ -66,6 +74,12 @@ class PaperTradingEquityService:
         user_id: int,
         snapshot_date: date | None = None,
     ) -> PaperTradingEquitySnapshotResult:
+        """创建或更新指定日期的权益快照。
+
+        同一账户同一天只保留一条快照：如果已存在则更新，不存在则创建。
+        这让 API 手动 tick 和后台定时 tick 重复执行时仍然保持幂等。
+        """
+
         resolved_snapshot_date = snapshot_date or self._today()
 
         positions = await self.repository.list_positions(
@@ -153,6 +167,8 @@ class PaperTradingEquityService:
         historical_snapshots: list[PaperTradingEquitySnapshot],
         snapshot_date: date,
     ) -> PaperTradingEquityCalculation:
+        """计算现金、持仓市值、总权益、收益率和最大回撤。"""
+
         warnings: list[str] = []
 
         cash_balance = self._quantize_money(self._to_decimal(account.cash_balance))

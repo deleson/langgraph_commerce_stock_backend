@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+"""纸面交易账户配置服务。
+
+账户配置决定 tick 能扫描多少只股票、是否允许买入/卖出、单笔仓位上限、
+总仓位上限、手续费率和数据质量要求。
+
+它只管理配置，不创建订单、成交、持仓、权益快照或运行记录。
+"""
+
 from decimal import Decimal
 from typing import Any
 
@@ -19,10 +27,10 @@ from app.services.paper_trading_account_service import PaperTradingAccountServic
 
 
 class PaperTradingAccountConfigService:
-    """Paper trading account config business service.
+    """纸面交易账户级风控和运行配置服务。
 
-    This service manages account-level paper trading rules.
-    It does not create orders, trades, positions, equity snapshots, or run records.
+    run_tick 会读取这里的配置，决定是否启用、最大扫描数量和风控参数。
+    这些配置是纸面交易自动推进的第一层保护。
     """
 
     def __init__(
@@ -105,6 +113,12 @@ class PaperTradingAccountConfigService:
         self,
         config: PaperTradingAccountConfig,
     ) -> dict[str, Any]:
+        """构造运行记录中的账户配置快照。
+
+        tick 开始时保存一份配置快照，后续即使用户修改配置，
+        也能回看当时这次运行使用的真实参数。
+        """
+
         return {
             "id": config.id,
             "account_id": config.account_id,
@@ -134,6 +148,8 @@ class PaperTradingAccountConfigService:
         account: PaperTradingAccount,
         request: PaperTradingAccountConfigUpdate,
     ) -> None:
+        """校验配置更新不会破坏纸面交易安全边界。"""
+
         if account.status == PaperTradingAccountStatus.CLOSED:
             raise BadRequestException(
                 message="closed paper trading account config cannot be updated"

@@ -1,5 +1,16 @@
 from __future__ import annotations
 
+"""每日简报查询与生成编排服务。
+
+本文件是日报 API 和后台任务共用的入口：
+1. 判断当天报告是否已经存在；
+2. 收集日报数据；
+3. 生成确定性日报；
+4. 可选调用 AI 润色；
+5. 创建或更新 daily_reports 记录；
+6. 可选生成通知。
+"""
+
 import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -30,11 +41,11 @@ logger = logging.getLogger(__name__)
 
 
 class DailyReportQueryService:
-    """Daily report business orchestration service.
+    """每日简报业务编排服务。
 
-    This service is the unified entry for API and background tasks.
-    It does not directly calculate market indicators and does not directly call
-    repositories outside the daily report boundary.
+    API 手动生成和 Celery 后台生成都走这里，避免出现两套日报逻辑。
+    它本身不直接计算技术指标，而是调用 DailyReportDataService 收集上下文，
+    再调用 DailyReportService / DailyReportAIService 生成报告。
     """
 
     DEFAULT_TIMEZONE = "Asia/Shanghai"
@@ -63,6 +74,13 @@ class DailyReportQueryService:
         request: DailyReportGenerateRequest,
         source: DailyReportSource = DailyReportSource.API,
     ) -> DailyReportGenerationResponse:
+        """生成或更新某个用户的每日简报。
+
+        如果同一天已有报告且没有 force_rebuild，则直接返回已有报告；
+        use_ai=True 时会在确定性日报基础上调用 AI 润色；
+        notify=True 时会创建通知，但通知失败不会让日报生成失败。
+        """
+
         report_date = request.report_date or self._today()
 
         existing_report = await self.repo.get_report_by_date(
@@ -231,6 +249,12 @@ class DailyReportQueryService:
         user: User,
         report,
     ) -> tuple[object, bool]:
+        """为日报创建通知。
+
+        通知是日报的附加能力，不是日报本体。
+        因此通知创建失败只记录日志并返回原报告，避免影响日报生成。
+        """
+
         if report.notification_id is not None:
             return report, False
 

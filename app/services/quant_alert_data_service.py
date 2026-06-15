@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+"""量化提醒扫描数据收集服务。
+
+本文件负责为一次提醒扫描准备市场数据上下文：
+从当前用户自选股构建扫描股票池，再读取 Market Overview、数据质量、技术指标和策略信号。
+
+它只负责“拿数据”，不判断规则是否触发，也不写提醒事件。
+"""
+
 from dataclasses import dataclass, field
 
 from app.models.user import User
@@ -11,6 +19,8 @@ from app.services.watchlist_service import AsyncWatchlistService
 
 @dataclass(slots=True)
 class QuantAlertUniverseItem:
+    """量化提醒扫描股票池中的单只股票。"""
+
     symbol: str
     market: str
     name: str | None = None
@@ -20,6 +30,8 @@ class QuantAlertUniverseItem:
 
 @dataclass(slots=True)
 class QuantAlertDataItem:
+    """单只股票在扫描时使用的行情与策略上下文。"""
+
     symbol: str
     market: str
     name: str | None = None
@@ -48,6 +60,8 @@ class QuantAlertDataItem:
 
 @dataclass(slots=True)
 class QuantAlertDataContext:
+    """一次量化提醒扫描的数据上下文。"""
+
     user_id: int
     request: QuantAlertScanRequest
     universe_items: list[QuantAlertUniverseItem]
@@ -58,11 +72,10 @@ class QuantAlertDataContext:
 
 
 class QuantAlertDataService:
-    """Collects deterministic market data for quant alert scans.
+    """收集量化提醒扫描所需的确定性行情数据。
 
-    This service only reads and aggregates data. It does not decide whether an
-    alert is triggered, does not create alert events, and does not create
-    notifications.
+    这个 Service 只读取和聚合数据，不判断是否触发提醒，
+    不创建 QuantAlertEvent，也不创建 Notification。
     """
 
     TECHNICAL_INDICATOR_LIMIT = 120
@@ -83,6 +96,12 @@ class QuantAlertDataService:
         user: User,
         request: QuantAlertScanRequest,
     ) -> QuantAlertDataContext:
+        """收集一次扫描所需的数据。
+
+        如果用户没有自选股、没有开启提醒，或外部行情不可用，
+        会通过 unavailable_reason / warnings 返回，而不是直接抛出业务异常。
+        """
+
         warnings: list[str] = []
         errors: list[str] = []
 
@@ -128,6 +147,12 @@ class QuantAlertDataService:
         request: QuantAlertScanRequest,
         warnings: list[str],
     ) -> list[QuantAlertUniverseItem]:
+        """从当前用户自选股构建提醒扫描股票池。
+
+        这里必须使用当前用户的自选股，不能扫描其他用户的股票池。
+        request.symbols / request.market 只是进一步过滤，不改变用户隔离边界。
+        """
+
         watchlist_items = await self.watchlist_service.list_my_watchlist(user)
 
         if not watchlist_items:

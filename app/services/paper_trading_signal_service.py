@@ -1,5 +1,14 @@
 from __future__ import annotations
 
+"""纸面交易信号读取服务。
+
+本文件负责把当前用户自选股转换成纸面交易 tick 的扫描对象，
+并读取 Market Overview、数据质量和策略信号。
+
+它只判断哪些股票具备生成模拟订单的条件，不创建订单、不更新持仓、
+不更新账户现金，也不生成权益快照。
+"""
+
 from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +25,8 @@ from app.services.watchlist_service import AsyncWatchlistService
 
 @dataclass(slots=True)
 class PaperTradingUniverseItem:
+    """纸面交易 tick 扫描股票池中的单只股票。"""
+
     symbol: str
     market: str
     name: str | None = None
@@ -24,6 +35,8 @@ class PaperTradingUniverseItem:
 
 @dataclass(slots=True)
 class PaperTradingSignalItem:
+    """单只股票的纸面交易信号上下文。"""
+
     symbol: str
     market: str
     name: str | None = None
@@ -50,6 +63,8 @@ class PaperTradingSignalItem:
 
 @dataclass(slots=True)
 class PaperTradingSignalContext:
+    """一次纸面交易 tick 的信号读取结果。"""
+
     user_id: int
     request: PaperTradingTickRequest
     universe_items: list[PaperTradingUniverseItem]
@@ -61,11 +76,10 @@ class PaperTradingSignalContext:
 
 
 class PaperTradingSignalService:
-    """Collect deterministic signal inputs for paper trading ticks.
+    """收集纸面交易 tick 所需的确定性信号输入。
 
-    This service only reads watchlist, market overview, data quality, and
-    strategy signals. It does not create orders, trades, positions, or equity
-    snapshots.
+    这个 Service 只读取自选股、行情概览、数据质量和策略信号。
+    buy / sell 信号会进入 actionable_items；hold / observe 只记录原因，不生成订单。
     """
 
     TIMEFRAME = "1d"
@@ -93,6 +107,12 @@ class PaperTradingSignalService:
         user: User,
         request: PaperTradingTickRequest,
     ) -> PaperTradingSignalContext:
+        """收集一次 tick 的所有股票信号。
+
+        数据质量为空、不足、过旧或有错误时，不允许生成模拟订单。
+        这样可以避免纸面交易在不可靠行情上推进。
+        """
+
         warnings: list[str] = []
         errors: list[str] = []
 
@@ -236,6 +256,12 @@ class PaperTradingSignalService:
         self,
         overview: MarketOverviewResponse,
     ) -> tuple[bool, str | None, str]:
+        """判断单只股票是否可以生成模拟订单。
+
+        只有数据质量通过，且策略信号为 buy / sell 时才返回 can_generate_order=True。
+        这一步仍然只是规则信号，不代表真实交易建议。
+        """
+
         data_quality = overview.data_quality
         if data_quality is None:
             return False, None, "缺少数据质量报告，暂不生成模拟订单"

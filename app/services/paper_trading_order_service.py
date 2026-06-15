@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+"""纸面交易模拟订单与模拟成交服务。
+
+本文件根据 buy / sell 信号创建 PaperTradingOrder 和 PaperTradingTrade。
+它只负责“生成虚拟订单并按最新价模拟成交”，不更新账户现金、不更新持仓、
+也不生成权益快照。
+"""
+
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal, ROUND_DOWN
@@ -25,6 +32,8 @@ from app.services.paper_trading_signal_service import (
 
 @dataclass(slots=True)
 class PaperTradingOrderExecutionItem:
+    """单个信号的模拟订单执行结果。"""
+
     symbol: str
     market: str
     action: str
@@ -46,10 +55,11 @@ class PaperTradingOrderExecutionResult:
 
 
 class PaperTradingOrderService:
-    """Create simulated paper trading orders and trades.
+    """创建纸面交易模拟订单和模拟成交。
 
-    This service creates order and trade rows only.
-    It does not update account cash, positions, or equity snapshots.
+    buy 信号按可用虚拟现金比例计算数量；
+    sell 信号按当前模拟持仓数量卖出。
+    现金、持仓和权益更新交给后续 Service。
     """
 
     BUY_CASH_RATIO = Decimal("0.10")
@@ -73,6 +83,11 @@ class PaperTradingOrderService:
         account: PaperTradingAccount,
         signal_context: PaperTradingSignalContext,
     ) -> PaperTradingOrderExecutionResult:
+        """把 actionable_items 转换为模拟订单和成交。
+
+        同一个 tick 内会用局部 available_cash 递减，避免多个 buy 信号都按同一笔现金下单。
+        """
+
         warnings: list[str] = []
         items: list[PaperTradingOrderExecutionItem] = []
 
@@ -138,6 +153,12 @@ class PaperTradingOrderService:
         signal_item: PaperTradingSignalItem,
         available_cash: Decimal,
     ) -> tuple[PaperTradingOrderExecutionItem, Decimal]:
+        """处理 buy 信号。
+
+        第一版使用 quote.latest_price 作为模拟成交价，并按账户可用现金的一定比例下单。
+        如果价格、现金或计算数量不可用，则跳过订单生成。
+        """
+
         latest_price = self._get_latest_price(signal_item)
         if latest_price is None or latest_price <= 0:
             return (
@@ -241,6 +262,12 @@ class PaperTradingOrderService:
         signal_item: PaperTradingSignalItem,
         available_cash: Decimal,
     ) -> tuple[PaperTradingOrderExecutionItem, Decimal]:
+        """处理 sell 信号。
+
+        sell 只会卖出当前纸面交易持仓数量；无持仓时跳过。
+        这里仍然只创建模拟成交，现金入账在 PositionService 中完成。
+        """
+
         latest_price = self._get_latest_price(signal_item)
         if latest_price is None or latest_price <= 0:
             return (

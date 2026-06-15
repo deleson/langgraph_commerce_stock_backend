@@ -1,5 +1,18 @@
 from __future__ import annotations
 
+"""量化提醒扫描编排服务。
+
+一次扫描的完整链路是：
+1. 读取当前用户 active 规则；
+2. 收集自选股行情、质量、指标和策略信号；
+3. 用 QuantAlertTriggerService 做确定性触发判断；
+4. 去重后写入 QuantAlertEvent；
+5. 可选创建 Notification；
+6. 返回本次扫描摘要。
+
+本服务不接券商、不下单，只做提醒事件记录。
+"""
+
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -34,15 +47,16 @@ from app.services.watchlist_service import AsyncWatchlistService
 
 @dataclass(slots=True)
 class QuantAlertCreatedEvent:
+    """已成功创建或更新通知后的提醒事件包装。"""
+
     event: QuantAlertEvent
     candidate: QuantAlertTriggeredCandidate
 
 class QuantAlertScanService:
-    """Orchestrates one quant alert scan.
+    """编排一次量化提醒扫描。
 
-    This service reads rules, collects market data, evaluates deterministic
-    alert rules, writes new QuantAlertEvent rows, optionally creates
-    abnormal_alert notifications, and returns a scan response.
+    这个 Service 连接规则、行情、触发判定、事件落库和通知创建。
+    它仍然是确定性逻辑，不调用 LLM，也不生成投资建议。
     """
 
     def __init__(
@@ -69,6 +83,12 @@ class QuantAlertScanService:
         user: User,
         request: QuantAlertScanRequest,
     ) -> QuantAlertScanResponse:
+        """执行一次提醒扫描。
+
+        无 active 规则、无可用股票池或行情不可用时，会返回 skipped / unavailable，
+        而不是制造空提醒。真正触发的事件会先做 dedup_key 去重，避免同一天重复提醒。
+        """
+
         triggered_at = datetime.now(UTC)
         warnings: list[str] = []
 
@@ -175,6 +195,12 @@ class QuantAlertScanService:
         candidates: Iterable[QuantAlertTriggeredCandidate],
         warnings: list[str],
     ) -> list[QuantAlertCreatedEvent]:
+        """将触发候选写入提醒事件表。
+
+        dedup_key 用于避免同一用户、同一股票、同一规则在同一周期重复创建事件。
+        数据库唯一约束命中时也按重复事件处理，保证并发下仍然安全。
+        """
+
         created_events: list[QuantAlertCreatedEvent] = []
 
         for candidate in candidates:
@@ -218,6 +244,12 @@ class QuantAlertScanService:
             created_event_items: list[QuantAlertCreatedEvent],
             warnings: list[str],
     ) -> list[QuantAlertCreatedEvent]:
+        """为提醒事件创建通知。
+
+        通知创建是提醒事件的附加能力。通知失败只写入 warnings，
+        不会回滚已经创建的 QuantAlertEvent。
+        """
+
         if not request.notify:
             return created_event_items
 

@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+"""纸面交易 API 与 tick 编排服务。
+
+本文件是纸面交易模块的统一业务入口：
+账户查询、配置查询、持仓/订单/成交/权益/运行记录查询，以及 run_tick 主链路都在这里编排。
+
+run_tick 只推进虚拟账户，不连接券商、不真实下单、不构成投资建议。
+"""
+
 from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -51,10 +59,10 @@ from app.services.paper_trading_signal_service import PaperTradingSignalContext,
 
 
 class PaperTradingQueryService:
-    """Unified paper trading business entry for API handlers.
+    """纸面交易 API 的统一业务入口。
 
-    This service coordinates account queries and paper trading ticks.
-    It keeps API routers thin and does not expose repository details to routers.
+    Router 层只处理 HTTP、认证和分页参数；
+    本 Service 负责账户归属校验、配置读取、tick 运行记录和多个子 Service 串联。
     """
 
     DETAIL_POSITION_LIMIT = 100
@@ -356,6 +364,19 @@ class PaperTradingQueryService:
         user: User,
         request: PaperTradingTickRequest,
     ) -> PaperTradingTickResponse:
+        """推进一次纸面交易 tick。
+
+        主流程：
+        1. 校验 target_user_id 必须等于当前用户；
+        2. 解析账户并读取账户配置；
+        3. 创建 PaperTradingRun 运行记录；
+        4. 收集策略信号；
+        5. 创建模拟订单和成交；
+        6. 更新现金与持仓；
+        7. 创建或更新权益快照；
+        8. 把快照和统计写回运行记录。
+        """
+
         self._validate_tick_user(
             user=user,
             request=request,
@@ -534,6 +555,12 @@ class PaperTradingQueryService:
         user: User,
         request: PaperTradingTickRequest,
     ) -> PaperTradingAccount:
+        """解析本次 tick 使用的纸面交易账户。
+
+        如果请求没有传 account_id，则获取或创建当前用户默认账户。
+        账户查询始终带 user_id，避免跨用户推进别人的虚拟账户。
+        """
+
         if request.account_id is not None:
             return await self.account_service.get_account_model(
                 user_id=user.id,
@@ -555,6 +582,8 @@ class PaperTradingQueryService:
         user: User,
         request: PaperTradingTickRequest,
     ) -> None:
+        """校验 tick 的目标用户不能被请求体伪造。"""
+
         if request.target_user_id is not None and request.target_user_id != user.id:
             raise BadRequestException(
                 message="paper trading tick target_user_id must match current user"

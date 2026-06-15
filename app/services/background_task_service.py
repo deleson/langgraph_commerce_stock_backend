@@ -1,5 +1,16 @@
 from __future__ import annotations
 
+"""后台任务 API 侧编排服务。
+
+本文件负责“用户通过 API 提交后台任务”这一侧的业务：
+1. 先把任务请求写入 background_tasks 表；
+2. 再把任务 id 投递给 Celery Worker；
+3. 后续任务执行状态由 Worker 回写数据库。
+
+注意：这里不直接执行耗时业务逻辑，避免 HTTP 请求被行情同步、日报生成、
+纸面交易 tick 等长任务阻塞。
+"""
+
 from typing import Any
 
 from celery import Celery
@@ -19,6 +30,12 @@ from app.schemas.background_task import (
 
 
 class BackgroundTaskService:
+    """后台任务提交、查询、列表和取消服务。
+
+    Router 层只处理 HTTP 请求和当前用户；
+    本 Service 负责把请求转成可追踪的 BackgroundTask 记录，并投递 Celery。
+    """
+
     DISPATCH_TASK_NAME = "background_tasks.dispatch_background_task"
     TERMINAL_STATUSES = {"success", "failed", "cancelled"}
 
@@ -39,6 +56,12 @@ class BackgroundTaskService:
         request: BackgroundTaskCreateRequest,
         user_id: int | None = None,
     ) -> BackgroundTaskSubmitResponse:
+        """提交后台任务。
+
+        任务先落库再投递 Celery，这样即使 Worker 异常，也能在数据库里看到失败原因。
+        user_id 用于把任务归属到当前用户，后续查询和取消都要按用户隔离。
+        """
+
         task = await self.repository.create_task(
             payload=request,
             user_id=user_id,
@@ -116,6 +139,12 @@ class BackgroundTaskService:
         task_id: int,
         user_id: int | None = None,
     ) -> BackgroundTaskResponse:
+        """取消尚未结束的后台任务。
+
+        当前第一版取消是业务状态取消，主要防止用户继续看到任务处于可执行状态。
+        已经 success / failed / cancelled 的终态任务不能再次取消。
+        """
+
         task = await self._get_task_or_raise(task_id=task_id)
 
         if user_id is not None and task.user_id != user_id:

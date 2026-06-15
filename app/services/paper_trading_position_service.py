@@ -1,5 +1,14 @@
 from __future__ import annotations
 
+"""纸面交易资金与持仓更新服务。
+
+本文件消费 PaperTradingOrderService 生成的模拟成交：
+buy 成交会减少账户现金并创建或增加持仓；
+sell 成交会增加账户现金并减少持仓。
+
+它不创建订单、不创建成交、不生成权益快照。
+"""
+
 from dataclasses import dataclass, field
 from decimal import Decimal, ROUND_DOWN
 
@@ -18,6 +27,8 @@ from app.services.paper_trading_order_service import (
 
 @dataclass(slots=True)
 class PaperTradingPositionUpdateItem:
+    """单笔模拟成交对现金和持仓的更新结果。"""
+
     symbol: str
     market: str
     side: str
@@ -40,10 +51,10 @@ class PaperTradingPositionUpdateResult:
 
 
 class PaperTradingPositionService:
-    """Update paper trading account cash and positions from simulated trades.
+    """根据模拟成交更新纸面交易账户现金和当前持仓。
 
-    This service consumes trades created by PaperTradingOrderService.
-    It does not create orders, trades, or equity snapshots.
+    平均成本会把手续费纳入成本；持仓市值按最新成交价重估。
+    这些计算只用于虚拟账户，不代表真实券商账户。
     """
 
     QUANTITY_PRECISION = Decimal("0.000001")
@@ -65,6 +76,12 @@ class PaperTradingPositionService:
         account: PaperTradingAccount,
         execution_result: PaperTradingOrderExecutionResult,
     ) -> PaperTradingPositionUpdateResult:
+        """应用一次 tick 的全部模拟成交。
+
+        订单服务已经创建 trade；这里按 trade 顺序更新现金和持仓，
+        最后统一更新账户 cash_balance。
+        """
+
         cash_before = self._to_decimal(account.cash_balance)
         current_cash = cash_before
 
@@ -153,6 +170,8 @@ class PaperTradingPositionService:
         trade: PaperTradingTrade,
         current_cash: Decimal,
     ) -> tuple[PaperTradingPositionUpdateItem, Decimal]:
+        """应用买入成交：现金减少，持仓增加或新建。"""
+
         trade_value = self._to_decimal(trade.trade_value)
         fee_amount = self._to_decimal(trade.fee_amount)
         total_cost = self._quantize_money(trade_value + fee_amount)
@@ -205,6 +224,8 @@ class PaperTradingPositionService:
         trade: PaperTradingTrade,
         current_cash: Decimal,
     ) -> tuple[PaperTradingPositionUpdateItem, Decimal]:
+        """应用卖出成交：现金增加，当前持仓减少。"""
+
         trade_value = self._to_decimal(trade.trade_value)
         fee_amount = self._to_decimal(trade.fee_amount)
         cash_inflow = self._quantize_money(trade_value - fee_amount)

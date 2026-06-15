@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+"""量化提醒 API 编排服务。
+
+本文件负责规则管理、事件查询和手动扫描入口。
+Router 层不直接访问 Repository，也不直接执行扫描细节；
+所有用户隔离和业务编排都收口在这里。
+"""
+
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,14 +30,10 @@ from app.services.quant_alert_scan_service import QuantAlertScanService
 
 
 class QuantAlertQueryService:
-    """Quant alert API orchestration service.
+    """量化提醒 API 业务编排服务。
 
-    This service is the unified entry for Quant Alert API handlers. It manages
-    alert rules, reads alert events, and delegates manual scans to
-    QuantAlertScanService.
-
-    It does not directly read market data and does not create notifications yet.
-    Notification creation is handled in a later step.
+    这个 Service 管理提醒规则、读取提醒事件，并把手动扫描委托给 QuantAlertScanService。
+    它不直接读取行情，也不直接判断规则触发。
     """
 
     def __init__(
@@ -205,6 +208,12 @@ class QuantAlertQueryService:
         user: User,
         request: QuantAlertScanRequest,
     ) -> QuantAlertScanResponse:
+        """执行当前用户的手动提醒扫描。
+
+        target_user_id 会被强制替换为当前用户 id，
+        防止调用方通过请求体扫描其他用户的规则或自选股。
+        """
+
         scan_request = request.model_copy(
             update={
                 "target_user_id": user.id,

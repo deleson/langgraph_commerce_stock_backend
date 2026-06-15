@@ -1,3 +1,9 @@
+"""用户资料 Service。
+
+本文件负责当前用户资料查询和更新。当前用户身份来自 JWT 解析结果，
+不能通过请求体传入 user_id 来修改其他用户资料。
+"""
+
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,6 +15,8 @@ from app.schemas.user import UserUpdateRequest
 
 
 class UserService:
+    """同步用户资料业务服务。"""
+
     def __init__(self,db:Session) -> None:
         self.db = db
         self.user_repo = UserRepository(db)
@@ -24,6 +32,11 @@ class UserService:
         return user
 
     def update_user_profile(self, user: User, payload: UserUpdateRequest) -> User:
+        """更新当前用户资料。
+
+        用户名更新需要检查唯一性，避免和其他账号冲突。
+        """
+
         update_data = payload.model_dump(exclude_unset=True)
 
         if "username" in update_data:
@@ -41,6 +54,8 @@ class UserService:
 
 
 class AsyncUserService:
+    """异步用户资料业务服务。"""
+
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self.user_repo = AsyncUserRepository(db)
@@ -60,6 +75,8 @@ class AsyncUserService:
         user: User,
         payload: UserUpdateRequest,
     ) -> User:
+        """更新当前用户资料。"""
+
         update_data = payload.model_dump(exclude_unset=True)
 
         if "username" in update_data:

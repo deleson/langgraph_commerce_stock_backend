@@ -1,3 +1,9 @@
+"""用户偏好 Service。
+
+本文件负责用户偏好的获取、默认创建和更新。偏好会影响自选股默认提醒、
+每日简报、量化提醒和候选评分等后续业务模块。
+"""
+
 from sqlalchemy.orm import Session
 
 from app.models.user import User
@@ -9,11 +15,18 @@ from app.repositories.user_preference_repo import AsyncUserPreferenceRepository
 
 
 class UserPreferenceService:
+    """同步用户偏好业务服务。"""
+
     def __init__(self, db: Session) -> None:
         self.db = db
         self.preference_repo = UserPreferenceRepository(db)
 
     def get_or_create_my_preference(self, user: User) -> UserPreference:
+        """获取或创建当前用户偏好。
+
+        默认偏好保证新用户无需手动配置，也能安全进入后续业务流程。
+        """
+
         preference = self.preference_repo.get_by_user_id(user.id)
         if preference is not None:
             return preference
@@ -35,11 +48,15 @@ class UserPreferenceService:
 
 
 class AsyncUserPreferenceService:
+    """异步用户偏好业务服务。"""
+
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self.preference_repo = AsyncUserPreferenceRepository(db)
 
     async def get_or_create_my_preference(self, user: User) -> UserPreference:
+        """获取或创建当前用户偏好。"""
+
         preference = await self.preference_repo.get_by_user_id(user.id)
         if preference is not None:
             return preference

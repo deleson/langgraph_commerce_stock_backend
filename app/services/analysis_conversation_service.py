@@ -1,3 +1,9 @@
+"""分析会话 Service。
+
+本文件负责保存普通追问、ReAct 追问、工具 Observation 和 ReAct trace。
+这些记录用于恢复上下文、审计工具调用，并在用户消息中异步抽取长期记忆。
+"""
+
 import logging
 from typing import Any
 
@@ -37,6 +43,11 @@ from app.services.user_memory_extraction_service import UserMemoryExtractionServ
 logger = logging.getLogger(__name__)
 
 class AnalysisConversationService:
+    """分析会话业务服务。
+
+    会话数据属于用户私有上下文，所有保存和查询都必须携带 user_id。
+    """
+
     def __init__(self, db: AsyncSession) -> None:
         self.repo = AsyncAnalysisConversationRepository(db)
         self.memory_extraction_service = UserMemoryExtractionService(db)
@@ -52,6 +63,11 @@ class AnalysisConversationService:
         message_type: ConversationMessageType = "react_follow_up",
         payload: dict[str, Any] | None = None,
     ) -> AnalysisConversationMessageResponse:
+        """保存用户消息，并尝试抽取用户记忆。
+
+        记忆抽取失败不会影响主会话保存，避免附属能力拖垮追问流程。
+        """
+
         message = await self._create_message(
             user_id=user_id,
             analysis_thread_id=analysis_thread_id,
@@ -97,6 +113,11 @@ class AnalysisConversationService:
         observations: list[ReactObservation],
         analysis_record_id: int | None = None,
     ) -> list[AnalysisConversationMessageResponse]:
+        """保存 ReAct 工具 Observation 消息。
+
+        工具返回内容会经过清洗和截断，避免过长或不适合落库的内容污染会话历史。
+        """
+
         if not observations:
             return []
 
@@ -135,6 +156,11 @@ class AnalysisConversationService:
         analysis_record_id: int | None = None,
         react_graph_checkpoint_id: str | None = None,
     ) -> list[AnalysisReactTraceResponse]:
+        """保存 ReAct 工具调用 trace。
+
+        trace 用于审计模型每一步工具选择、执行结果和失败原因。
+        """
+
         if not traces:
             return []
 
@@ -208,6 +234,11 @@ class AnalysisConversationService:
         analysis_thread_id: str,
         limit: int = 10,
     ) -> AnalysisConversationContext:
+        """读取最近会话上下文。
+
+        limit 会被限制在安全范围内，避免一次性把过多历史消息塞回 LLM 上下文。
+        """
+
         safe_limit = clamp_int(
             limit,
             default=MAX_CONVERSATION_CONTEXT_MESSAGES,
@@ -241,6 +272,11 @@ class AnalysisConversationService:
         self,
         message: AnalysisConversationMessageResponse,
     ) -> None:
+        """从用户消息中抽取长期记忆。
+
+        这是附属增强能力，失败时只记录日志，不影响用户追问主链路。
+        """
+
         try:
             await self.memory_extraction_service.extract_from_conversation_message(
                 user_id=message.user_id,
@@ -274,6 +310,8 @@ class AnalysisConversationService:
         payload: dict[str, Any] | None = None,
         analysis_record_id: int | None = None,
     ) -> AnalysisConversationMessageResponse:
+        """创建单条会话消息并分配线程内序号。"""
+
         sequence_no = await self.repo.get_next_sequence_no(
             user_id=user_id,
             analysis_thread_id=analysis_thread_id,
@@ -307,6 +345,11 @@ class AnalysisConversationService:
         self,
         payload: dict[str, Any] | None,
     ) -> dict[str, Any] | None:
+        """清洗可落库的 payload。
+
+        ReAct 相关 payload 可能来自工具输入输出，落库前需要做安全清洗。
+        """
+
         if payload is None:
             return None
 

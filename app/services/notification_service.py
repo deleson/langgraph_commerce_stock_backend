@@ -1,3 +1,9 @@
+"""通知 Service。
+
+本文件负责通知列表、详情、创建和已读状态更新。
+通知来自分析完成、日报生成、量化提醒等模块，读取和修改时必须绑定当前用户。
+"""
+
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,6 +15,8 @@ from app.schemas.notification import NotificationCreateRequest
 
 
 class NotificationService:
+    """同步通知业务服务。"""
+
     def __init__(self, db: Session) -> None:
         self.db = db
         self.notification_repo = NotificationRepository(db)
@@ -30,6 +38,8 @@ class NotificationService:
         user: User,
         notification_id: int,
     ) -> Notification:
+        """查询当前用户通知详情。"""
+
         notification = self.notification_repo.get_by_id_for_user(
             notification_id=notification_id,
             user_id=user.id,
@@ -67,6 +77,8 @@ class NotificationService:
         user: User,
         notification_id: int,
     ) -> Notification:
+        """标记当前用户的一条通知为已读。"""
+
         notification = self.get_my_notification(
             user=user,
             notification_id=notification_id,
@@ -81,6 +93,8 @@ class NotificationService:
         return self.notification_repo.mark_all_as_read(user.id)
 
 class AsyncNotificationService:
+    """异步通知业务服务。"""
+
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self.notification_repo = AsyncNotificationRepository(db)
@@ -102,6 +116,8 @@ class AsyncNotificationService:
             user: User,
             notification_id: int,
     ) -> Notification:
+        """查询当前用户通知详情。"""
+
         notification = await self.notification_repo.get_by_id_for_user(
             notification_id=notification_id,
             user_id=user.id,
@@ -139,6 +155,8 @@ class AsyncNotificationService:
             user: User,
             notification_id: int,
     ) -> Notification:
+        """标记当前用户的一条通知为已读。"""
+
         notification = await self.get_my_notification(
             user=user,
             notification_id=notification_id,

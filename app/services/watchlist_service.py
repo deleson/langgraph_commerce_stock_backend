@@ -1,3 +1,9 @@
+"""自选股 Service。
+
+本文件负责当前用户自选股的创建、查询、更新和删除。
+自选股是日报、量化提醒和纸面交易扫描股票池的重要来源，必须按 user_id 做隔离。
+"""
+
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +18,8 @@ from app.repositories.user_preference_repo import AsyncUserPreferenceRepository
 
 
 class WatchlistService:
+    """同步自选股业务服务。"""
+
     def __init__(self, db: Session) -> None:
         self.db = db
         self.watchlist_repo = WatchlistRepository(db)
@@ -29,6 +37,8 @@ class WatchlistService:
         return self.watchlist_repo.list_by_user_id(user.id)
 
     def get_my_watchlist_item(self, *, user: User, item_id: int) -> WatchlistItem:
+        """查询当前用户自选股详情。"""
+
         item = self.watchlist_repo.get_by_id_for_user(
             item_id=item_id,
             user_id=user.id,
@@ -47,6 +57,11 @@ class WatchlistService:
         user: User,
         payload: WatchlistCreateRequest,
     ) -> WatchlistItem:
+        """创建当前用户自选股。
+
+        同一用户不能重复添加同一市场同一股票；提醒默认值可继承用户偏好。
+        """
+
         symbol = self._normalize_symbol(payload.symbol)
         market = self._normalize_market(payload.market)
 
@@ -106,6 +121,8 @@ class WatchlistService:
 
 
 class AsyncWatchlistService:
+    """异步自选股业务服务。"""
+
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self.watchlist_repo = AsyncWatchlistRepository(db)
@@ -128,6 +145,8 @@ class AsyncWatchlistService:
         user: User,
         item_id: int,
     ) -> WatchlistItem:
+        """查询当前用户自选股详情。"""
+
         item = await self.watchlist_repo.get_by_id_for_user(
             item_id=item_id,
             user_id=user.id,
@@ -146,6 +165,8 @@ class AsyncWatchlistService:
         user: User,
         payload: WatchlistCreateRequest,
     ) -> WatchlistItem:
+        """创建当前用户自选股。"""
+
         symbol = self._normalize_symbol(payload.symbol)
         market = self._normalize_market(payload.market)
 

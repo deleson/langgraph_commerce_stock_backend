@@ -1,3 +1,9 @@
+"""设备 Service。
+
+本文件负责用户设备注册、列表查询和停用。设备管理是后续移动端 App 推送提醒的基础，
+但当前这里只保存设备信息，不直接执行真实推送。
+"""
+
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
@@ -11,6 +17,8 @@ from app.schemas.device import DeviceRegisterRequest
 
 
 class DeviceService:
+    """同步设备业务服务。"""
+
     def __init__(self, db: Session) -> None:
         self.db = db
         self.device_repo = DeviceRepository(db)
@@ -24,6 +32,11 @@ class DeviceService:
         user: User,
         payload: DeviceRegisterRequest,
     ) -> Device:
+        """注册或更新当前用户设备。
+
+        同一用户同一 platform + push_token 会复用旧记录，避免重复创建设备。
+        """
+
         device = self.device_repo.get_by_platform_token_for_user(
             user_id=user.id,
             platform=payload.platform,
@@ -49,6 +62,8 @@ class DeviceService:
         user: User,
         device_id: int,
     ) -> Device:
+        """停用当前用户设备。"""
+
         device = self.device_repo.get_by_id_for_user(
             device_id=device_id,
             user_id=user.id,
@@ -71,6 +86,8 @@ class DeviceService:
 
 
 class AsyncDeviceService:
+    """异步设备业务服务。"""
+
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self.device_repo = AsyncDeviceRepository(db)
@@ -84,6 +101,8 @@ class AsyncDeviceService:
         user: User,
         payload: DeviceRegisterRequest,
     ) -> Device:
+        """注册或更新当前用户设备。"""
+
         device = await self.device_repo.get_by_platform_token_for_user(
             user_id=user.id,
             platform=payload.platform,
@@ -109,6 +128,8 @@ class AsyncDeviceService:
         user: User,
         device_id: int,
     ) -> Device:
+        """停用当前用户设备。"""
+
         device = await self.device_repo.get_by_id_for_user(
             device_id=device_id,
             user_id=user.id,

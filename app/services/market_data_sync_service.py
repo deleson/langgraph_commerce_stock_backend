@@ -1,3 +1,11 @@
+"""行情同步服务。
+
+本服务负责把外部 Provider 的股票信息和 K 线同步到数据库。它处在“外部行情源”
+和“内部量化计算”之间，所以必须先完成数据质量检查，再写入 market_symbols /
+market_candles / sync_status / sync_logs。后续技术指标、策略信号、回测和纸面交易
+都依赖这里落库后的稳定数据。
+"""
+
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
@@ -34,6 +42,8 @@ from app.services.market_providers import (
 
 
 class MarketDataSyncService:
+    """协调 Provider、数据质量服务和 Repository 的行情同步编排器。"""
+
     def __init__(
         self,
         db: AsyncSession,
@@ -55,6 +65,11 @@ class MarketDataSyncService:
         symbol: str,
         market: MarketCode,
     ) -> MarketSymbol:
+        """同步单只股票基础信息。
+
+        股票基础信息先落库，K 线同步时才能把 candle 关联到 symbol_id。
+        """
+
         symbol_payload = await self.provider.get_symbol(
             symbol=symbol,
             market=market,
@@ -70,6 +85,18 @@ class MarketDataSyncService:
         limit: int | None = None,
         adjust_type: AdjustType = "none",
     ) -> list[MarketCandle]:
+        """同步单只股票 K 线。
+
+        业务流程：
+        1. 读取当前 Provider；
+        2. 拉取 Provider 原始 K 线；
+        3. 用 MarketDataQualityService 标准化、去重、校验；
+        4. upsert 到 market_candles；
+        5. 写同步状态和同步日志。
+
+        这一步只负责“数据入库”，不计算策略信号，也不判断买卖。
+        """
+
         settings = get_settings()
         sync_limit = limit or settings.market_data_candle_sync_limit
         normalized_symbol = symbol.strip().upper()
@@ -107,6 +134,8 @@ class MarketDataSyncService:
 
             provider_candles = await self.provider.get_candles(query)
 
+            # Provider 返回的数据不能直接入库：先统一 UTC 时间、价格精度、去重，
+            # 再检查空数据、数量不足等问题，避免下游指标被脏数据污染。
             candle_payloads, quality_result = self.quality_service.inspect_provider_candles(
                 provider_candles,
                 symbol_id=market_symbol.id,
@@ -155,6 +184,8 @@ class MarketDataSyncService:
         limit: int | None = None,
         adjust_type: AdjustType = "none",
     ) -> dict[str, int]:
+        """批量同步多只股票 K 线，返回每只股票最终保存的 K 线数量。"""
+
         result: dict[str, int] = {}
 
         for symbol in symbols:
@@ -291,6 +322,8 @@ class MarketDataSyncService:
         self,
         quality_result: MarketDataQualityCheckResult,
     ) -> str:
+        """把数据质量结果折算成同步状态，供 API 和运维日志查看。"""
+
         if quality_result.errors:
             return "failed"
 
@@ -327,6 +360,12 @@ class MarketDataSyncService:
     def _build_provider(
         self,
     ) -> MarketDataProvider:
+        """根据配置选择生产实际使用的行情 Provider。
+
+        目前真实接入支持 mock / baostock / tushare。这里故意做白名单判断，
+        避免 .env 里误写了未实现 Provider 后，系统静默使用错误数据源。
+        """
+
         settings = get_settings()
         provider_name = settings.market_data_primary_provider.strip().lower()
 

@@ -1,3 +1,9 @@
+"""BaoStock 行情 Provider。
+
+BaoStock 是 A 股数据源之一，SDK 调用是同步阻塞形式，因此这里通过
+anyio.to_thread.run_sync 放到线程中执行，避免阻塞异步 API 主事件循环。
+"""
+
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -15,6 +21,8 @@ from app.services.market_providers.base import MarketDataProvider
 
 
 class BaoStockProvider(MarketDataProvider):
+    """面向 A 股日 K 线的 BaoStock 适配器。"""
+
     provider_name = "baostock"
 
     @property
@@ -70,6 +78,11 @@ class BaoStockProvider(MarketDataProvider):
         self,
         query: MarketCandleQuery,
     ) -> list[MarketProviderCandle]:
+        """读取 BaoStock 日 K 线。
+
+        Provider 层只负责调用和格式转换，不负责入库和质量判定。
+        """
+
         if query.market != "CN":
             raise BadRequestException(message="baostock only supports CN market")
 
@@ -120,6 +133,8 @@ class BaoStockProvider(MarketDataProvider):
         self,
         query: MarketCandleQuery,
     ) -> list[MarketProviderCandle]:
+        """在线程中执行 BaoStock 同步 SDK 调用。"""
+
         import baostock as bs
 
         provider_symbol = self._to_baostock_code(query.symbol)

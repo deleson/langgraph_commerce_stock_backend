@@ -1,3 +1,9 @@
+"""Mock 行情 Provider 适配器。
+
+它把 MockMarketDataService 生成的演示数据转换成 Provider 统一接口，
+让行情同步链路在没有真实外部服务时也能完整运行。
+"""
+
 from decimal import Decimal
 
 from app.core.exceptions import NotFoundException
@@ -13,6 +19,8 @@ from app.services.market_providers.base import MarketDataProvider
 
 
 class MockMarketDataProvider(MarketDataProvider):
+    """开发、测试和降级场景使用的模拟 Provider。"""
+
     provider_name = "mock"
 
     def __init__(
@@ -71,6 +79,8 @@ class MockMarketDataProvider(MarketDataProvider):
         self,
         query: MarketCandleQuery,
     ) -> list[MarketProviderCandle]:
+        """把 Mock K 线转换成 MarketProviderCandle。"""
+
         candles = self.market_data_service.get_candles(
             symbol=query.symbol,
             market=query.market,

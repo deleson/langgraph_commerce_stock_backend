@@ -1,3 +1,10 @@
+"""K 线序列读取服务。
+
+技术指标、策略信号、回测等量化模块都需要按时间升序的一段 K 线。本服务把
+“从数据库读取 K 线、校验最小样本数、按时间排序”收敛在一起，避免每个量化
+Service 各自重复写查询和边界判断。
+"""
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import BadRequestException, NotFoundException
@@ -13,6 +20,8 @@ from app.schemas.market_data import (
 
 
 class MarketCandleSeriesService:
+    """从 market_candles 表读取可用于量化计算的 K 线序列。"""
+
     def __init__(
         self,
         db: AsyncSession,
@@ -33,6 +42,12 @@ class MarketCandleSeriesService:
         source: MarketDataSource | None = None,
         min_required: int = 1,
     ) -> list[MarketCandle]:
+        """读取指定股票的一段 K 线。
+
+        source 和 adjust_type 会参与查询过滤，目的是防止 mock、tushare、前复权、
+        不复权等不同口径的数据被混在一起计算。
+        """
+
         normalized_symbol = symbol.strip().upper()
 
         if min_required <= 0:
@@ -71,4 +86,6 @@ class MarketCandleSeriesService:
         self,
         candles: list[MarketCandle],
     ) -> list[MarketCandle]:
+        """统一按 candle_time 升序返回，保证 rolling / pct_change 等计算方向正确。"""
+
         return sorted(candles, key=lambda candle: candle.candle_time)

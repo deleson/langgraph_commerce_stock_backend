@@ -1,3 +1,10 @@
+"""技术指标查询编排服务。
+
+TechnicalIndicatorService 只负责公式计算；本服务负责把数据库 K 线读取出来、
+转换成 DataFrame，再调用公式服务组装 API 响应。它是 API、Market Overview、
+策略信号和 AI 图复用技术指标的统一入口。
+"""
+
 from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +26,8 @@ from app.services.technical_indicator_service import TechnicalIndicatorService
 
 
 class TechnicalIndicatorQueryService:
+    """从数据库 K 线生成技术指标响应。"""
+
     def __init__(
         self,
         db: AsyncSession,
@@ -168,6 +177,12 @@ class TechnicalIndicatorQueryService:
         adjust_type: AdjustType = "none",
         source: MarketDataSource | None = None,
     ) -> TechnicalIndicatorResponse:
+        """一次性计算完整技术指标汇总。
+
+        当前 summary 至少要求 35 根 K 线，主要是为了让 MACD 的 26/9 组合有足够
+        样本。样本不足时不强行返回指标，避免下游策略信号基于不稳定数据评分。
+        """
+
         candles = await self.candle_series_service.get_candle_series(
             symbol=symbol,
             market=market,
@@ -228,6 +243,8 @@ class TechnicalIndicatorQueryService:
         source: MarketDataSource | None,
         min_required: int,
     ):
+        """读取 K 线并转换成 DataFrame，供单项指标接口复用。"""
+
         candles = await self.candle_series_service.get_candle_series(
             symbol=symbol,
             market=market,

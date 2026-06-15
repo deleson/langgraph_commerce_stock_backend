@@ -1,3 +1,10 @@
+"""策略信号规则服务。
+
+本服务把技术指标和数据质量报告转换成确定性的策略信号。它不是 LLM 自由判断，
+也不是投资建议：所有 buy / sell / hold / observe 都来自固定规则、固定分数和
+固定阈值，主要用于研究、回测、候选评分和纸面交易模拟。
+"""
+
 from app.schemas.market_data_sync import MarketDataQualityReport
 from app.schemas.strategy_signal import (
     StrategySignalInputSnapshot,
@@ -14,13 +21,16 @@ from app.schemas.technical_indicator import (
     VolumeFactorSnapshot,
 )
 
-class StrategySignalService:
-    """Generate strategy signals from technical indicators.
 
-    This service starts with a neutral baseline signal.
-    Specific rules will be added step by step in later stage 5.8 tasks.
+class StrategySignalService:
+    """根据技术指标生成可解释的策略信号。
+
+    评分流程是“中性基准分 + 多个规则加减分 + 阈值映射信号”。这样做的好处是：
+    每个分数来源都能在 rule_results 中审计，后续回测和纸面交易也能复盘依据。
     """
 
+    # 50 分表示中性起点；各规则只做加减分，最后再限制在 0 到 100。
+    # 这些常量是第一版确定性策略权重，不代表真实投资模型已经最优。
     BASE_SCORE = 50
     MAX_REASON_COUNT = 10
     MAX_RISK_COUNT = 10
@@ -57,10 +67,10 @@ class StrategySignalService:
         data_quality: MarketDataQualityReport | None = None,
         include_detail: bool = True,
     ) -> StrategySignalResponse:
-        """Build a strategy signal response.
+        """生成策略信号响应。
 
-        Stage 5.8 step 5 adds the data quality gate.
-        Indicator-specific rules will be added in later steps.
+        先执行数据质量门控：无数据或硬错误直接 unavailable；数据不足或过旧只给
+        observe。数据可用时再计算趋势、RSI、MACD、动量、波动率和成交量规则。
         """
 
         quality_rule = self._build_data_quality_rule(data_quality)
@@ -145,6 +155,8 @@ class StrategySignalService:
             technical_indicators.summary.volume_factor
         )
 
+        # 总分只由固定规则得出，没有 LLM 参与。这样回测、候选评分和纸面交易
+        # 每一次信号都能通过 rule_results 追溯到具体指标。
         score = self._clamp_score(
             self.BASE_SCORE
             + trend_rule.score_delta
@@ -222,6 +234,12 @@ class StrategySignalService:
         self,
         data_quality: MarketDataQualityReport | None,
     ) -> StrategyRuleResult | None:
+        """构建数据质量规则。
+
+        数据质量是所有策略规则之前的安全门：空数据和硬错误不能生成信号；
+        数量不足或过旧只能观察，避免系统在数据基础不可靠时给出强信号。
+        """
+
         if data_quality is None:
             return StrategyRuleResult(
                 rule_name="data_quality",
@@ -365,6 +383,12 @@ class StrategySignalService:
         self,
         moving_average: MovingAverageSnapshot,
     ) -> StrategyRuleResult:
+        """构建均线趋势规则。
+
+        多头排列加分，空头排列扣分；MA5/MA20 与 EMA12/EMA26 只是确认项，
+        用来降低单一均线标签带来的误判风险。
+        """
+
         score_delta = 0
         warnings: list[str] = []
 
@@ -402,6 +426,12 @@ class StrategySignalService:
         self,
         rsi: RsiSnapshot,
     ) -> StrategyRuleResult:
+        """构建 RSI 规则。
+
+        RSI 超卖会适度加分，表示可能存在修复机会；RSI 超买会扣分，
+        表示追高风险上升。超卖不直接等于买入，因为弱势股票也可能长期低 RSI。
+        """
+
         score_delta = 0
         warnings: list[str] = []
 
@@ -443,6 +473,12 @@ class StrategySignalService:
         self,
         macd: MacdSnapshot,
     ) -> StrategyRuleResult:
+        """构建 MACD 动能规则。
+
+        MACD 用 DIF、DEA 和柱体观察趋势动能。多头动能加分，空头动能扣分；
+        histogram 作为额外确认项，避免只看 DIF/DEA 标签。
+        """
+
         score_delta = 0
         warnings: list[str] = []
 
@@ -486,6 +522,12 @@ class StrategySignalService:
         self,
         momentum: MomentumSnapshot,
     ) -> StrategyRuleResult:
+        """构建价格动量规则。
+
+        动量规则比较最新价格和历史窗口价格的差值。中短期动量一致时额外加减分，
+        但它仍然只是策略总分中的一个维度。
+        """
+
         score_delta = 0
         warnings: list[str] = []
 
@@ -527,6 +569,12 @@ class StrategySignalService:
         self,
         volatility: VolatilitySnapshot,
     ) -> StrategyRuleResult:
+        """构建波动率风险规则。
+
+        低波动小幅加分，高波动和极端波动扣分。这里的目标不是预测涨跌，
+        而是把历史波动风险纳入策略评分。
+        """
+
         score_delta = 0
         warnings: list[str] = []
 
@@ -567,6 +615,12 @@ class StrategySignalService:
         self,
         volume_factor: VolumeFactorSnapshot,
     ) -> StrategyRuleResult:
+        """构建成交量确认规则。
+
+        放量表示市场参与度提升，缩量表示确认度不足。成交量只做辅助确认，
+        不单独决定买卖方向。
+        """
+
         score_delta = 0
         warnings: list[str] = []
 
@@ -678,6 +732,12 @@ class StrategySignalService:
         self,
         moving_average: MovingAverageSnapshot,
     ) -> int:
+        """计算趋势确认分。
+
+        只有 MA 和 EMA 同向时才给确认分；缺少任一关键值时返回 0，
+        避免样本不足时放大趋势信号。
+        """
+
         if self._has_missing_trend_confirmation_values(moving_average):
             return 0
 
@@ -776,6 +836,12 @@ class StrategySignalService:
         *,
         limit: int,
     ) -> list[str]:
+        """限制 reasons / risks 数量并去重。
+
+        API 响应需要保留关键解释，但不能无限堆叠文本；限制数量可以保证前端展示
+        和后台任务结果都保持可读。
+        """
+
         result: list[str] = []
         seen: set[str] = set()
 
@@ -802,6 +868,12 @@ class StrategySignalService:
         self,
         score: int,
     ) -> str:
+        """把 0-100 总分映射为策略信号。
+
+        高分区间偏 buy，低分区间偏 sell，中间区间保持 hold / observe。
+        observe 表示需要继续观察，不等于系统建议用户真实交易。
+        """
+
         if score >= 65:
             return "buy"
 
@@ -820,6 +892,8 @@ class StrategySignalService:
         self,
         score: int,
     ) -> str:
+        """根据分数距离中性区间的程度生成强弱标签。"""
+
         if score >= 75 or score < 25:
             return "strong"
 

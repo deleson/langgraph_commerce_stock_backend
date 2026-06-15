@@ -1,3 +1,10 @@
+"""K 线到 Pandas DataFrame 的转换服务。
+
+量化公式通常基于序列计算，例如 rolling mean、pct_change、EMA 等。数据库模型
+适合持久化，DataFrame 更适合向量化计算。本服务负责把 MarketCandle 转换成
+结构稳定、时间升序、数值列可计算的 DataFrame。
+"""
+
 from collections.abc import Sequence
 from decimal import Decimal
 
@@ -8,6 +15,8 @@ from app.models.market_candle import MarketCandle
 
 
 class IndicatorDataFrameService:
+    """为技术指标计算准备标准 DataFrame。"""
+
     required_columns = [
         "candle_time",
         "open_price",
@@ -21,6 +30,8 @@ class IndicatorDataFrameService:
         self,
         candles: Sequence[MarketCandle],
     ) -> pd.DataFrame:
+        """把 K 线模型列表转换为指标计算使用的 DataFrame。"""
+
         if not candles:
             raise BadRequestException(message="candles cannot be empty")
 
@@ -53,6 +64,12 @@ class IndicatorDataFrameService:
         self,
         df: pd.DataFrame,
     ) -> pd.DataFrame:
+        """统一时间、数值类型和排序。
+
+        candle_time 使用 UTC，价格和成交量列转为数值列，并按时间升序排列。
+        这样后续 rolling / EMA / pct_change 都能按真实时间方向计算。
+        """
+
         missing_columns = [
             column
             for column in self.required_columns
@@ -96,6 +113,8 @@ class IndicatorDataFrameService:
         self,
         df: pd.DataFrame,
     ) -> None:
+        """校验 DataFrame 是否满足技术指标计算的基础条件。"""
+
         if df.empty:
             raise BadRequestException(message="market candle dataframe cannot be empty")
 

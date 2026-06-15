@@ -1,3 +1,10 @@
+"""数据库 K 线质量报告服务。
+
+MarketDataQualityService 更偏底层清洗和检查；本服务面向 API、策略信号和 AI 图，
+负责从数据库取出 K 线，再生成“这批数据是否可用”的报告。这样下游模块可以根据
+is_empty / is_enough / is_stale / warnings 做安全降级。
+"""
+
 from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +24,8 @@ from app.services.market_data_quality_service import MarketDataQualityService
 
 
 class MarketDataQualityReportService:
+    """基于已入库 K 线生成质量报告。"""
+
     def __init__(
         self,
         db: AsyncSession,
@@ -40,6 +49,12 @@ class MarketDataQualityReportService:
         min_required: int = 1,
         stale_after_days: int | None = None,
     ) -> MarketDataQualityReport:
+        """读取数据库 K 线并返回质量报告。
+
+        如果没有 K 线，本方法不会让上层直接崩溃，而是返回 is_empty=True 的报告。
+        策略信号、AI 分析和纸面交易可以据此进入 unavailable / skipped 路径。
+        """
+
         normalized_symbol = symbol.strip().upper()
         checked_at = datetime.now(UTC)
 

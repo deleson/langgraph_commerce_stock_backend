@@ -1,3 +1,10 @@
+"""策略信号查询编排服务。
+
+StrategySignalService 只负责规则评分；本服务负责从数据库读取技术指标和数据质量
+报告，再把两者交给规则服务生成响应。API、Market Overview、候选评分和纸面交易
+都可以复用这个入口。
+"""
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas.market_data import (
@@ -13,12 +20,12 @@ from app.services.technical_indicator_query_service import TechnicalIndicatorQue
 
 
 class StrategySignalQueryService:
-    """Build strategy signal responses from stored market candles.
+    """基于已入库 K 线生成策略信号。
 
-    This service is an orchestration layer:
-    1. load technical indicators from market_candles;
-    2. load data quality report from market_candles;
-    3. generate a strategy signal from both inputs.
+    这里是编排层，不直接写公式，也不写数据库查询细节：
+    1. TechnicalIndicatorQueryService 负责技术指标；
+    2. MarketDataQualityReportService 负责数据质量；
+    3. StrategySignalService 负责确定性评分。
     """
 
     def __init__(
@@ -53,6 +60,12 @@ class StrategySignalQueryService:
         min_required: int = 35,
         stale_after_days: int | None = None,
     ) -> StrategySignalResponse:
+        """生成单只股票策略信号。
+
+        source / adjust_type 会同时传给技术指标和数据质量报告，保证两边使用同一批
+        K 线口径，避免“指标来自 mock，质量报告来自 tushare”这种混用。
+        """
+
         normalized_symbol = symbol.strip().upper()
 
         technical_indicators = await self.technical_indicator_query_service.get_summary(

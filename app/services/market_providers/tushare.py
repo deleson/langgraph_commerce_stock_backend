@@ -1,3 +1,10 @@
+"""Tushare 行情 Provider。
+
+Tushare 是当前生产环境 A 股数据的主要真实来源之一。本适配器只做三件事：
+校验当前请求是否属于它支持的范围、调用 Tushare SDK、把返回行转换成项目统一的
+MarketProviderCandle。它不负责入库、不负责技术指标、不负责策略判断。
+"""
+
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -17,6 +24,8 @@ from app.services.market_providers.base import MarketDataProvider
 
 
 class TushareProvider(MarketDataProvider):
+    """面向 A 股日 K 线的 Tushare 适配器。"""
+
     provider_name = "tushare"
 
     @property
@@ -81,6 +90,13 @@ class TushareProvider(MarketDataProvider):
         self,
         query: MarketCandleQuery,
     ) -> list[MarketProviderCandle]:
+        """读取 Tushare 日 K 线。
+
+        第一版只开放 CN 市场、1d 周期和 none 复权，是为了把生产链路先跑通。
+        如果后续要支持前复权、后复权或更细周期，应先扩展这里的 Provider 能力，
+        再扩展同步 API 和测试，而不是在策略层临时拼接。
+        """
+
         if query.market != "CN":
             raise BadRequestException(message="tushare only supports CN market")
 
@@ -101,6 +117,8 @@ class TushareProvider(MarketDataProvider):
         self,
         query: MarketCandleQuery,
     ) -> list[MarketProviderCandle]:
+        """在线程中执行同步 SDK 调用，避免阻塞 FastAPI 事件循环。"""
+
         import tushare as ts
 
         settings = get_settings()
@@ -144,6 +162,8 @@ class TushareProvider(MarketDataProvider):
         row: dict[str, Any],
         query: MarketCandleQuery,
     ) -> MarketProviderCandle:
+        """把 Tushare 的单行数据转换成项目内部统一 K 线结构。"""
+
         return MarketProviderCandle(
             symbol=query.symbol,
             market=query.market,
@@ -164,6 +184,8 @@ class TushareProvider(MarketDataProvider):
         self,
         symbol: str,
     ) -> str:
+        """把项目内的 6 位股票代码转换成 Tushare 使用的交易所后缀格式。"""
+
         normalized_symbol = symbol.strip().upper()
 
         if normalized_symbol.endswith((".SH", ".SZ")):

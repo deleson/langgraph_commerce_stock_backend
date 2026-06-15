@@ -1,3 +1,10 @@
+"""行情聚合服务。
+
+MarketService 面向 API 层提供搜索、报价、K 线、基础指标和 Overview 聚合能力。
+它优先读取数据库中的真实同步数据；在没有数据库连接或数据库没有数据时，才使用
+MockMarketDataService 作为开发/测试降级来源。
+"""
+
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,10 +38,10 @@ from app.schemas.market_data_sync import (
 from app.services.market_data_quality_report_service import MarketDataQualityReportService
 
 class MarketService:
-    """Coordinate market data for API responses.
+    """行情 API 的业务聚合入口。
 
-    Market API now reads PostgreSQL first and falls back to mock data.
-    This keeps the public API stable while real providers are introduced.
+    这一层不直接调用 Tushare / BaoStock；真实行情先由 MarketDataSyncService 入库，
+    再由这里读取。这样查询 API、技术指标、策略信号和 AI 图看到的是同一套数据。
     """
 
     def __init__(
@@ -57,6 +64,12 @@ class MarketService:
         keyword: str | None = None,
         market: MarketCode | None = None,
     ) -> list[MarketStockSearchItem]:
+        """搜索股票。
+
+        如果数据库已有同步过的股票基础信息，优先返回数据库结果；否则返回 Mock
+        股票池，保证开发阶段 API 不会因为缺少真实数据而不可用。
+        """
+
         if self.repository is not None:
             db_symbols = await self.repository.list_symbols(
                 market=market,
@@ -81,6 +94,11 @@ class MarketService:
         symbol: str,
         market: MarketCode,
     ) -> MarketQuoteResponse:
+        """读取单只股票报价快照。
+
+        数据库报价来自最近一根 K 线；Mock 报价只用于开发、测试或数据缺失降级。
+        """
+
         if self.repository is not None:
             db_quote = await self._get_quote_from_db(
                 symbol=symbol,
@@ -192,6 +210,13 @@ class MarketService:
         strategy_signal_min_required: int = 35,
         strategy_signal_stale_after_days: int | None = None,
     ) -> MarketOverviewResponse:
+        """聚合单只股票的行情总览。
+
+        Overview 可以按开关附加技术指标、数据质量、同步状态和策略信号。
+        这些附加项都通过独立 Service 获取，避免把量化公式和数据质量逻辑写在
+        MarketService 本身里。
+        """
+
         quote = await self.get_quote(symbol=symbol, market=market)
         indicators = await self.get_indicators(symbol=symbol, market=market)
         candles_response = await self.get_candles(
@@ -463,6 +488,11 @@ class MarketService:
         adjust_type: AdjustType,
         technical_indicator_source: MarketDataSource | None,
     ) -> TechnicalIndicatorResponse | None:
+        """按开关为 Overview 附加技术指标。
+
+        没有数据库连接时直接返回 None，因为完整技术指标必须基于已入库 K 线。
+        """
+
         if not include_technical_indicators:
             return None
 
@@ -491,6 +521,8 @@ class MarketService:
             data_quality_min_required: int,
             data_quality_stale_after_days: int | None,
     ) -> MarketDataQualityReport | None:
+        """按开关为 Overview 附加数据质量报告。"""
+
         if not include_data_quality:
             return None
 
@@ -520,6 +552,8 @@ class MarketService:
             quote_source: str,
             candles_source: str,
     ) -> MarketDataSyncStatusResponse | None:
+        """按开关为 Overview 附加最近同步状态。"""
+
         if not include_sync_status:
             return None
 
@@ -552,6 +586,8 @@ class MarketService:
             self,
             source: str | None,
     ) -> MarketDataSource | None:
+        """把响应里的 source 文本收敛成 Schema 允许的数据源枚举。"""
+
         allowed_sources = {
             "mock",
             "baostock",
@@ -580,6 +616,12 @@ class MarketService:
             strategy_signal_min_required: int,
             strategy_signal_stale_after_days: int | None,
     ) -> StrategySignalResponse | None:
+        """按开关为 Overview 附加策略信号。
+
+        策略信号会再次读取技术指标和数据质量报告，保证返回的信号包含完整的
+        rule_results 和 input_snapshot，便于前端展示和后续审计。
+        """
+
         if not include_strategy_signal:
             return None
 

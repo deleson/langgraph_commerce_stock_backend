@@ -1,3 +1,10 @@
+"""行情数据 Redis 缓存辅助服务。
+
+当前项目以数据库为主存储，Redis 主要用于缓存高频读取结果和 Celery。这个服务
+只定义缓存 key 规则和 JSON 读写方式，是否启用缓存由配置控制，业务 Service 可以
+按需要逐步接入。
+"""
+
 import json
 from typing import Any
 
@@ -9,10 +16,10 @@ from app.schemas.market_data import AdjustType, CandleTimeframe, MarketCode, Mar
 
 
 class MarketDataCacheService:
-    """Small Redis cache helper for market data.
+    """行情缓存读写与 key 构造工具。
 
-    This service only prepares cache operations and key rules.
-    Business services can decide when to read or write cache later.
+    key 中会包含 market / symbol / timeframe / adjust_type / source 等口径字段，
+    避免不同数据来源或不同复权方式的结果共用同一个缓存。
     """
 
     def __init__(

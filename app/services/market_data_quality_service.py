@@ -1,3 +1,10 @@
+"""行情数据质量服务。
+
+量化计算最怕“看起来有数据，但数据不可信”。本服务负责在 K 线进入数据库或
+进入策略计算前做基础清洗：时间统一、价格精度统一、重复 K 线去重、OHLC 合法性
+检查、数量不足和数据过旧提示。它不判断股票好坏，只判断数据是否适合被继续使用。
+"""
+
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -9,6 +16,12 @@ from app.schemas.market_data import MarketCandleCreate, MarketProviderCandle
 
 @dataclass
 class MarketDataQualityCheckResult:
+    """一次 K 线质量检查的结果。
+
+    errors 表示数据不能继续使用；warnings 表示可以使用但可信度需要降低。
+    策略信号会根据这些字段进入 unavailable 或 observe 等安全路径。
+    """
+
     candle_count: int
     duplicate_count: int = 0
     earliest_candle_time: datetime | None = None
@@ -21,6 +34,8 @@ class MarketDataQualityCheckResult:
 
 
 class MarketDataQualityService:
+    """K 线标准化和质量检查服务。"""
+
     price_quant = Decimal("0.0001")
     amount_quant = Decimal("0.0001")
 
@@ -30,6 +45,12 @@ class MarketDataQualityService:
         *,
         symbol_id: int | None = None,
     ) -> MarketCandleCreate:
+        """把 Provider K 线转换成可入库的 MarketCandleCreate。
+
+        这里会统一时间、价格精度和成交额精度，并校验 OHLC 价格关系。
+        这样后续指标计算可以假设输入数据已经满足基本金融 K 线约束。
+        """
+
         candle_time = self._normalize_datetime(candle.candle_time)
 
         open_price = self._normalize_price(candle.open_price)
@@ -73,6 +94,13 @@ class MarketDataQualityService:
         *,
         symbol_id: int | None = None,
     ) -> list[MarketCandleCreate]:
+        """批量标准化 K 线，并按唯一身份去重。
+
+        唯一身份由 symbol / market / timeframe / candle_time / source /
+        adjust_type 组成。保留最后一次出现的数据，适合 Provider 重复返回同一天
+        K 线时进行温和修正。
+        """
+
         normalized_by_key: dict[
             tuple[str, str, str, datetime, str, str],
             MarketCandleCreate,
@@ -100,6 +128,15 @@ class MarketDataQualityService:
         stale_after_days: int | None = None,
         now: datetime | None = None,
     ) -> MarketDataQualityCheckResult:
+        """检查已经标准化后的 K 线质量。
+
+        检查项包括：
+        1. 是否为空；
+        2. 是否满足最小样本数；
+        3. 标准化前后是否出现重复 K 线；
+        4. 最新 K 线是否过旧。
+        """
+
         if min_required <= 0:
             raise BadRequestException(message="min_required must be greater than 0")
 
@@ -159,6 +196,8 @@ class MarketDataQualityService:
         stale_after_days: int | None = None,
         now: datetime | None = None,
     ) -> tuple[list[MarketCandleCreate], MarketDataQualityCheckResult]:
+        """Provider 原始 K 线的一站式标准化与质量检查入口。"""
+
         normalized_candles = self.normalize_candles(
             candles,
             symbol_id=symbol_id,
@@ -211,6 +250,12 @@ class MarketDataQualityService:
         low_price: Decimal,
         close_price: Decimal,
     ) -> None:
+        """校验 OHLC 价格关系。
+
+        high 必须大于等于 low，open / close 必须落在 high-low 区间内。
+        这些约束不是策略观点，而是 K 线数据本身的基本合法性。
+        """
+
         if high_price < low_price:
             raise BadRequestException(
                 message=f"invalid candle price range for {symbol}: high_price < low_price"

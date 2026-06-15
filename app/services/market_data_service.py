@@ -1,3 +1,10 @@
+"""Mock 行情数据服务。
+
+这是项目早期和测试环境使用的模拟行情源，用于在没有真实 Provider 时保持 API、
+AI 分析和量化链路可以运行。它生成的是可复现的演示数据，不代表真实市场行情，
+生产环境真实数据应优先来自 MarketDataSyncService + Provider 入库后的 K 线。
+"""
+
 from datetime import UTC, datetime, timedelta
 
 from app.core.exceptions import NotFoundException
@@ -21,7 +28,7 @@ from app.schemas.stock_analysis import MarketCode, MarketSnapshot
 # _mock_volume()	内部方法：生成模拟成交量
 
 class MockMarketDataService:
-    """Mock market data provider for stock analysis and market APIs."""
+    """面向开发、测试和降级场景的 Mock 行情服务。"""
 
     _MOCK_QUOTES: dict[tuple[str, MarketCode], dict[str, object]] = {
         ("AAPL", "US"): {

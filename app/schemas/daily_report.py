@@ -108,6 +108,24 @@ class DailyReportGenerateRequest(BaseModel):
     )
 
 
+class DailyReportModeUpdateRequest(BaseModel):
+    """当前用户日报模式开关请求体。"""
+
+    daily_report_enabled: bool = Field(
+        description="Whether scheduled daily report mode is enabled for the current user.",
+    )
+
+
+class DailyReportModeResponse(BaseModel):
+    """当前用户日报模式状态响应。"""
+
+    daily_report_enabled: bool
+    timezone: str
+    scheduler_enabled: bool
+    effective_status: str
+    message: str
+
+
 class DailyReportTaskPayload(DailyReportGenerateRequest):
     """每日简报后台任务 payload。
 

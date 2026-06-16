@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.models.user import User
+from app.models.user_preference import UserPreference
 
 
 class UserRepository:
@@ -100,6 +101,29 @@ class AsyncUserRepository:
         stmt = (
             select(User)
             .where(User.is_active.is_(True), User.status == "active")
+            .order_by(User.id.asc())
+            .offset(offset)
+            .limit(limit)
+        )
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def list_daily_report_enabled_users(
+        self,
+        *,
+        limit: int = 200,
+        offset: int = 0,
+    ) -> list[User]:
+        """分页查询已开启日报模式的活跃用户。"""
+
+        stmt = (
+            select(User)
+            .join(UserPreference, UserPreference.user_id == User.id)
+            .where(
+                User.is_active.is_(True),
+                User.status == "active",
+                UserPreference.daily_report_enabled.is_(True),
+            )
             .order_by(User.id.asc())
             .offset(offset)
             .limit(limit)

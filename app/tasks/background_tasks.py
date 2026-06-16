@@ -190,7 +190,7 @@ async def _submit_scheduled_daily_reports_async() -> dict[str, object]:
         batch_size = settings.celery_beat_daily_report_batch_size
 
         while True:
-            users = await user_repository.list_active_users(
+            users = await user_repository.list_daily_report_enabled_users(
                 limit=batch_size,
                 offset=offset,
             )
@@ -248,7 +248,7 @@ async def _submit_scheduled_daily_reports_async() -> dict[str, object]:
     if submitted_count == 0 and failed_count == 0:
         return {
             "status": "skipped",
-            "reason": "no_active_users_for_daily_report",
+            "reason": "no_daily_report_enabled_users",
             "submitted_count": submitted_count,
             "failed_count": failed_count,
             "skipped_count": skipped_count,

@@ -9,22 +9,52 @@ from datetime import date
 from fastapi import APIRouter, Query, status
 
 from app.api.deps import AsyncCurrentUser, AsyncDBSession
+from app.core.config import get_settings
 from app.schemas.common import ApiResponse
 from app.schemas.daily_report import (
     DailyReportGenerateRequest,
     DailyReportGenerationResponse,
     DailyReportListQuery,
     DailyReportListResponse,
+    DailyReportModeResponse,
+    DailyReportModeUpdateRequest,
     DailyReportResponse,
     DailyReportSource,
     DailyReportStatus,
     DailyReportTodayResponse,
 )
 from app.services.daily_report_query_service import DailyReportQueryService
+from app.services.user_preference_service import AsyncUserPreferenceService
 from app.utils.responses import success_response
 
 
 router = APIRouter(prefix="/daily-reports", tags=["daily-reports"])
+
+
+def _build_daily_report_mode_response(
+    *,
+    daily_report_enabled: bool,
+    timezone: str,
+) -> DailyReportModeResponse:
+    scheduler_enabled = get_settings().celery_beat_daily_report_enabled
+
+    if not daily_report_enabled:
+        effective_status = "disabled"
+        message = "日报模式已关闭。你仍然可以手动生成日报。"
+    elif scheduler_enabled:
+        effective_status = "enabled"
+        message = "日报模式已开启，后端定时任务会按部署配置自动生成日报。"
+    else:
+        effective_status = "enabled_but_scheduler_off"
+        message = "日报模式已开启，但当前服务器未启用日报定时任务。你仍然可以手动生成日报。"
+
+    return DailyReportModeResponse(
+        daily_report_enabled=daily_report_enabled,
+        timezone=timezone,
+        scheduler_enabled=scheduler_enabled,
+        effective_status=effective_status,
+        message=message,
+    )
 
 
 @router.post(
@@ -56,6 +86,56 @@ async def generate_daily_report(
         source=DailyReportSource.API,
     )
     return success_response(data=result)
+
+
+@router.get(
+    "/mode",
+    summary="Get Daily Report Mode",
+    description="Get scheduled daily report mode for the current user.",
+    response_model=ApiResponse[DailyReportModeResponse],
+    status_code=status.HTTP_200_OK,
+)
+async def get_daily_report_mode(
+    current_user: AsyncCurrentUser,
+    db: AsyncDBSession,
+) -> ApiResponse[DailyReportModeResponse]:
+    """查询当前用户是否开启定时日报模式。"""
+
+    preference = await AsyncUserPreferenceService(db).get_daily_report_mode(
+        current_user
+    )
+    return success_response(
+        data=_build_daily_report_mode_response(
+            daily_report_enabled=preference.daily_report_enabled,
+            timezone=preference.timezone,
+        )
+    )
+
+
+@router.patch(
+    "/mode",
+    summary="Update Daily Report Mode",
+    description="Enable or disable scheduled daily report mode for the current user.",
+    response_model=ApiResponse[DailyReportModeResponse],
+    status_code=status.HTTP_200_OK,
+)
+async def update_daily_report_mode(
+    payload: DailyReportModeUpdateRequest,
+    current_user: AsyncCurrentUser,
+    db: AsyncDBSession,
+) -> ApiResponse[DailyReportModeResponse]:
+    """开启或关闭当前用户的定时日报模式。"""
+
+    preference = await AsyncUserPreferenceService(db).update_daily_report_mode(
+        current_user,
+        enabled=payload.daily_report_enabled,
+    )
+    return success_response(
+        data=_build_daily_report_mode_response(
+            daily_report_enabled=preference.daily_report_enabled,
+            timezone=preference.timezone,
+        )
+    )
 
 
 @router.get(

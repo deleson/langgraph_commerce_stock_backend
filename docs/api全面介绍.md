@@ -85,6 +85,8 @@ Authorization: Bearer <access_token>
 | user-memories | POST | `/user-memories/{memory_id}/deactivate` | 是 | 停用用户记忆 |
 | user-memory-retrieval | POST | `/user-memory-retrieval/search` | 是 | 相似记忆检索 |
 | daily-reports | POST | `/daily-reports/generate` | 是 | 生成日报 |
+| daily-reports | GET | `/daily-reports/mode` | 是 | 查询当前用户日报模式 |
+| daily-reports | PATCH | `/daily-reports/mode` | 是 | 开启或关闭当前用户日报模式 |
 | daily-reports | GET | `/daily-reports` | 是 | 日报列表 |
 | daily-reports | GET | `/daily-reports/today` | 是 | 今日日报 |
 | daily-reports | GET | `/daily-reports/{report_id}` | 是 | 日报详情 |
@@ -492,11 +494,43 @@ disclaimer
 | 接口 | 说明 |
 | ---- | ---- |
 | `POST /daily-reports/generate` | 手动生成日报 |
+| `GET /daily-reports/mode` | 查询当前用户是否开启日报模式 |
+| `PATCH /daily-reports/mode` | 开启或关闭当前用户日报模式 |
 | `GET /daily-reports` | 日报列表 |
 | `GET /daily-reports/today` | 今日日报 |
 | `GET /daily-reports/{report_id}` | 日报详情 |
 
 日报会聚合用户自选股、行情、策略信号、候选评分、用户画像和记忆等信息；AI 润色受额度和配置控制。
+
+日报模式开关说明：
+
+| 字段 / 行为 | 说明 |
+| --- | --- |
+| `daily_report_enabled` | 用户级日报模式开关，保存在 `user_preferences` 中 |
+| `scheduler_enabled` | 后端部署级 Celery Beat 日报调度是否开启，只由服务端配置控制 |
+| `effective_status` | `disabled`、`enabled`、`enabled_but_scheduler_off` 三种状态 |
+| 手动生成日报 | 不受日报模式开关限制，用户仍可调用 `POST /daily-reports/generate` |
+| 自动生成日报 | 只有用户开启日报模式，并且服务端启用定时任务时才会自动提交后台任务 |
+
+`PATCH /daily-reports/mode` 请求体：
+
+```json
+{
+  "daily_report_enabled": true
+}
+```
+
+响应 `data` 示例：
+
+```json
+{
+  "daily_report_enabled": true,
+  "timezone": "Asia/Shanghai",
+  "scheduler_enabled": false,
+  "effective_status": "enabled_but_scheduler_off",
+  "message": "日报模式已开启，但当前服务器未启用日报定时任务。你仍然可以手动生成日报。"
+}
+```
 
 ### 量化提醒
 

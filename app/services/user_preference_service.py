@@ -75,3 +75,20 @@ class AsyncUserPreferenceService:
             setattr(preference, field, value)
 
         return await self.preference_repo.save(preference)
+
+    async def get_daily_report_mode(self, user: User) -> UserPreference:
+        """读取当前用户的日报模式配置。"""
+
+        return await self.get_or_create_my_preference(user)
+
+    async def update_daily_report_mode(
+        self,
+        user: User,
+        *,
+        enabled: bool,
+    ) -> UserPreference:
+        """开启或关闭当前用户的日报模式。"""
+
+        preference = await self.get_or_create_my_preference(user)
+        preference.daily_report_enabled = enabled
+        return await self.preference_repo.save(preference)

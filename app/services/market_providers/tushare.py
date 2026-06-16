@@ -49,19 +49,11 @@ class TushareProvider(MarketDataProvider):
         if not keyword:
             return []
 
-        normalized_keyword = keyword.strip().upper()
-        if not normalized_keyword.isdigit():
-            return []
-
-        try:
-            symbol = await self.get_symbol(
-                symbol=normalized_keyword,
-                market="CN",
-            )
-        except NotFoundException:
-            return []
-
-        return [symbol][:limit]
+        return await anyio.to_thread.run_sync(
+            self._search_symbols_sync,
+            keyword,
+            limit,
+        )
 
     async def get_symbol(
         self,
@@ -73,18 +65,68 @@ class TushareProvider(MarketDataProvider):
             raise NotFoundException(message=f"tushare does not support market: {market}")
 
         normalized_symbol = symbol.strip().upper()
-        provider_symbol = self._to_tushare_code(normalized_symbol)
-
-        return MarketSymbolCreate(
-            symbol=normalized_symbol,
-            market="CN",
-            name=normalized_symbol,
-            currency="CNY",
-            exchange=self._infer_exchange(provider_symbol),
-            provider_symbol=provider_symbol,
-            source="tushare",
-            is_active=True,
+        return await anyio.to_thread.run_sync(
+            self._get_symbol_sync,
+            normalized_symbol,
         )
+
+    def _search_symbols_sync(
+        self,
+        keyword: str,
+        limit: int,
+    ) -> list[MarketSymbolCreate]:
+        normalized_keyword = keyword.strip().upper()
+        if not normalized_keyword:
+            return []
+
+        pro = self._build_client()
+        fields = self._stock_basic_fields()
+        df = pro.stock_basic(
+            exchange="",
+            list_status="L",
+            fields=fields,
+        )
+
+        if df is None or df.empty:
+            return []
+
+        matched_symbols: list[MarketSymbolCreate] = []
+        for row in df.to_dict("records"):
+            symbol = str(row.get("symbol") or "").strip().upper()
+            ts_code = str(row.get("ts_code") or "").strip().upper()
+            name = str(row.get("name") or "").strip()
+
+            if (
+                normalized_keyword not in symbol
+                and normalized_keyword not in ts_code
+                and normalized_keyword not in name.upper()
+            ):
+                continue
+
+            matched_symbols.append(self._row_to_symbol(row))
+            if len(matched_symbols) >= limit:
+                break
+
+        return matched_symbols
+
+    def _get_symbol_sync(
+        self,
+        symbol: str,
+    ) -> MarketSymbolCreate:
+        pro = self._build_client()
+        provider_symbol = self._to_tushare_code(symbol)
+        fields = self._stock_basic_fields()
+        df = pro.stock_basic(
+            ts_code=provider_symbol,
+            list_status="L",
+            fields=fields,
+        )
+
+        if df is None or df.empty:
+            raise NotFoundException(message=f"tushare stock basic not found for CN:{symbol}")
+
+        row = df.to_dict("records")[0]
+        return self._row_to_symbol(row)
 
     async def get_candles(
         self,
@@ -119,22 +161,12 @@ class TushareProvider(MarketDataProvider):
     ) -> list[MarketProviderCandle]:
         """在线程中执行同步 SDK 调用，避免阻塞 FastAPI 事件循环。"""
 
-        import tushare as ts
-
-        settings = get_settings()
-        if settings.tushare_token is None:
-            raise BadRequestException(message="TUSHARE_TOKEN is required")
-
-        token = settings.tushare_token.get_secret_value()
-        if not token:
-            raise BadRequestException(message="TUSHARE_TOKEN is required")
-
         provider_symbol = self._to_tushare_code(query.symbol)
 
         end_date = datetime.now(UTC).date()
         start_date = end_date - timedelta(days=query.limit * 3)
 
-        pro = ts.pro_api(token)
+        pro = self._build_client()
 
         df = pro.daily(
             ts_code=provider_symbol,
@@ -179,6 +211,57 @@ class TushareProvider(MarketDataProvider):
             is_adjusted=False,
             adjust_type="none",
         )
+
+    def _row_to_symbol(
+        self,
+        row: dict[str, Any],
+    ) -> MarketSymbolCreate:
+        provider_symbol = str(row.get("ts_code") or "").strip().upper()
+        symbol = str(row.get("symbol") or "").strip().upper()
+        name = str(row.get("name") or symbol).strip()
+        exchange = (
+            str(row.get("exchange") or self._infer_exchange(provider_symbol))
+            .strip()
+            .upper()
+        )
+        currency = str(row.get("curr_type") or "CNY").strip().upper()
+
+        if not symbol and provider_symbol:
+            symbol = provider_symbol.split(".", maxsplit=1)[0]
+
+        if not symbol:
+            raise NotFoundException(message="tushare stock basic row missing symbol")
+
+        return MarketSymbolCreate(
+            symbol=symbol,
+            market="CN",
+            name=name or symbol,
+            currency=currency or "CNY",
+            exchange=exchange or self._infer_exchange(provider_symbol),
+            provider_symbol=provider_symbol or self._to_tushare_code(symbol),
+            source="tushare",
+            is_active=True,
+        )
+
+    def _build_client(
+        self,
+    ):
+        import tushare as ts
+
+        settings = get_settings()
+        if settings.tushare_token is None:
+            raise BadRequestException(message="TUSHARE_TOKEN is required")
+
+        token = settings.tushare_token.get_secret_value()
+        if not token:
+            raise BadRequestException(message="TUSHARE_TOKEN is required")
+
+        return ts.pro_api(token)
+
+    def _stock_basic_fields(
+        self,
+    ) -> str:
+        return "ts_code,symbol,name,exchange,curr_type,list_status"
 
     def _to_tushare_code(
         self,

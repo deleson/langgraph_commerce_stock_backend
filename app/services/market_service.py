@@ -29,6 +29,7 @@ from app.schemas.stock_analysis import MarketSnapshot
 from app.schemas.technical_indicator import TechnicalIndicatorResponse
 from app.services.indicator_service import IndicatorService
 from app.services.market_data_service import MockMarketDataService
+from app.services.market_data_sync_service import MarketDataSyncService
 from app.services.technical_indicator_query_service import TechnicalIndicatorQueryService
 from app.repositories.market_data_sync_repo import AsyncMarketDataSyncRepository
 from app.schemas.market_data_sync import (
@@ -51,6 +52,7 @@ class MarketService:
             indicator_service: IndicatorService | None = None,
             repository: AsyncMarketRepository | None = None,
             sync_repository: AsyncMarketDataSyncRepository | None = None,
+            sync_service: MarketDataSyncService | None = None,
     ) -> None:
         self.db = db
         self.market_data_service = market_data_service or MockMarketDataService()
@@ -59,6 +61,7 @@ class MarketService:
         self.sync_repository = sync_repository or (
             AsyncMarketDataSyncRepository(db) if db is not None else None
         )
+        self.sync_service = sync_service
     async def search_stocks(
         self,
         keyword: str | None = None,
@@ -84,9 +87,39 @@ class MarketService:
                     for symbol in db_symbols
                 ]
 
+        provider_symbols = await self._search_symbols_from_provider(
+            keyword=keyword,
+            market=market,
+        )
+        if provider_symbols:
+            return [
+                self._build_search_item_from_model(symbol)
+                for symbol in provider_symbols
+            ]
+
         return self.market_data_service.search_stocks(
             keyword=keyword,
             market=market,
+        )
+
+    async def _search_symbols_from_provider(
+        self,
+        *,
+        keyword: str | None,
+        market: MarketCode | None,
+    ) -> list[MarketSymbol]:
+        if self.sync_service is not None:
+            sync_service = self.sync_service
+        elif self.db is not None:
+            sync_service = MarketDataSyncService(self.db)
+        else:
+            return []
+
+        return await sync_service.search_symbols(
+            keyword=keyword,
+            market=market,
+            limit=50,
+            persist=True,
         )
 
     async def get_quote(

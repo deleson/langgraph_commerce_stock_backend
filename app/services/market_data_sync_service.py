@@ -76,6 +76,38 @@ class MarketDataSyncService:
         )
         return await self.repository.upsert_symbol(symbol_payload)
 
+    async def search_symbols(
+        self,
+        *,
+        keyword: str | None = None,
+        market: MarketCode | None = None,
+        limit: int = 50,
+        persist: bool = True,
+    ) -> list[MarketSymbol]:
+        """Search symbols through the configured Provider and optionally cache them.
+
+        This keeps frontend search as a single backend request: API callers do not
+        need to search, sync the symbol, and search again.
+        """
+
+        provider_symbols = await self.provider.search_symbols(
+            keyword=keyword,
+            market=market,
+            limit=limit,
+        )
+
+        if not persist:
+            return [
+                MarketSymbol(**payload.model_dump())
+                for payload in provider_symbols
+            ]
+
+        saved_symbols: list[MarketSymbol] = []
+        for payload in provider_symbols:
+            saved_symbols.append(await self.repository.upsert_symbol(payload))
+
+        return saved_symbols
+
     async def sync_candles(
         self,
         *,

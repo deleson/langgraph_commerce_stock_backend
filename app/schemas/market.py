@@ -43,6 +43,7 @@ class MarketStockSearchItem(BaseModel):
     name: str
     currency: str
     exchange: str | None = None
+    source: str | None = None
 
 
 class MarketQuoteResponse(BaseModel):

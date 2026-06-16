@@ -82,6 +82,11 @@ class MarketService:
             )
 
             if db_symbols:
+                db_symbols = await self._refresh_search_symbols_if_needed(
+                    symbols=db_symbols,
+                    keyword=keyword,
+                    market=market,
+                )
                 return [
                     self._build_search_item_from_model(symbol)
                     for symbol in db_symbols
@@ -121,6 +126,56 @@ class MarketService:
             limit=50,
             persist=True,
         )
+
+    async def _refresh_search_symbols_if_needed(
+        self,
+        *,
+        symbols: list[MarketSymbol],
+        keyword: str | None,
+        market: MarketCode | None,
+    ) -> list[MarketSymbol]:
+        """数据库命中但基础信息像占位数据时，用 Provider 尝试刷新。
+
+        早期同步或 mock 降级可能只保存了代码，导致前端搜索结果没有真实名称。
+        搜索接口本来就是用户主动查询入口，因此这里允许做一次轻量 Provider 搜索；
+        如果 Provider 不可用，继续返回数据库结果，避免影响基础可用性。
+        """
+
+        if not keyword or not self._symbols_need_provider_refresh(symbols):
+            return symbols
+
+        provider_symbols = await self._search_symbols_from_provider(
+            keyword=keyword,
+            market=market,
+        )
+        if not provider_symbols:
+            return symbols
+
+        merged_symbols = {
+            (symbol.market, symbol.symbol): symbol
+            for symbol in symbols
+        }
+        for symbol in provider_symbols:
+            merged_symbols[(symbol.market, symbol.symbol)] = symbol
+
+        return sorted(
+            merged_symbols.values(),
+            key=lambda item: (item.market, item.symbol),
+        )[:50]
+
+    def _symbols_need_provider_refresh(
+        self,
+        symbols: list[MarketSymbol],
+    ) -> bool:
+        for symbol in symbols:
+            name = (symbol.name or "").strip()
+            if not name:
+                return True
+            if name.upper() == symbol.symbol.upper():
+                return True
+            if symbol.source == "mock":
+                return True
+        return False
 
     async def get_quote(
         self,
@@ -250,6 +305,18 @@ class MarketService:
         MarketService 本身里。
         """
 
+        await self._ensure_candles_for_overview(
+            symbol=symbol,
+            market=market,
+            timeframe=timeframe,
+            limit=limit,
+            include_technical_indicators=include_technical_indicators,
+            technical_indicator_limit=technical_indicator_limit,
+            include_strategy_signal=include_strategy_signal,
+            strategy_signal_limit=strategy_signal_limit,
+            adjust_type=adjust_type,
+        )
+
         quote = await self.get_quote(symbol=symbol, market=market)
         indicators = await self.get_indicators(symbol=symbol, market=market)
         candles_response = await self.get_candles(
@@ -314,6 +381,74 @@ class MarketService:
             sync_status=sync_status,
             strategy_signal=strategy_signal,
         )
+
+    async def _ensure_candles_for_overview(
+        self,
+        *,
+        symbol: str,
+        market: MarketCode,
+        timeframe: CandleTimeframe,
+        limit: int,
+        include_technical_indicators: bool,
+        technical_indicator_limit: int,
+        include_strategy_signal: bool,
+        strategy_signal_limit: int,
+        adjust_type: AdjustType,
+    ) -> None:
+        """详情页查询前，尝试把已搜索到的股票 K 线补齐。
+
+        股票搜索只负责基础信息缓存；如果用户马上进入详情页，而数据库还没有 K 线，
+        这里会按当前 Provider 做一次同步，再让 overview 读取统一的入库数据。
+        同步失败时不抛给用户，保留原有 mock 降级能力。
+        """
+
+        if self.repository is None:
+            return
+
+        normalized_symbol = symbol.strip().upper()
+        market_symbol = await self.repository.get_symbol(
+            symbol=normalized_symbol,
+            market=market,
+        )
+        if market_symbol is None:
+            return
+
+        existing_candles = await self.repository.list_candles(
+            MarketCandleQuery(
+                symbol=normalized_symbol,
+                market=market,
+                timeframe=timeframe,
+                limit=1,
+                adjust_type=adjust_type,
+                source=None,
+            )
+        )
+        if existing_candles:
+            return
+
+        sync_limit = limit
+        if include_technical_indicators:
+            sync_limit = max(sync_limit, technical_indicator_limit)
+        if include_strategy_signal:
+            sync_limit = max(sync_limit, strategy_signal_limit)
+
+        try:
+            sync_service = self.sync_service or (
+                MarketDataSyncService(self.db) if self.db is not None else None
+            )
+            if sync_service is None:
+                return
+
+            await sync_service.sync_candles(
+                symbol=normalized_symbol,
+                market=market,
+                timeframe=timeframe,
+                limit=sync_limit,
+                adjust_type=adjust_type,
+            )
+        except Exception:
+            # 查询接口不能因为 Provider 临时失败完全不可用；后续仍走原有 mock 降级。
+            return
 
     async def _get_quote_from_db(
         self,
@@ -449,6 +584,7 @@ class MarketService:
             name=symbol.name,
             currency=symbol.currency,
             exchange=symbol.exchange,
+            source=symbol.source,
         )
 
     def _build_candle_response(

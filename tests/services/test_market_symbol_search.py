@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -53,7 +53,7 @@ class FakeSecret:
 
 
 class FakeProvider(MarketDataProvider):
-    provider_name = "fake"
+    provider_name = "tushare"
 
     @property
     def supported_markets(self) -> set[MarketCode]:
@@ -111,15 +111,16 @@ class FakeProvider(MarketDataProvider):
                 symbol=query.symbol,
                 market=query.market,
                 timeframe=query.timeframe,
-                candle_time=datetime.now(UTC),
-                open_price=Decimal("1"),
-                high_price=Decimal("1"),
-                low_price=Decimal("1"),
-                close_price=Decimal("1"),
-                volume=1,
+                candle_time=datetime.now(UTC) - timedelta(days=query.limit - index),
+                open_price=Decimal("100") + Decimal(index),
+                high_price=Decimal("101") + Decimal(index),
+                low_price=Decimal("99") + Decimal(index),
+                close_price=Decimal("100.5") + Decimal(index),
+                volume=1000 + index,
                 source="tushare",
                 adjust_type=query.adjust_type,
             )
+            for index in range(query.limit)
         ]
 
 
@@ -192,3 +193,82 @@ async def test_market_service_search_uses_provider_and_persists_symbol(
     assert saved_symbol is not None
     assert saved_symbol.name == "贵州茅台"
     assert saved_symbol.provider_symbol == "600519.SH"
+
+
+async def test_market_service_search_refreshes_placeholder_db_symbol(
+    db_session: AsyncSession,
+) -> None:
+    repository = AsyncMarketRepository(db_session)
+    await repository.upsert_symbol(
+        MarketSymbolCreate(
+            symbol="600519",
+            market="CN",
+            name="600519",
+            currency="CNY",
+            exchange=None,
+            provider_symbol="600519",
+            source="mock",
+            is_active=True,
+        )
+    )
+    sync_service = MarketDataSyncService(
+        db_session,
+        provider=FakeProvider(),
+    )
+    service = MarketService(
+        db_session,
+        sync_service=sync_service,
+    )
+
+    result = await service.search_stocks(keyword="600519", market="CN")
+
+    assert len(result) == 1
+    assert result[0].name == "贵州茅台"
+    assert result[0].exchange == "SSE"
+    assert result[0].source == "tushare"
+
+    saved_symbol = await repository.get_symbol(
+        symbol="600519",
+        market="CN",
+    )
+    assert saved_symbol is not None
+    assert saved_symbol.name == "贵州茅台"
+    assert saved_symbol.source == "tushare"
+
+
+async def test_market_service_overview_syncs_candles_for_searched_symbol(
+    db_session: AsyncSession,
+) -> None:
+    repository = AsyncMarketRepository(db_session)
+    await repository.upsert_symbol(
+        MarketSymbolCreate(
+            symbol="600519",
+            market="CN",
+            name="贵州茅台",
+            currency="CNY",
+            exchange="SSE",
+            provider_symbol="600519.SH",
+            source="tushare",
+            is_active=True,
+        )
+    )
+    sync_service = MarketDataSyncService(
+        db_session,
+        provider=FakeProvider(),
+    )
+    service = MarketService(
+        db_session,
+        sync_service=sync_service,
+    )
+
+    overview = await service.get_overview(
+        symbol="600519",
+        market="CN",
+        timeframe="1d",
+        limit=5,
+    )
+
+    assert overview.quote.name == "贵州茅台"
+    assert overview.quote.source == "tushare"
+    assert len(overview.candles) == 5
+    assert overview.candles[-1].close_price > overview.candles[0].close_price

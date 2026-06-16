@@ -211,16 +211,17 @@ Query：
 | `keyword` | string? | 股票代码或名称关键词 |
 | `market` | `US` / `CN` / `HK`? | 可选市场过滤 |
 
-响应：股票搜索项，包含 `symbol`、`market`、`name`、`currency`、`exchange`。
+响应：股票搜索项，包含 `symbol`、`market`、`name`、`currency`、`exchange`、`source`。
 
 当前搜索链路说明：
 
 ```text
 1. 后端优先查询 market_symbols 表中已经缓存或同步过的股票基础信息；
-2. 如果数据库没有匹配结果，后端会根据当前 MARKET_DATA_PRIMARY_PROVIDER 调用 Provider 搜索；
-3. Tushare Provider 当前会通过 stock_basic 获取 A 股真实基础信息，包括股票名称、交易所和币种；
-4. Provider 返回的基础信息会写入 market_symbols，后续同一关键词可直接从数据库返回；
-5. 如果真实 Provider 不可用或没有结果，开发/测试环境仍可使用 Mock 行情池作为降级来源。
+2. 如果数据库命中但名称为空、名称等于代码或来源仍是 mock，后端会尝试用当前 Provider 刷新基础信息；
+3. 如果数据库没有匹配结果，后端会根据当前 MARKET_DATA_PRIMARY_PROVIDER 调用 Provider 搜索；
+4. Tushare Provider 当前会通过 stock_basic 获取 A 股真实基础信息，包括股票名称、交易所和币种；
+5. Provider 返回的基础信息会写入 market_symbols，后续同一关键词可直接从数据库返回；
+6. 如果真实 Provider 不可用或没有结果，开发/测试环境仍可使用 Mock 行情池作为降级来源。
 ```
 
 前端只需要调用一次搜索接口，不需要先调用同步接口再重新搜索。
@@ -229,7 +230,8 @@ Query：
 flowchart TD
     A["前端输入关键词"] --> B["GET /market/stocks/search"]
     B --> C["查询 market_symbols"]
-    C -->|有结果| D["返回数据库搜索结果"]
+    C -->|有可用结果| D["返回数据库搜索结果"]
+    C -->|结果像占位数据| E["调用当前 Provider.search_symbols"]
     C -->|无结果| E["调用当前 Provider.search_symbols"]
     E --> F["Provider 返回股票基础信息"]
     F --> G["写入 market_symbols"]
@@ -259,6 +261,8 @@ Query：
 ### `GET /market/stocks/{symbol}/overview`
 
 overview 是前端股票详情页最推荐使用的聚合接口。
+
+如果股票基础信息已经通过搜索写入 `market_symbols`，但该股票还没有入库 K 线，overview 会先尝试按当前 Provider 同步所需 K 线，再读取数据库生成详情页响应。Provider 同步失败时，查询接口仍保留开发/测试环境的 Mock 降级能力。
 
 常用 Query：
 

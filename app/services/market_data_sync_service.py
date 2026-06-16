@@ -84,10 +84,10 @@ class MarketDataSyncService:
         limit: int = 50,
         persist: bool = True,
     ) -> list[MarketSymbol]:
-        """Search symbols through the configured Provider and optionally cache them.
+        """通过已配置的 Provider 搜索股票标的，并可选择缓存结果。
 
-        This keeps frontend search as a single backend request: API callers do not
-        need to search, sync the symbol, and search again.
+        这样前端搜索只需要发起一次后端请求：API 调用方不需要先搜索、
+        同步股票标的，然后再搜索一次。
         """
 
         provider_symbols = await self.provider.search_symbols(

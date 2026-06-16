@@ -211,6 +211,29 @@ Query：
 
 响应：股票搜索项，包含 `symbol`、`market`、`name`、`currency`、`exchange`。
 
+当前搜索链路说明：
+
+```text
+1. 后端优先查询 market_symbols 表中已经缓存或同步过的股票基础信息；
+2. 如果数据库没有匹配结果，后端会根据当前 MARKET_DATA_PRIMARY_PROVIDER 调用 Provider 搜索；
+3. Tushare Provider 当前会通过 stock_basic 获取 A 股真实基础信息，包括股票名称、交易所和币种；
+4. Provider 返回的基础信息会写入 market_symbols，后续同一关键词可直接从数据库返回；
+5. 如果真实 Provider 不可用或没有结果，开发/测试环境仍可使用 Mock 行情池作为降级来源。
+```
+
+前端只需要调用一次搜索接口，不需要先调用同步接口再重新搜索。
+
+```mermaid
+flowchart TD
+    A["前端输入关键词"] --> B["GET /market/stocks/search"]
+    B --> C["查询 market_symbols"]
+    C -->|有结果| D["返回数据库搜索结果"]
+    C -->|无结果| E["调用当前 Provider.search_symbols"]
+    E --> F["Provider 返回股票基础信息"]
+    F --> G["写入 market_symbols"]
+    G --> H["返回统一搜索结果"]
+```
+
 ### `GET /market/stocks/{symbol}/quote`
 
 Path：`symbol`。
@@ -263,7 +286,7 @@ strategy_signal?
 
 | 接口 | 说明 |
 | ---- | ---- |
-| `POST /market-sync/symbols/{symbol}` | 同步股票基础信息 |
+| `POST /market-sync/symbols/{symbol}` | 同步单只股票基础信息。Tushare 当前通过 `stock_basic` 获取真实股票名称等信息 |
 | `POST /market-sync/stocks/{symbol}/candles` | 同步 K 线 |
 | `GET /market-data-quality/stocks/{symbol}/report` | 检查 K 线是否为空、数量不足、过旧或有错误 |
 | `GET /market-data-quality/sync-statuses` | 同步状态列表 |

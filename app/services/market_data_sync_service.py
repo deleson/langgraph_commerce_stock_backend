@@ -33,6 +33,7 @@ from app.services.market_data_quality_service import (
     MarketDataQualityCheckResult,
     MarketDataQualityService,
 )
+from app.services.market_symbol_sync_service import MarketSymbolSyncService
 from app.services.market_providers import (
     BaoStockProvider,
     MarketDataProvider,
@@ -70,11 +71,14 @@ class MarketDataSyncService:
         股票基础信息先落库，K 线同步时才能把 candle 关联到 symbol_id。
         """
 
-        symbol_payload = await self.provider.get_symbol(
+        return await MarketSymbolSyncService(
+            self.db,
+            provider=self.provider,
+            repository=self.repository,
+        ).sync_symbol(
             symbol=symbol,
             market=market,
         )
-        return await self.repository.upsert_symbol(symbol_payload)
 
     async def search_symbols(
         self,
@@ -90,23 +94,16 @@ class MarketDataSyncService:
         同步股票标的，然后再搜索一次。
         """
 
-        provider_symbols = await self.provider.search_symbols(
+        return await MarketSymbolSyncService(
+            self.db,
+            provider=self.provider,
+            repository=self.repository,
+        ).search_symbols(
             keyword=keyword,
             market=market,
             limit=limit,
+            persist=persist,
         )
-
-        if not persist:
-            return [
-                MarketSymbol(**payload.model_dump())
-                for payload in provider_symbols
-            ]
-
-        saved_symbols: list[MarketSymbol] = []
-        for payload in provider_symbols:
-            saved_symbols.append(await self.repository.upsert_symbol(payload))
-
-        return saved_symbols
 
     async def sync_candles(
         self,

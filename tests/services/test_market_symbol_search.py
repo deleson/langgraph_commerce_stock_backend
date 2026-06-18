@@ -13,6 +13,7 @@ from app.schemas.market_data import (
 )
 from app.services.market_data_sync_service import MarketDataSyncService
 from app.services.market_providers.base import MarketDataProvider
+from app.services.market_providers.baostock import BaoStockProvider
 from app.services.market_providers.tushare import TushareProvider
 from app.services.market_service import MarketService
 
@@ -50,6 +51,29 @@ class FakeTusharePro:
 class FakeSecret:
     def get_secret_value(self) -> str:
         return "fake-token"
+
+
+class FakeBaoStockLoginResult:
+    error_code = "0"
+    error_msg = ""
+
+
+class FakeBaoStockQueryResult:
+    error_code = "0"
+    error_msg = ""
+    fields = ["code", "code_name", "ipoDate", "outDate", "type", "status"]
+
+    def __init__(self) -> None:
+        self.consumed = False
+
+    def next(self) -> bool:
+        if self.consumed:
+            return False
+        self.consumed = True
+        return True
+
+    def get_row_data(self) -> list[str]:
+        return ["sz.002594", "比亚迪", "2011-06-30", "", "1", "1"]
 
 
 class FakeProvider(MarketDataProvider):
@@ -165,6 +189,44 @@ async def test_tushare_provider_get_symbol_uses_stock_basic(monkeypatch) -> None
     assert result.exchange == "SSE"
     assert result.provider_symbol == "600519.SH"
     assert fake_pro.stock_basic_calls[0]["ts_code"] == "600519.SH"
+
+
+async def test_tushare_provider_list_symbols_uses_stock_basic(monkeypatch) -> None:
+    fake_pro = FakeTusharePro()
+    monkeypatch.setattr(
+        "app.services.market_providers.tushare.get_settings",
+        lambda: SimpleNamespace(tushare_token=FakeSecret()),
+    )
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "tushare",
+        SimpleNamespace(pro_api=lambda token: fake_pro),
+    )
+
+    result = await TushareProvider().list_symbols(market="CN", limit=1)
+
+    assert len(result) == 1
+    assert result[0].symbol == "600519"
+    assert result[0].raw_payload["ts_code"] == "600519.SH"
+    assert fake_pro.stock_basic_calls[0]["exchange"] == ""
+    assert fake_pro.stock_basic_calls[0]["list_status"] == "L"
+
+
+async def test_baostock_provider_get_symbol_keeps_raw_payload(monkeypatch) -> None:
+    fake_bs = SimpleNamespace(
+        login=lambda: FakeBaoStockLoginResult(),
+        logout=lambda: None,
+        query_stock_basic=lambda code: FakeBaoStockQueryResult(),
+    )
+    monkeypatch.setitem(__import__("sys").modules, "baostock", fake_bs)
+
+    result = await BaoStockProvider().get_symbol(symbol="002594", market="CN")
+
+    assert result.symbol == "002594"
+    assert result.name == "比亚迪"
+    assert result.provider_symbol == "sz.002594"
+    assert result.source == "baostock"
+    assert result.raw_payload["code_name"] == "比亚迪"
 
 
 async def test_market_service_search_uses_provider_and_persists_symbol(

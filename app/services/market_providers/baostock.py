@@ -109,12 +109,16 @@ class BaoStockProvider(MarketDataProvider):
 
         try:
             name = normalized_symbol
+            raw_payload: dict[str, str] = {
+                "code": provider_symbol,
+            }
 
             if hasattr(bs, "query_stock_basic"):
                 result = bs.query_stock_basic(code=provider_symbol)
                 if result.error_code == "0" and result.next():
                     row = dict(zip(result.fields, result.get_row_data(), strict=False))
                     name = row.get("code_name") or normalized_symbol
+                    raw_payload = row
 
             return MarketSymbolCreate(
                 symbol=normalized_symbol,
@@ -123,8 +127,10 @@ class BaoStockProvider(MarketDataProvider):
                 currency="CNY",
                 exchange=self._infer_exchange(provider_symbol),
                 provider_symbol=provider_symbol,
+                list_status=raw_payload.get("status") or None,
                 source="baostock",
                 is_active=True,
+                raw_payload=raw_payload,
             )
         finally:
             bs.logout()

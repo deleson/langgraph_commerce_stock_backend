@@ -18,6 +18,7 @@ from app.services.market_providers import (
 )
 from app.services.market_data_quality_service import MarketDataQualityService
 from app.services.market_data_sync_service import MarketDataSyncService
+from app.services.market_symbol_sync_service import MarketSymbolSyncService
 from app.services.market_candle_series_service import MarketCandleSeriesService
 from app.services.indicator_dataframe_service import IndicatorDataFrameService
 from app.services.technical_indicator_service import TechnicalIndicatorService
@@ -143,6 +144,7 @@ __all__ = [
     "TushareProvider",
     "MarketDataQualityService",
     "MarketDataSyncService",
+    "MarketSymbolSyncService",
     "MarketCandleSeriesService",
     "IndicatorDataFrameService",
     "TechnicalIndicatorService",

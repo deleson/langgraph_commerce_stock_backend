@@ -1,7 +1,8 @@
 """股票基础信息 Model。
 
-market_symbols 表保存股票代码、市场、名称、币种和 Provider 映射代码。
-它是 K 线和行情同步状态的基础引用表。
+market_symbols 表保存项目统一后的股票基础信息，面向前端搜索、详情页、
+K 线同步状态和后续量化链路使用。不同 Provider 的原始基础信息保存在
+market_symbol_sources，避免 Tushare / BaoStock 字段互相覆盖。
 """
 
 from datetime import datetime
@@ -58,6 +59,10 @@ class MarketSymbol(Base):
         String(50),
         nullable=True,
     )
+    list_status: Mapped[str | None] = mapped_column(
+        String(30),
+        nullable=True,
+    )
     source: Mapped[str] = mapped_column(
         String(30),
         default="mock",
@@ -67,6 +72,22 @@ class MarketSymbol(Base):
         Boolean,
         default=True,
         nullable=False,
+    )
+    data_hash: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
+    last_synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    sync_status: Mapped[str | None] = mapped_column(
+        String(30),
+        nullable=True,
+    )
+    last_sync_error: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
     )
 
     created_at: Mapped[datetime] = mapped_column(

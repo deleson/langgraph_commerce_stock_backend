@@ -30,6 +30,7 @@ from app.schemas.technical_indicator import TechnicalIndicatorResponse
 from app.services.indicator_service import IndicatorService
 from app.services.market_data_service import MockMarketDataService
 from app.services.market_data_sync_service import MarketDataSyncService
+from app.services.market_symbol_sync_service import MarketSymbolSyncService
 from app.services.technical_indicator_query_service import TechnicalIndicatorQueryService
 from app.repositories.market_data_sync_repo import AsyncMarketDataSyncRepository
 from app.schemas.market_data_sync import (
@@ -102,6 +103,9 @@ class MarketService:
                 for symbol in provider_symbols
             ]
 
+        if self.repository is not None and not self._should_use_mock_search_fallback():
+            return []
+
         return self.market_data_service.search_stocks(
             keyword=keyword,
             market=market,
@@ -113,19 +117,36 @@ class MarketService:
         keyword: str | None,
         market: MarketCode | None,
     ) -> list[MarketSymbol]:
-        if self.sync_service is not None:
-            sync_service = self.sync_service
-        elif self.db is not None:
-            sync_service = MarketDataSyncService(self.db)
-        else:
+        if not self._is_exact_cn_symbol_keyword(keyword=keyword, market=market):
             return []
 
-        return await sync_service.search_symbols(
-            keyword=keyword,
-            market=market,
-            limit=50,
-            persist=True,
+        if self.sync_service is not None:
+            sync_service = self.sync_service
+            return await sync_service.search_symbols(
+                keyword=keyword,
+                market=market,
+                limit=50,
+                persist=True,
+            )
+
+        if self.db is None:
+            return []
+
+        from app.core.config import get_settings
+
+        settings = get_settings()
+        symbol_sync_service = MarketSymbolSyncService(
+            self.db,
+            provider_name=(
+                settings.market_symbol_exact_lookup_provider
+                or settings.market_data_primary_provider
+            ),
         )
+        symbol = await symbol_sync_service.sync_symbol(
+            symbol=keyword or "",
+            market=market or "CN",
+        )
+        return [symbol]
 
     async def _refresh_search_symbols_if_needed(
         self,
@@ -141,7 +162,11 @@ class MarketService:
         如果 Provider 不可用，继续返回数据库结果，避免影响基础可用性。
         """
 
-        if not keyword or not self._symbols_need_provider_refresh(symbols):
+        if (
+            not keyword
+            or not self._is_exact_cn_symbol_keyword(keyword=keyword, market=market)
+            or not self._symbols_need_provider_refresh(symbols)
+        ):
             return symbols
 
         provider_symbols = await self._search_symbols_from_provider(
@@ -176,6 +201,36 @@ class MarketService:
             if symbol.source == "mock":
                 return True
         return False
+
+    def _is_exact_cn_symbol_keyword(
+        self,
+        *,
+        keyword: str | None,
+        market: MarketCode | None,
+    ) -> bool:
+        """只有 A 股 6 位代码允许走用户请求链路的精确 Provider 兜底。
+
+        名称/关键词模糊搜索必须依赖数据库股票池，避免高频消耗 Tushare quota。
+        """
+
+        if market is not None and market != "CN":
+            return False
+
+        if not keyword:
+            return False
+
+        normalized_keyword = keyword.strip().upper()
+        return len(normalized_keyword) == 6 and normalized_keyword.isdigit()
+
+    def _should_use_mock_search_fallback(
+        self,
+    ) -> bool:
+        if self.sync_service is not None:
+            return self.sync_service.provider.provider_name == "mock"
+
+        from app.core.config import get_settings
+
+        return get_settings().market_data_primary_provider.strip().lower() == "mock"
 
     async def get_quote(
         self,

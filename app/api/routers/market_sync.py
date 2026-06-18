@@ -10,10 +10,62 @@ from app.api.deps import AsyncCurrentUser, AsyncDBSession
 from app.schemas.common import ApiResponse
 from app.schemas.market_data import AdjustType, CandleTimeframe, MarketCode
 from app.services.market_data_sync_service import MarketDataSyncService
+from app.services.market_symbol_sync_service import MarketSymbolSyncService
 from app.utils.responses import success_response
 
 
 router = APIRouter(prefix="/market-sync", tags=["market-sync"])
+
+
+@router.post(
+    "/symbol-pool",
+    summary="Sync Market Symbol Pool",
+    response_model=ApiResponse[dict[str, object]],
+)
+async def sync_market_symbol_pool(
+    current_user: AsyncCurrentUser,
+    db: AsyncDBSession,
+    market: MarketCode = Query(
+        default="CN",
+        description="Market code: US, CN, or HK",
+    ),
+    provider: str | None = Query(
+        default=None,
+        description="Optional Provider name, for example tushare, baostock, or mock",
+    ),
+    limit: int | None = Query(
+        default=None,
+        ge=1,
+        le=10000,
+        description="Optional max number of symbols to sync",
+    ),
+):
+    # 同步股票池可能消耗 Provider quota，因此必须要求登录用户触发。
+    _ = current_user
+
+    summary = await MarketSymbolSyncService(
+        db,
+        provider_name=provider,
+    ).sync_symbol_pool(
+        market=market,
+        limit=limit,
+    )
+
+    return success_response(
+        data={
+            "status": summary.status,
+            "provider": summary.provider,
+            "market": summary.market,
+            "fetched_count": summary.fetched_count,
+            "source_inserted": summary.source_inserted,
+            "source_updated": summary.source_updated,
+            "source_skipped": summary.source_skipped,
+            "canonical_inserted": summary.canonical_inserted,
+            "canonical_updated": summary.canonical_updated,
+            "canonical_skipped": summary.canonical_skipped,
+            "error_message": summary.error_message,
+        }
+    )
 
 
 @router.post(

@@ -35,6 +35,21 @@ class MarketDataProvider(ABC):
     ) -> list[MarketSymbolCreate]:
         """从当前 Provider 搜索可交易标的。"""
 
+    async def list_symbols(
+        self,
+        *,
+        market: MarketCode | None = None,
+        limit: int | None = None,
+    ) -> list[MarketSymbolCreate]:
+        """低频批量同步股票池。
+
+        不是所有 Provider 都适合作为全量股票池来源，默认返回空列表。
+        例如 BaoStock 当前只用于精确代码补齐和 K 线同步，避免错误地把它当成
+        高频全市场搜索入口。
+        """
+
+        return []
+
     @abstractmethod
     async def get_symbol(
         self,

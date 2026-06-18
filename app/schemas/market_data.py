@@ -6,7 +6,7 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -33,8 +33,14 @@ class MarketSymbolCreate(BaseModel):
     currency: str = Field(min_length=1, max_length=10)
     exchange: str | None = Field(default=None, max_length=30)
     provider_symbol: str | None = Field(default=None, max_length=50)
+    list_status: str | None = Field(default=None, max_length=30)
     source: MarketDataSource = "mock"
     is_active: bool = True
+    data_hash: str | None = Field(default=None, max_length=64)
+    last_synced_at: datetime | None = None
+    sync_status: str | None = Field(default=None, max_length=30)
+    last_sync_error: str | None = Field(default=None, max_length=500)
+    raw_payload: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("symbol", "market", "currency", "exchange", mode="before")
     @classmethod
@@ -43,7 +49,7 @@ class MarketSymbolCreate(BaseModel):
             return value.strip().upper()
         return value
 
-    @field_validator("provider_symbol", mode="before")
+    @field_validator("provider_symbol", "list_status", "sync_status", mode="before")
     @classmethod
     def normalize_provider_symbol(cls, value: str | None) -> str | None:
         if isinstance(value, str):
@@ -65,8 +71,13 @@ class MarketSymbolUpdate(BaseModel):
     currency: str | None = Field(default=None, min_length=1, max_length=10)
     exchange: str | None = Field(default=None, max_length=30)
     provider_symbol: str | None = Field(default=None, max_length=50)
+    list_status: str | None = Field(default=None, max_length=30)
     source: MarketDataSource | None = None
     is_active: bool | None = None
+    data_hash: str | None = Field(default=None, max_length=64)
+    last_synced_at: datetime | None = None
+    sync_status: str | None = Field(default=None, max_length=30)
+    last_sync_error: str | None = Field(default=None, max_length=500)
 
     @field_validator("currency", "exchange", mode="before")
     @classmethod
@@ -75,7 +86,7 @@ class MarketSymbolUpdate(BaseModel):
             return value.strip().upper()
         return value
 
-    @field_validator("name", "provider_symbol", mode="before")
+    @field_validator("name", "provider_symbol", "list_status", "sync_status", mode="before")
     @classmethod
     def normalize_text(cls, value: str | None) -> str | None:
         if isinstance(value, str):
@@ -95,8 +106,72 @@ class MarketSymbolDB(BaseModel):
     currency: str
     exchange: str | None
     provider_symbol: str | None
+    list_status: str | None = None
     source: str
     is_active: bool
+    data_hash: str | None = None
+    last_synced_at: datetime | None = None
+    sync_status: str | None = None
+    last_sync_error: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class MarketSymbolSourceCreate(BaseModel):
+    """写入 Provider 股票基础信息来源表的数据结构。"""
+
+    symbol: str = Field(min_length=1, max_length=20)
+    market: MarketCode
+    provider: str = Field(min_length=1, max_length=30)
+    provider_symbol: str | None = Field(default=None, max_length=50)
+    name: str = Field(min_length=1, max_length=100)
+    currency: str = Field(min_length=1, max_length=10)
+    exchange: str | None = Field(default=None, max_length=30)
+    list_status: str | None = Field(default=None, max_length=30)
+    is_active: bool = True
+    raw_payload: dict[str, Any] = Field(default_factory=dict)
+    raw_hash: str = Field(min_length=64, max_length=64)
+    normalized_hash: str = Field(min_length=64, max_length=64)
+    sync_status: str = Field(default="success", max_length=30)
+    last_synced_at: datetime
+    last_sync_error: str | None = Field(default=None, max_length=500)
+
+    @field_validator("symbol", "market", "currency", "exchange", mode="before")
+    @classmethod
+    def normalize_uppercase(cls, value: str | None) -> str | None:
+        if isinstance(value, str):
+            return value.strip().upper()
+        return value
+
+    @field_validator("provider", "provider_symbol", "name", "list_status", mode="before")
+    @classmethod
+    def normalize_text(cls, value: str | None) -> str | None:
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
+
+class MarketSymbolSourceDB(BaseModel):
+    """Provider 股票基础信息来源表响应结构。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    symbol: str
+    market: str
+    provider: str
+    provider_symbol: str | None
+    name: str
+    currency: str
+    exchange: str | None
+    list_status: str | None
+    is_active: bool
+    raw_payload: dict[str, Any]
+    raw_hash: str
+    normalized_hash: str
+    sync_status: str
+    last_synced_at: datetime
+    last_sync_error: str | None
     created_at: datetime
     updated_at: datetime
 

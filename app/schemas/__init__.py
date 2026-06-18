@@ -60,6 +60,8 @@ from app.schemas.market_data import (
     MarketProviderCandle,
     MarketSymbolCreate,
     MarketSymbolDB,
+    MarketSymbolSourceCreate,
+    MarketSymbolSourceDB,
     MarketSymbolUpdate,
 )
 from app.schemas.technical_indicator import (
@@ -398,6 +400,8 @@ __all__ = [
     "MarketProviderCandle",
     "MarketSymbolCreate",
     "MarketSymbolDB",
+    "MarketSymbolSourceCreate",
+    "MarketSymbolSourceDB",
     "MarketSymbolUpdate",
     "IndicatorStrength",
     "MacdSignal",

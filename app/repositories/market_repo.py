@@ -6,15 +6,19 @@ market、symbol、timeframe、source 和 adjust_type，否则技术指标、回�
 
 from collections.abc import Sequence
 
-from sqlalchemy import select
+from datetime import UTC, datetime
+
+from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.market_candle import MarketCandle
 from app.models.market_symbol import MarketSymbol
+from app.models.market_symbol_source import MarketSymbolSource
 from app.schemas.market_data import (
     MarketCandleCreate,
     MarketCandleQuery,
     MarketSymbolCreate,
+    MarketSymbolSourceCreate,
     MarketSymbolUpdate,
 )
 
@@ -70,7 +74,7 @@ class AsyncMarketRepository:
         self,
         payload: MarketSymbolCreate,
     ) -> MarketSymbol:
-        symbol = MarketSymbol(**payload.model_dump())
+        symbol = MarketSymbol(**self._symbol_model_data(payload))
         self.db.add(symbol)
         await self.db.commit()
         await self.db.refresh(symbol)
@@ -110,10 +114,187 @@ class AsyncMarketRepository:
             currency=payload.currency,
             exchange=payload.exchange,
             provider_symbol=payload.provider_symbol,
+            list_status=payload.list_status,
             source=payload.source,
             is_active=payload.is_active,
+            data_hash=payload.data_hash,
+            last_synced_at=payload.last_synced_at,
+            sync_status=payload.sync_status,
+            last_sync_error=payload.last_sync_error,
         )
         return await self.update_symbol(existing, update_payload)
+
+    async def upsert_symbols_bulk(
+        self,
+        payloads: Sequence[MarketSymbolCreate],
+    ) -> dict[str, int]:
+        """批量 upsert 统一股票基础信息。
+
+        全量股票池同步不能逐条 SELECT/UPDATE/COMMIT。这里先一次性取出已有记录，
+        在内存里按 market + symbol 对比哈希，只有变化的数据才写库。
+        """
+
+        if not payloads:
+            return {
+                "inserted": 0,
+                "updated": 0,
+                "skipped": 0,
+            }
+
+        keys = {(payload.market, payload.symbol) for payload in payloads}
+        existing_symbols = await self.list_symbols_by_keys(keys)
+        existing_map = {
+            (symbol.market, symbol.symbol): symbol
+            for symbol in existing_symbols
+        }
+
+        inserted = 0
+        updated = 0
+        skipped = 0
+
+        for payload in payloads:
+            key = (payload.market, payload.symbol)
+            existing = existing_map.get(key)
+            model_data = self._symbol_model_data(payload)
+
+            if existing is None:
+                self.db.add(MarketSymbol(**model_data))
+                inserted += 1
+                continue
+
+            if payload.data_hash and existing.data_hash == payload.data_hash:
+                skipped += 1
+                continue
+
+            for field, value in model_data.items():
+                setattr(existing, field, value)
+            self.db.add(existing)
+            updated += 1
+
+        await self.db.commit()
+
+        return {
+            "inserted": inserted,
+            "updated": updated,
+            "skipped": skipped,
+        }
+
+    async def list_symbols_by_keys(
+        self,
+        keys: set[tuple[str, str]],
+    ) -> list[MarketSymbol]:
+        if not keys:
+            return []
+
+        stmt = select(MarketSymbol).where(
+            tuple_(MarketSymbol.market, MarketSymbol.symbol).in_(keys)
+        )
+
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_symbol_source(
+        self,
+        *,
+        provider: str,
+        market: str,
+        symbol: str,
+    ) -> MarketSymbolSource | None:
+        stmt = select(MarketSymbolSource).where(
+            MarketSymbolSource.provider == provider,
+            MarketSymbolSource.market == market,
+            MarketSymbolSource.symbol == symbol,
+        )
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def list_symbol_sources_by_keys(
+        self,
+        keys: set[tuple[str, str, str]],
+    ) -> list[MarketSymbolSource]:
+        if not keys:
+            return []
+
+        stmt = select(MarketSymbolSource).where(
+            tuple_(
+                MarketSymbolSource.provider,
+                MarketSymbolSource.market,
+                MarketSymbolSource.symbol,
+            ).in_(keys)
+        )
+
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def upsert_symbol_sources_bulk(
+        self,
+        payloads: Sequence[MarketSymbolSourceCreate],
+    ) -> dict[str, int]:
+        """批量 upsert Provider 来源记录，并用哈希跳过未变化记录。"""
+
+        if not payloads:
+            return {
+                "inserted": 0,
+                "updated": 0,
+                "skipped": 0,
+            }
+
+        keys = {
+            (payload.provider, payload.market, payload.symbol)
+            for payload in payloads
+        }
+        existing_sources = await self.list_symbol_sources_by_keys(keys)
+        existing_map = {
+            (source.provider, source.market, source.symbol): source
+            for source in existing_sources
+        }
+
+        inserted = 0
+        updated = 0
+        skipped = 0
+
+        for payload in payloads:
+            key = (payload.provider, payload.market, payload.symbol)
+            existing = existing_map.get(key)
+            model_data = payload.model_dump()
+
+            if existing is None:
+                self.db.add(MarketSymbolSource(**model_data))
+                inserted += 1
+                continue
+
+            if (
+                existing.raw_hash == payload.raw_hash
+                and existing.normalized_hash == payload.normalized_hash
+            ):
+                skipped += 1
+                continue
+
+            for field, value in model_data.items():
+                setattr(existing, field, value)
+            self.db.add(existing)
+            updated += 1
+
+        await self.db.commit()
+
+        return {
+            "inserted": inserted,
+            "updated": updated,
+            "skipped": skipped,
+        }
+
+    def _symbol_model_data(
+        self,
+        payload: MarketSymbolCreate,
+    ) -> dict:
+        data = payload.model_dump(
+            exclude={
+                "raw_payload",
+            }
+        )
+        if data.get("last_synced_at") is None and data.get("sync_status") == "success":
+            data["last_synced_at"] = datetime.now(UTC)
+        return data
 
     async def get_candle(
         self,

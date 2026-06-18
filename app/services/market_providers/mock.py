@@ -54,6 +54,19 @@ class MockMarketDataProvider(MarketDataProvider):
             for stock in stocks[:limit]
         ]
 
+    async def list_symbols(
+        self,
+        *,
+        market: MarketCode | None = None,
+        limit: int | None = None,
+    ) -> list[MarketSymbolCreate]:
+        stocks = self.market_data_service.search_stocks(
+            keyword=None,
+            market=market,
+        )
+        selected_stocks = stocks[:limit] if limit is not None else stocks
+        return [self._to_symbol_create(stock) for stock in selected_stocks]
+
     async def get_symbol(
         self,
         *,
@@ -120,6 +133,13 @@ class MockMarketDataProvider(MarketDataProvider):
             provider_symbol=stock.symbol,
             source="mock",
             is_active=True,
+            raw_payload={
+                "symbol": stock.symbol,
+                "market": stock.market,
+                "name": stock.name,
+                "currency": stock.currency,
+                "exchange": stock.exchange,
+            },
         )
 
     def _to_decimal(

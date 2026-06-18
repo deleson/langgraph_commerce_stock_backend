@@ -63,6 +63,11 @@ class Settings(BaseSettings):
     celery_beat_market_data_sync_limit: int = Field(default=30)
     celery_beat_market_data_sync_adjust_type: str = Field(default="none")
     celery_beat_market_data_sync_source: str = Field(default="mock")
+    celery_beat_market_symbol_sync_enabled: bool = Field(default=False)
+    celery_beat_market_symbol_sync_interval_seconds: int = Field(default=86400)
+    celery_beat_market_symbol_sync_market: str = Field(default="CN")
+    celery_beat_market_symbol_sync_limit: int | None = Field(default=None)
+    celery_beat_market_symbol_sync_provider: str = Field(default="")
     celery_beat_daily_report_enabled: bool = Field(default=False)
     celery_beat_daily_report_hour: int = Field(default=18, ge=0, le=23)
     celery_beat_daily_report_minute: int = Field(default=0, ge=0, le=59)
@@ -121,6 +126,10 @@ class Settings(BaseSettings):
     market_data_quality_cache_ttl_seconds: int = Field(default=300)
     market_data_sync_status_cache_ttl_seconds: int = Field(default=60)
     market_data_technical_indicator_cache_ttl_seconds: int = Field(default=300)
+    market_symbol_primary_provider: str = Field(default="tushare")
+    market_symbol_fallback_providers: str = Field(default="baostock,mock")
+    market_symbol_sync_provider: str = Field(default="")
+    market_symbol_exact_lookup_provider: str = Field(default="baostock")
 
     baostock_enabled: bool = Field(default=True)
 

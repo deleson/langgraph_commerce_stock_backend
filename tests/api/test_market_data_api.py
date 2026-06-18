@@ -180,6 +180,31 @@ async def test_sync_market_symbol_success(
     assert data["synced"] is True
 
 
+async def test_sync_market_symbol_pool_success(
+    async_client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    response = await async_client.post(
+        f"{API_PREFIX}/market-sync/symbol-pool",
+        params={
+            "market": "US",
+            "provider": "mock",
+            "limit": 2,
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()["data"]
+    assert data["status"] == "success"
+    assert data["provider"] == "mock"
+    assert data["market"] == "US"
+    assert data["fetched_count"] == 2
+    assert data["source_inserted"] == 2
+    assert data["canonical_inserted"] == 2
+
+
 async def test_sync_stock_candles_success(
     async_client: AsyncClient,
     auth_headers: dict[str, str],

@@ -41,6 +41,7 @@ from app.services.ai_usage_token_service import (
     AIUsageTokenService,
 )
 from app.services.market_data_sync_service import MarketDataSyncService
+from app.services.market_symbol_sync_service import MarketSymbolSyncService
 from app.services.user_memory_embedding_service import UserMemoryEmbeddingService
 from app.services.user_profile_service import UserProfileService
 from app.repositories.user_repo import AsyncUserRepository
@@ -96,6 +97,11 @@ def dispatch_background_task(task_id: int) -> dict[str, object]:
 def submit_scheduled_market_data_sync() -> dict[str, object]:
     loop = _get_worker_event_loop()
     return loop.run_until_complete(_submit_scheduled_market_data_sync_async())
+
+@celery_app.task(name="background_tasks.submit_scheduled_market_symbol_sync")
+def submit_scheduled_market_symbol_sync() -> dict[str, object]:
+    loop = _get_worker_event_loop()
+    return loop.run_until_complete(_submit_scheduled_market_symbol_sync_async())
 
 @celery_app.task(name="background_tasks.submit_scheduled_daily_reports")
 def submit_scheduled_daily_reports() -> dict[str, object]:
@@ -166,6 +172,43 @@ async def _submit_scheduled_market_data_sync_async() -> dict[str, object]:
             "timeframe": payload.timeframe,
             "limit": payload.limit,
         }
+
+async def _submit_scheduled_market_symbol_sync_async() -> dict[str, object]:
+    """由 Celery Beat 触发的股票基础信息池同步。
+
+    该任务只同步股票基础信息，不同步全市场 K 线。这样既能维护搜索数据库可用性，
+    又不会对 Provider 和数据库造成不可控的数据压力。
+    """
+
+    settings = get_settings()
+
+    async with AsyncSessionLocal() as db:
+        summary = await MarketSymbolSyncService(
+            db,
+            provider_name=(
+                settings.celery_beat_market_symbol_sync_provider
+                or settings.market_symbol_sync_provider
+                or settings.market_data_primary_provider
+            ),
+        ).sync_symbol_pool(
+            market=settings.celery_beat_market_symbol_sync_market,
+            limit=settings.celery_beat_market_symbol_sync_limit,
+        )
+
+    return {
+        "status": summary.status,
+        "reason": "scheduled_market_symbol_sync_completed",
+        "provider": summary.provider,
+        "market": summary.market,
+        "fetched_count": summary.fetched_count,
+        "source_inserted": summary.source_inserted,
+        "source_updated": summary.source_updated,
+        "source_skipped": summary.source_skipped,
+        "canonical_inserted": summary.canonical_inserted,
+        "canonical_updated": summary.canonical_updated,
+        "canonical_skipped": summary.canonical_skipped,
+        "error_message": summary.error_message,
+    }
 
 async def _submit_scheduled_daily_reports_async() -> dict[str, object]:
     """由 Celery Beat 批量提交每日简报任务。

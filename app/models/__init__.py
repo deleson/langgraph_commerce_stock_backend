@@ -14,6 +14,7 @@ from app.models.user_preference import UserPreference
 from app.models.user_session import UserSession
 from app.models.watchlist_item import WatchlistItem
 from app.models.market_symbol import MarketSymbol
+from app.models.market_symbol_source import MarketSymbolSource
 from app.models.market_candle import MarketCandle
 from app.models.market_data_sync_status import MarketDataSyncStatus
 from app.models.market_data_sync_log import MarketDataSyncLog
@@ -48,6 +49,7 @@ __all__ = [
     "UserSession",
     "WatchlistItem",
     "MarketSymbol",
+    "MarketSymbolSource",
     "MarketCandle",
     "MarketDataSyncStatus",
     "MarketDataSyncLog",

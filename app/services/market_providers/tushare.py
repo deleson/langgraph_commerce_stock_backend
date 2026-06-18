@@ -55,6 +55,26 @@ class TushareProvider(MarketDataProvider):
             limit,
         )
 
+    async def list_symbols(
+        self,
+        *,
+        market: MarketCode | None = None,
+        limit: int | None = None,
+    ) -> list[MarketSymbolCreate]:
+        """低频拉取 Tushare 股票基础信息池。
+
+        Tushare stock_basic 调用额度宝贵，因此该方法应由后台同步任务调用，
+        不能放到普通用户名称搜索链路里反复触发。
+        """
+
+        if market is not None and market != "CN":
+            return []
+
+        return await anyio.to_thread.run_sync(
+            self._list_symbols_sync,
+            limit,
+        )
+
     async def get_symbol(
         self,
         *,
@@ -108,6 +128,27 @@ class TushareProvider(MarketDataProvider):
                 break
 
         return matched_symbols
+
+    def _list_symbols_sync(
+        self,
+        limit: int | None,
+    ) -> list[MarketSymbolCreate]:
+        pro = self._build_client()
+        fields = self._stock_basic_fields()
+        df = pro.stock_basic(
+            exchange="",
+            list_status="L",
+            fields=fields,
+        )
+
+        if df is None or df.empty:
+            return []
+
+        rows = df.to_dict("records")
+        if limit is not None:
+            rows = rows[:limit]
+
+        return [self._row_to_symbol(row) for row in rows]
 
     def _get_symbol_sync(
         self,
@@ -239,8 +280,13 @@ class TushareProvider(MarketDataProvider):
             currency=currency or "CNY",
             exchange=exchange or self._infer_exchange(provider_symbol),
             provider_symbol=provider_symbol or self._to_tushare_code(symbol),
+            list_status=str(row.get("list_status") or "").strip().upper() or None,
             source="tushare",
             is_active=True,
+            raw_payload={
+                str(key): value
+                for key, value in row.items()
+            },
         )
 
     def _build_client(

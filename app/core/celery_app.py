@@ -37,6 +37,15 @@ def build_beat_schedule(settings: Settings) -> dict[str, dict]:
             ),
         }
 
+    if settings.celery_beat_market_symbol_sync_enabled:
+        # 股票基础信息可以低频全量同步；K 线不要做全市场全量同步。
+        beat_schedule["scheduled-market-symbol-sync"] = {
+            "task": "background_tasks.submit_scheduled_market_symbol_sync",
+            "schedule": schedule(
+                run_every=settings.celery_beat_market_symbol_sync_interval_seconds
+            ),
+        }
+
     if settings.celery_beat_daily_report_enabled:
         # 每日简报可能触发 AI 润色，生产开启前需要确认额度和通知策略。
         beat_schedule["scheduled-daily-reports"] = {

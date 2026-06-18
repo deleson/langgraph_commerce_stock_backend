@@ -45,6 +45,7 @@ Authorization: Bearer <access_token>
 | market | GET | `/market/stocks/{symbol}/candles` | 是 | 获取 K 线 |
 | market | GET | `/market/stocks/{symbol}/indicators` | 是 | 获取基础指标 |
 | market | GET | `/market/stocks/{symbol}/overview` | 是 | 获取行情聚合概览 |
+| market-sync | POST | `/market-sync/symbol-pool` | 是 | 同步股票基础信息池 |
 | market-sync | POST | `/market-sync/symbols/{symbol}` | 是 | 同步股票基础信息 |
 | market-sync | POST | `/market-sync/stocks/{symbol}/candles` | 是 | 同步 K 线 |
 | market-data-quality | GET | `/market-data-quality/stocks/{symbol}/report` | 是 | 数据质量报告 |
@@ -217,11 +218,11 @@ Query：
 
 ```text
 1. 后端优先查询 market_symbols 表中已经缓存或同步过的股票基础信息；
-2. 如果数据库命中但名称为空、名称等于代码或来源仍是 mock，后端会尝试用当前 Provider 刷新基础信息；
-3. 如果数据库没有匹配结果，后端会根据当前 MARKET_DATA_PRIMARY_PROVIDER 调用 Provider 搜索；
-4. Tushare Provider 当前会通过 stock_basic 获取 A 股真实基础信息，包括股票名称、交易所和币种；
-5. Provider 返回的基础信息会写入 market_symbols，后续同一关键词可直接从数据库返回；
-6. 如果真实 Provider 不可用或没有结果，开发/测试环境仍可使用 Mock 行情池作为降级来源。
+2. 名称 / 关键词搜索只查数据库股票池，不在用户请求中高频调用 Tushare；
+3. 如果数据库命中但名称为空、名称等于代码或来源仍是 mock，并且搜索词是 6 位 A 股代码，后端会尝试 Provider 精确刷新；
+4. 如果数据库没有匹配结果，只有 6 位 A 股代码会调用配置的精确查询 Provider；
+5. Provider 返回的基础信息会写入 market_symbol_sources，并按 Provider 优先级刷新 market_symbols；
+6. 真实 Provider 不可用或没有结果时，真实搜索返回空结果；只有无数据库或明确 mock Provider 场景才使用 Mock 搜索池。
 ```
 
 前端只需要调用一次搜索接口，不需要先调用同步接口再重新搜索。
@@ -231,11 +232,11 @@ flowchart TD
     A["前端输入关键词"] --> B["GET /market/stocks/search"]
     B --> C["查询 market_symbols"]
     C -->|有可用结果| D["返回数据库搜索结果"]
-    C -->|结果像占位数据| E["调用当前 Provider.search_symbols"]
-    C -->|无结果| E["调用当前 Provider.search_symbols"]
-    E --> F["Provider 返回股票基础信息"]
-    F --> G["写入 market_symbols"]
-    G --> H["返回统一搜索结果"]
+    C -->|名称/关键词无结果| E["返回空结果"]
+    C -->|6 位 A 股代码缺失或占位| F["调用精确查询 Provider"]
+    F --> G["写入 market_symbol_sources"]
+    G --> H["刷新 market_symbols"]
+    H --> D
 ```
 
 ### `GET /market/stocks/{symbol}/quote`
@@ -292,11 +293,39 @@ strategy_signal?
 
 | 接口 | 说明 |
 | ---- | ---- |
-| `POST /market-sync/symbols/{symbol}` | 同步单只股票基础信息。Tushare 当前通过 `stock_basic` 获取真实股票名称等信息 |
+| `POST /market-sync/symbol-pool` | 低频同步股票基础信息池。Tushare 适合用于该入口；结果会用哈希判断变化，避免无意义更新 |
+| `POST /market-sync/symbols/{symbol}` | 同步单只股票基础信息。BaoStock 可用于精确代码补齐；Tushare 也可用但要注意额度 |
 | `POST /market-sync/stocks/{symbol}/candles` | 同步 K 线 |
 | `GET /market-data-quality/stocks/{symbol}/report` | 检查 K 线是否为空、数量不足、过旧或有错误 |
 | `GET /market-data-quality/sync-statuses` | 同步状态列表 |
 | `GET /market-data-quality/sync-logs` | 同步日志列表 |
+
+`POST /market-sync/symbol-pool` Query：
+
+| 字段 | 默认 | 说明 |
+| ---- | ---- | ---- |
+| `market` | `CN` | 同步哪个市场的股票基础信息 |
+| `provider` | 配置值 | 可选 Provider，例如 `tushare`、`baostock`、`mock` |
+| `limit` | 无 | 可选同步数量上限，测试或小批量验证时使用 |
+
+响应包含：
+
+```text
+status
+provider
+market
+fetched_count
+source_inserted / source_updated / source_skipped
+canonical_inserted / canonical_updated / canonical_skipped
+error_message
+```
+
+注意：
+
+```text
+该接口只同步股票基础信息，不同步全市场 K 线。
+股票基础信息会先写入 market_symbol_sources，再按 Provider 优先级刷新 market_symbols。
+```
 
 ## 五、技术指标与策略信号
 

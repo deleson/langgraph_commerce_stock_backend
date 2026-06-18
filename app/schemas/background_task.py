@@ -24,6 +24,7 @@ from app.schemas.paper_trading import PaperTradingTickRequest
 
 BackgroundTaskType = Literal[
     "market_data_sync",
+    "watchlist_candle_sync",
     "stock_analysis_async",
     "candidate_scoring_async",
     "candidate_ai_explanation_async",
@@ -74,6 +75,32 @@ class MarketDataSyncTaskPayload(BaseModel):
     @classmethod
     def normalize_symbol(cls, value: str) -> str:
         return value.strip().upper()
+
+class WatchlistCandleSyncTaskPayload(BaseModel):
+    """批量同步自选股 K 线后台任务 payload。"""
+
+    market: MarketCode = "CN"
+    timeframe: CandleTimeframe = "1d"
+    limit: int = Field(default=120, ge=1, le=1000)
+    adjust_type: AdjustType = "none"
+    source: MarketDataSource = "baostock"
+    fallback_sources: list[MarketDataSource] = Field(default_factory=lambda: ["tushare"])
+    max_symbols: int = Field(default=300, ge=1, le=5000)
+    batch_size: int = Field(default=50, ge=1, le=500)
+    stale_after_days: int = Field(default=3, ge=0, le=365)
+
+    @field_validator("fallback_sources", mode="before")
+    @classmethod
+    def normalize_fallback_sources(
+        cls,
+        value: list[str] | str | None,
+    ) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [item.strip().lower() for item in value.split(",") if item.strip()]
+        return [str(item).strip().lower() for item in value if str(item).strip()]
+
 
 class StockAnalysisAsyncTaskPayload(BaseModel):
     """异步个股分析后台任务 payload。"""

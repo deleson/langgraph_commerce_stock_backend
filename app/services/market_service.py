@@ -5,6 +5,7 @@ MarketService 面向 API 层提供搜索、报价、K 线、基础指标和 Over
 MockMarketDataService 作为开发/测试降级来源。
 """
 
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -478,7 +479,16 @@ class MarketService:
                 source=None,
             )
         )
-        if existing_candles:
+
+        from app.core.config import get_settings
+
+        settings = get_settings()
+        stale_after_days = settings.celery_beat_watchlist_candle_sync_stale_after_days
+
+        if existing_candles and not self._is_overview_candle_stale(
+            existing_candles[-1],
+            stale_after_days=stale_after_days,
+        ):
             return
 
         sync_limit = limit
@@ -488,22 +498,63 @@ class MarketService:
             sync_limit = max(sync_limit, strategy_signal_limit)
 
         try:
-            sync_service = self.sync_service or (
-                MarketDataSyncService(self.db) if self.db is not None else None
-            )
-            if sync_service is None:
+            if self.sync_service is not None:
+                await self.sync_service.sync_candles(
+                    symbol=normalized_symbol,
+                    market=market,
+                    timeframe=timeframe,
+                    limit=sync_limit,
+                    adjust_type=adjust_type,
+                )
                 return
 
-            await sync_service.sync_candles(
-                symbol=normalized_symbol,
-                market=market,
-                timeframe=timeframe,
-                limit=sync_limit,
-                adjust_type=adjust_type,
-            )
+            if self.db is None:
+                return
+
+            provider_names = self._overview_sync_provider_names(settings)
+            for provider_name in provider_names:
+                try:
+                    await MarketDataSyncService(
+                        self.db,
+                        provider_name=provider_name,
+                    ).sync_candles(
+                        symbol=normalized_symbol,
+                        market=market,
+                        timeframe=timeframe,
+                        limit=sync_limit,
+                        adjust_type=adjust_type,
+                    )
+                    return
+                except Exception:
+                    continue
         except Exception:
             # 查询接口不能因为 Provider 临时失败完全不可用；后续仍走原有 mock 降级。
             return
+
+    def _is_overview_candle_stale(
+        self,
+        candle: MarketCandleModel,
+        *,
+        stale_after_days: int,
+    ) -> bool:
+        latest_date = candle.candle_time.astimezone(UTC).date()
+        return (datetime.now(UTC).date() - latest_date).days > stale_after_days
+
+    def _overview_sync_provider_names(
+        self,
+        settings,
+    ) -> list[str]:
+        source = (
+            settings.celery_beat_watchlist_candle_sync_source
+            or settings.market_data_primary_provider
+        )
+        fallback_text = settings.celery_beat_watchlist_candle_sync_fallback_sources
+        providers: list[str] = []
+        for provider_name in [source, *fallback_text.split(",")]:
+            normalized = provider_name.strip().lower()
+            if normalized and normalized not in providers:
+                providers.append(normalized)
+        return providers or [settings.market_data_primary_provider.strip().lower()]
 
     async def _get_quote_from_db(
         self,

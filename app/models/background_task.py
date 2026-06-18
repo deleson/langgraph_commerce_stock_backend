@@ -22,6 +22,7 @@ class BackgroundTask(Base):
         CheckConstraint(
             "task_type IN ("
             "'market_data_sync',"
+            "'watchlist_candle_sync',"
             "'stock_analysis_async',"
             "'candidate_scoring_async',"
             "'candidate_ai_explanation_async',"

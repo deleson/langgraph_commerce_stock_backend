@@ -68,6 +68,19 @@ class Settings(BaseSettings):
     celery_beat_market_symbol_sync_market: str = Field(default="CN")
     celery_beat_market_symbol_sync_limit: int | None = Field(default=None)
     celery_beat_market_symbol_sync_provider: str = Field(default="")
+    celery_beat_watchlist_candle_sync_enabled: bool = Field(default=False)
+    celery_beat_watchlist_candle_sync_hour: int = Field(default=2, ge=0, le=23)
+    celery_beat_watchlist_candle_sync_minute: int = Field(default=0, ge=0, le=59)
+    celery_beat_watchlist_candle_sync_market: str = Field(default="CN")
+    celery_beat_watchlist_candle_sync_timeframe: str = Field(default="1d")
+    celery_beat_watchlist_candle_sync_limit: int = Field(default=120, ge=1, le=1000)
+    celery_beat_watchlist_candle_sync_adjust_type: str = Field(default="none")
+    celery_beat_watchlist_candle_sync_source: str = Field(default="baostock")
+    celery_beat_watchlist_candle_sync_fallback_sources: str = Field(default="tushare")
+    celery_beat_watchlist_candle_sync_max_symbols: int = Field(default=300, ge=1, le=5000)
+    celery_beat_watchlist_candle_sync_batch_size: int = Field(default=50, ge=1, le=500)
+    celery_beat_watchlist_candle_sync_stale_after_days: int = Field(default=3, ge=0, le=365)
+    celery_beat_watchlist_candle_sync_max_retries: int = Field(default=2, ge=0, le=5)
     celery_beat_daily_report_enabled: bool = Field(default=False)
     celery_beat_daily_report_hour: int = Field(default=18, ge=0, le=23)
     celery_beat_daily_report_minute: int = Field(default=0, ge=0, le=59)
@@ -148,6 +161,7 @@ class Settings(BaseSettings):
         # APP_ENV_FILE 让同一套代码可以在开发、测试、生产环境读取不同 env 文件。
         env_file=getenv("APP_ENV_FILE", ".env"),
         env_file_encoding="utf-8",
+        env_ignore_empty=True,
         case_sensitive=False,
         extra="ignore",
     )

@@ -520,6 +520,34 @@ disclaimer
 | `POST /user-memories/{memory_id}/deactivate` | 停用记忆 |
 | `POST /user-memory-retrieval/search` | 相似记忆检索 |
 
+
+#### `watchlist_candle_sync` 自选股 K 线同步任务
+
+该任务用于后台批量刷新自选股日 K 线，不做全市场 K 线同步。它适合由 Celery Beat 定时提交，也可以通过后台任务接口由管理员或开发者手动提交。
+
+常用 payload 字段：
+
+| 字段 | 示例 | 说明 |
+| ---- | ---- | ---- |
+| `market` | `CN` | 同步哪个市场的自选股 |
+| `timeframe` | `1d` | 当前主链路用于日 K 线 |
+| `limit` | `120` | 每只股票最多拉取的 K 线数量 |
+| `adjust_type` | `none` | 复权类型 |
+| `source` | `baostock` | 主同步 Provider |
+| `fallback_sources` | `["tushare"]` | 主 Provider 失败时的备用 Provider 列表 |
+| `max_symbols` | `300` | 单次任务最多处理多少只自选股 |
+| `batch_size` | `50` | 批处理大小，避免一次任务过大 |
+| `stale_after_days` | `3` | 数据超过多少天才认为过旧，需要重新同步 |
+
+设计边界：
+
+```text
+1. 股票基础信息可以低频全量同步；
+2. K 线数据只同步自选股、最近分析股票或明确指定股票；
+3. 查询行情时优先读取数据库；
+4. Provider 主要用于后台同步或数据库缺失兜底；
+5. Tushare 有额度限制，生产环境不应在用户请求中高频调用。
+```
 ## 九、日报与量化提醒
 
 ### 每日简报

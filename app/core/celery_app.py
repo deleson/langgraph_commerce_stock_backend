@@ -46,6 +46,16 @@ def build_beat_schedule(settings: Settings) -> dict[str, dict]:
             ),
         }
 
+    if getattr(settings, "celery_beat_watchlist_candle_sync_enabled", False):
+        # 自选股日 K 只同步用户关注过的股票，避免全市场 K 线同步带来 Provider 压力。
+        beat_schedule["scheduled-watchlist-candle-sync"] = {
+            "task": "background_tasks.submit_scheduled_watchlist_candle_sync",
+            "schedule": crontab(
+                hour=settings.celery_beat_watchlist_candle_sync_hour,
+                minute=settings.celery_beat_watchlist_candle_sync_minute,
+            ),
+        }
+
     if settings.celery_beat_daily_report_enabled:
         # 每日简报可能触发 AI 润色，生产开启前需要确认额度和通知策略。
         beat_schedule["scheduled-daily-reports"] = {

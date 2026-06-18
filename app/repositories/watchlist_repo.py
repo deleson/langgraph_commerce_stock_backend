@@ -99,6 +99,37 @@ class AsyncWatchlistRepository:
         result = await self.db.execute(stmt)
         return list(result.scalars().all())
 
+    async def list_distinct_symbols(
+        self,
+        *,
+        market: str | None = None,
+        limit: int | None = None,
+    ) -> list[tuple[str, str]]:
+        """读取所有自选股中去重后的 market + symbol。
+
+        K 线批量同步只能面向用户关注过的股票池，不能从 market_symbols 全市场表
+        扫描，否则会把低频维护任务放大成不可控的全市场同步。
+        """
+
+        stmt = select(
+            WatchlistItem.market,
+            WatchlistItem.symbol,
+        ).distinct()
+
+        if market is not None:
+            stmt = stmt.where(WatchlistItem.market == market)
+
+        stmt = stmt.order_by(WatchlistItem.market.asc(), WatchlistItem.symbol.asc())
+
+        if limit is not None:
+            stmt = stmt.limit(limit)
+
+        result = await self.db.execute(stmt)
+        return [
+            (row.market, row.symbol)
+            for row in result.all()
+        ]
+
     async def get_by_id_for_user(
         self,
         *,

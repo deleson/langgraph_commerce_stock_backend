@@ -459,3 +459,41 @@ async def test_submit_background_task_invalid_payload_type_returns_422(
     )
 
     assert response.status_code == 422
+
+
+async def test_submit_watchlist_candle_sync_background_task_success(
+    async_client: AsyncClient,
+    auth_headers: dict[str, str],
+    mock_celery_send_task: list[dict],
+) -> None:
+    response = await async_client.post(
+        f"{API_PREFIX}/background-tasks",
+        json={
+            "task_type": "watchlist_candle_sync",
+            "payload": {
+                "market": "CN",
+                "timeframe": "1d",
+                "limit": 120,
+                "adjust_type": "none",
+                "source": "mock",
+                "fallback_sources": ["mock"],
+                "max_symbols": 300,
+                "batch_size": 50,
+                "stale_after_days": 3,
+            },
+            "priority": "normal",
+            "source": "api",
+            "max_retries": 2,
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 202
+
+    data = response.json()["data"]
+    assert data["task_type"] == "watchlist_candle_sync"
+    assert data["status"] == "queued"
+    assert mock_celery_send_task[-1] == {
+        "name": "background_tasks.dispatch_background_task",
+        "args": [data["task_id"]],
+    }

@@ -50,6 +50,7 @@ class MarketDataSyncService:
         db: AsyncSession,
         *,
         provider: MarketDataProvider | None = None,
+        provider_name: str | None = None,
         repository: AsyncMarketRepository | None = None,
         sync_repository: AsyncMarketDataSyncRepository | None = None,
         quality_service: MarketDataQualityService | None = None,
@@ -58,7 +59,7 @@ class MarketDataSyncService:
         self.repository = repository or AsyncMarketRepository(db)
         self.sync_repository = sync_repository or AsyncMarketDataSyncRepository(db)
         self.quality_service = quality_service or MarketDataQualityService()
-        self.provider = provider or self._build_provider()
+        self.provider = provider or self._build_provider(provider_name)
 
     async def sync_symbol(
         self,
@@ -386,29 +387,41 @@ class MarketDataSyncService:
     ) -> int:
         return max(int((finished_at - started_at).total_seconds() * 1000), 0)
 
-    def _build_provider(
-        self,
+    @classmethod
+    def build_provider(
+        cls,
+        provider_name: str | None = None,
     ) -> MarketDataProvider:
-        """根据配置选择生产实际使用的行情 Provider。
+        """按名称构造行情 Provider。
 
-        目前真实接入支持 mock / baostock / tushare。这里故意做白名单判断，
-        避免 .env 里误写了未实现 Provider 后，系统静默使用错误数据源。
+        单股任务、批量任务和查询兜底都通过这里创建 Provider，避免各处自己解析
+        .env。这里继续使用白名单，防止配置里写了尚未实现的数据源后静默跑错。
         """
 
         settings = get_settings()
-        provider_name = settings.market_data_primary_provider.strip().lower()
+        resolved_provider_name = (
+            provider_name or settings.market_data_primary_provider
+        ).strip().lower()
 
-        if provider_name == "mock":
+        if resolved_provider_name == "mock":
             return MockMarketDataProvider()
 
-        if provider_name == "baostock":
+        if resolved_provider_name == "baostock":
             if not settings.baostock_enabled:
                 raise BadRequestException(message="baostock provider is disabled")
             return BaoStockProvider()
 
-        if provider_name == "tushare":
+        if resolved_provider_name == "tushare":
             if not settings.tushare_enabled:
                 raise BadRequestException(message="tushare provider is disabled")
             return TushareProvider()
 
-        raise BadRequestException(message=f"unsupported market data provider: {provider_name}")
+        raise BadRequestException(
+            message=f"unsupported market data provider: {resolved_provider_name}"
+        )
+
+    def _build_provider(
+        self,
+        provider_name: str | None = None,
+    ) -> MarketDataProvider:
+        return self.build_provider(provider_name)

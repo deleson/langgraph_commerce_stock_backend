@@ -24,6 +24,7 @@ from app.repositories.background_task_repo import AsyncBackgroundTaskRepository
 from app.schemas.background_task import (
     BackgroundTaskCreateRequest,
     MarketDataSyncTaskPayload,
+    WatchlistCandleSyncTaskPayload,
     PaperTradingTickTaskPayload,
     QuantAlertScanTaskPayload,
     StockAnalysisAsyncTaskPayload,
@@ -42,6 +43,7 @@ from app.services.ai_usage_token_service import (
 )
 from app.services.market_data_sync_service import MarketDataSyncService
 from app.services.market_symbol_sync_service import MarketSymbolSyncService
+from app.services.watchlist_candle_sync_service import WatchlistCandleSyncService
 from app.services.user_memory_embedding_service import UserMemoryEmbeddingService
 from app.services.user_profile_service import UserProfileService
 from app.repositories.user_repo import AsyncUserRepository
@@ -102,6 +104,11 @@ def submit_scheduled_market_data_sync() -> dict[str, object]:
 def submit_scheduled_market_symbol_sync() -> dict[str, object]:
     loop = _get_worker_event_loop()
     return loop.run_until_complete(_submit_scheduled_market_symbol_sync_async())
+
+@celery_app.task(name="background_tasks.submit_scheduled_watchlist_candle_sync")
+def submit_scheduled_watchlist_candle_sync() -> dict[str, object]:
+    loop = _get_worker_event_loop()
+    return loop.run_until_complete(_submit_scheduled_watchlist_candle_sync_async())
 
 @celery_app.task(name="background_tasks.submit_scheduled_daily_reports")
 def submit_scheduled_daily_reports() -> dict[str, object]:
@@ -209,6 +216,65 @@ async def _submit_scheduled_market_symbol_sync_async() -> dict[str, object]:
         "canonical_skipped": summary.canonical_skipped,
         "error_message": summary.error_message,
     }
+
+async def _submit_scheduled_watchlist_candle_sync_async() -> dict[str, object]:
+    """由 Celery Beat 提交自选股日 K 批量同步任务。
+
+    Beat 不直接跑同步，先创建 background_tasks 记录，再交给统一 dispatch，
+    这样任务状态、重试和结果都能被 API 查询。
+    """
+
+    settings = get_settings()
+
+    payload = WatchlistCandleSyncTaskPayload(
+        market=settings.celery_beat_watchlist_candle_sync_market,
+        timeframe=settings.celery_beat_watchlist_candle_sync_timeframe,
+        limit=settings.celery_beat_watchlist_candle_sync_limit,
+        adjust_type=settings.celery_beat_watchlist_candle_sync_adjust_type,
+        source=settings.celery_beat_watchlist_candle_sync_source,
+        fallback_sources=settings.celery_beat_watchlist_candle_sync_fallback_sources,
+        max_symbols=settings.celery_beat_watchlist_candle_sync_max_symbols,
+        batch_size=settings.celery_beat_watchlist_candle_sync_batch_size,
+        stale_after_days=settings.celery_beat_watchlist_candle_sync_stale_after_days,
+    )
+
+    request = BackgroundTaskCreateRequest(
+        task_type="watchlist_candle_sync",
+        payload=payload.model_dump(mode="json"),
+        priority="normal",
+        source="scheduler",
+        max_retries=settings.celery_beat_watchlist_candle_sync_max_retries,
+    )
+
+    async with AsyncSessionLocal() as db:
+        repository = AsyncBackgroundTaskRepository(db)
+        task = await repository.create_task(
+            payload=request,
+            user_id=None,
+        )
+
+        async_result = celery_app.send_task(
+            "background_tasks.dispatch_background_task",
+            args=[task.id],
+        )
+
+        queued_task = await repository.mark_queued(
+            task=task,
+            celery_task_id=async_result.id,
+        )
+
+        return {
+            "status": "queued",
+            "reason": "scheduled_watchlist_candle_sync_submitted",
+            "task_id": queued_task.id,
+            "task_type": queued_task.task_type,
+            "celery_task_id": queued_task.celery_task_id,
+            "market": payload.market,
+            "timeframe": payload.timeframe,
+            "limit": payload.limit,
+            "source": payload.source,
+            "fallback_sources": payload.fallback_sources,
+        }
 
 async def _submit_scheduled_daily_reports_async() -> dict[str, object]:
     """由 Celery Beat 批量提交每日简报任务。
@@ -522,6 +588,13 @@ async def _dispatch_background_task_async(task_id: int) -> dict[str, object]:
 
         if running_task.task_type == "market_data_sync":
             return await _run_market_data_sync_task(
+                repository=repository,
+                task=running_task,
+                db=db,
+            )
+
+        if running_task.task_type == "watchlist_candle_sync":
+            return await _run_watchlist_candle_sync_task(
                 repository=repository,
                 task=running_task,
                 db=db,
@@ -1712,6 +1785,126 @@ def _build_stock_analysis_async_quota_prompt(
         ]
     )
 
+async def _run_watchlist_candle_sync_task(
+    *,
+    repository: AsyncBackgroundTaskRepository,
+    task,
+    db,
+) -> dict[str, Any]:
+    """执行自选股日 K 批量同步后台任务。"""
+
+    try:
+        payload = WatchlistCandleSyncTaskPayload.model_validate(task.payload)
+        summary = await WatchlistCandleSyncService(db).sync_watchlist_candles(
+            market=payload.market,
+            timeframe=payload.timeframe,
+            limit=payload.limit,
+            adjust_type=payload.adjust_type,
+            source=payload.source,
+            fallback_sources=payload.fallback_sources,
+            max_symbols=payload.max_symbols,
+            batch_size=payload.batch_size,
+            stale_after_days=payload.stale_after_days,
+        )
+
+        result = {
+            "task_type": task.task_type,
+            "reason": "watchlist_candle_sync_completed",
+            **summary.to_result(),
+        }
+
+        if summary.status == "failed":
+            updated_task, retried = await _mark_failed_or_retry(
+                repository=repository,
+                task=task,
+                error_message="all watchlist candle sync symbols failed",
+                result=result,
+                retryable=True,
+            )
+            return {
+                "status": updated_task.status,
+                "reason": (
+                    "watchlist_candle_sync_retrying"
+                    if retried
+                    else "watchlist_candle_sync_failed"
+                ),
+                "task_id": updated_task.id,
+                "task_type": updated_task.task_type,
+                "retry_count": updated_task.retry_count,
+                "max_retries": updated_task.max_retries,
+                "will_retry": retried,
+            }
+
+        success_task = await repository.mark_success(
+            task=task,
+            result=result,
+        )
+
+        return {
+            "status": success_task.status,
+            "reason": "watchlist_candle_sync_completed",
+            "task_id": success_task.id,
+            "task_type": success_task.task_type,
+            "synced_symbol_count": summary.synced_symbol_count,
+            "skipped_symbol_count": summary.skipped_symbol_count,
+            "failed_symbol_count": summary.failed_symbol_count,
+        }
+
+    except ValidationError as exc:
+        message = _safe_error_message(exc)
+        failed_task = await repository.mark_failed(
+            task=task,
+            error_message=message,
+            result={
+                "status": "failed",
+                "reason": "invalid_watchlist_candle_sync_payload",
+                "task_type": task.task_type,
+                "will_retry": False,
+                "retry_count": task.retry_count,
+                "max_retries": task.max_retries,
+                "error_type": exc.__class__.__name__,
+            },
+        )
+
+        return {
+            "status": failed_task.status,
+            "reason": "invalid_watchlist_candle_sync_payload",
+            "task_id": failed_task.id,
+            "task_type": failed_task.task_type,
+        }
+
+    except Exception as exc:
+        message = _safe_error_message(exc)
+        error_result = {
+            "status": "failed",
+            "reason": "watchlist_candle_sync_failed",
+            "task_type": task.task_type,
+            "error_type": exc.__class__.__name__,
+            "error_message": message,
+        }
+        updated_task, retried = await _mark_failed_or_retry(
+            repository=repository,
+            task=task,
+            error_message=message,
+            result=error_result,
+            retryable=True,
+        )
+
+        return {
+            "status": updated_task.status,
+            "reason": (
+                "watchlist_candle_sync_retrying"
+                if retried
+                else "watchlist_candle_sync_failed"
+            ),
+            "task_id": updated_task.id,
+            "task_type": updated_task.task_type,
+            "retry_count": updated_task.retry_count,
+            "max_retries": updated_task.max_retries,
+            "will_retry": retried,
+        }
+
+
 async def _run_market_data_sync_task(
     *,
     repository: AsyncBackgroundTaskRepository,
@@ -1727,7 +1920,10 @@ async def _run_market_data_sync_task(
     try:
         payload = MarketDataSyncTaskPayload.model_validate(task.payload)
 
-        candles = await MarketDataSyncService(db).sync_candles(
+        candles = await MarketDataSyncService(
+            db,
+            provider_name=payload.source,
+        ).sync_candles(
             symbol=payload.symbol,
             market=payload.market,
             timeframe=payload.timeframe,
@@ -1748,8 +1944,8 @@ async def _run_market_data_sync_task(
             "first_candle_time": candles[0].candle_time.isoformat() if candles else None,
             "last_candle_time": candles[-1].candle_time.isoformat() if candles else None,
             "note": (
-                "第一版后台市场数据同步复用 MarketDataSyncService；"
-                "source / start_date / end_date / force_refresh 暂作为参数预留"
+                "后台市场数据同步按 payload.source 构造 Provider；"
+                "start_date / end_date / force_refresh 暂作为参数预留"
             ),
         }
 

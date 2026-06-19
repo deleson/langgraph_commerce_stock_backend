@@ -45,14 +45,16 @@ async def login_user(
     db: AsyncDBSession,
 ):
     auth_service = AsyncAuthService(db)
-    user = await auth_service.authenticate_user(payload)
-    access_token, refresh_token = await auth_service.issue_token_pair(user)
+    token_pair = await auth_service.login_user(payload)
 
     return success_response(
         data=TokenPairResponse(
-            access_token=access_token,
-            refresh_token=refresh_token,
+            access_token=token_pair.access_token,
+            refresh_token=token_pair.refresh_token,
             token_type="bearer",
+            session_id=token_pair.session_id,
+            device_category=token_pair.device_category,
+            replaced_sessions_count=token_pair.replaced_sessions_count,
         )
     )
 

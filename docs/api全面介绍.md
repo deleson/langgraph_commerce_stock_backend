@@ -132,19 +132,38 @@ Authorization: Bearer <access_token>
 
 请求体：
 
-| 字段 | 类型 | 说明 |
-| ---- | ---- | ---- |
-| `email` | Email | 登录邮箱 |
-| `password` | string | 8 到 128 个字符 |
+| 字段 | 类型 | 必填 | 说明 |
+| ---- | ---- | ---- | ---- |
+| `email` | Email | 是 | 登录邮箱 |
+| `password` | string | 是 | 8 到 128 个字符 |
+| `platform` | string | 否 | 设备平台：`android`、`ios`、`web`、`unknown`，Android App 建议固定传 `android` |
+| `device_fingerprint` | string | 否 | 前端生成并持久保存的设备指纹，后端只保存 hash，不保存原文 |
+| `device_name` | string | 否 | 设备名称，例如手机型号或浏览器名称 |
+| `push_token` | string | 否 | 推送 token；有值时后端会登记或更新设备信息 |
+| `app_version` | string | 否 | App 版本号，便于排查兼容问题 |
 
 响应：
 
 | 字段 | 说明 |
 | ---- | ---- |
-| `access_token` | 短期访问 token |
-| `refresh_token` | 刷新 token |
+| `access_token` | 短期访问 token，payload 中绑定本次 `session_id` |
+| `refresh_token` | 刷新 token，服务端只保存 hash |
 | `token_type` | 固定为 `bearer` |
+| `session_id` | 服务端登录会话 ID |
+| `device_category` | 设备类别：`mobile`、`web`、`unknown` |
+| `replaced_sessions_count` | 本次登录替换的旧同类设备会话数量 |
 
+登录会话规则：
+
+```text
+android / ios 归类为 mobile；
+web 归类为 web；
+同一账号在同一 device_category 下只保留一个有效 session；
+新同类设备登录后，旧同类 session 会被撤销，旧 access token 即使未自然过期也会失效；
+mobile 与 web 不互踢，可以同时保持登录。
+```
+
+旧设备继续请求受保护接口时，后端会返回 401，错误信息中可能包含 `replaced_by_same_category_login`，前端应提示“账号已在另一台同类设备登录”，然后清空本地 token 并跳转登录页。
 ### `POST /auth/refresh`
 
 请求体：`refresh_token`。

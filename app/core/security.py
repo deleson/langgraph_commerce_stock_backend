@@ -1,28 +1,22 @@
 """认证安全工具。
 
-该文件封装密码强度校验、密码哈希、JWT access token 创建 / 解析、
-refresh token 生成与哈希逻辑。AuthService 和认证依赖会使用这里的函数。
-
-注意：
-生产环境的 JWT_SECRET_KEY 必须保密且足够随机；正式公开访问前应配置 HTTPS，
-避免 token 在网络传输中被窃取。
+封装密码强度校验、密码哈希、JWT access token 创建 / 解析、refresh token
+生成与哈希逻辑。AuthService 和认证依赖会使用这里的函数。
 """
 
-from datetime import UTC,datetime,timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
-
-from jose import JWTError,jwt
-from pwdlib import PasswordHash
-
-
-from app.core.config import get_settings
-from app.core.exceptions import BadRequestException,UnauthorizedException
-from app.schemas.auth import TokenPayload
+from uuid import uuid4
 
 import hashlib
 import secrets
 
-from uuid import uuid4
+from jose import JWTError, jwt
+from pwdlib import PasswordHash
+
+from app.core.config import get_settings
+from app.core.exceptions import BadRequestException, UnauthorizedException
+from app.schemas.auth import TokenPayload
 
 password_hash = PasswordHash.recommended()
 settings = get_settings()
@@ -31,24 +25,19 @@ MIN_PASSWORD_LENGTH = 8
 MAX_PASSWORD_LENGTH = 128
 
 
-
-def validate_password_strength(password:str) -> None:
-    """校验用户密码的基础强度。
-
-    当前第一版只做长度和空白密码限制，避免明显弱密码进入哈希流程。
-    更严格的复杂度要求可以在后续安全加固阶段补充。
-    """
+def validate_password_strength(password: str) -> None:
+    """校验用户密码的基础强度。"""
 
     if len(password) < MIN_PASSWORD_LENGTH:
         raise BadRequestException(
             message=f"password must be at least {MIN_PASSWORD_LENGTH} characters long",
-            details=[{"field":"password","reason":"password is too short"}]
+            details=[{"field": "password", "reason": "password is too short"}],
         )
 
     if len(password) > MAX_PASSWORD_LENGTH:
         raise BadRequestException(
             message=f"password must be at most {MAX_PASSWORD_LENGTH} characters long",
-            details=[{"field":"password","reason":"password is too long"}]
+            details=[{"field": "password", "reason": "password is too long"}],
         )
 
     if password.isspace():
@@ -58,32 +47,38 @@ def validate_password_strength(password:str) -> None:
         )
 
 
-def hash_password(password:str) -> str:
-    """校验并哈希明文密码。
-
-    数据库只保存哈希后的密码，不能保存用户明文密码。
-    """
+def hash_password(password: str) -> str:
+    """校验并哈希明文密码。"""
 
     validate_password_strength(password)
     return password_hash.hash(password)
 
-def verify_password(plain_password:str,hashed_password:str) -> bool:
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
     """校验明文密码是否匹配数据库中的密码哈希。"""
 
-    return password_hash.verify(plain_password,hashed_password)
+    return password_hash.verify(plain_password, hashed_password)
+
+
+def generate_access_token_jti() -> str:
+    """生成 access token 的唯一 jti，便于黑名单和会话追踪。"""
+
+    return uuid4().hex
 
 
 def create_access_token(
-        *,
-        subject:str,
-        user_id:int,
-        is_superuser:bool,
-        expires_delta:timedelta | None = None,
+    *,
+    subject: str,
+    user_id: int,
+    is_superuser: bool,
+    session_id: int | None = None,
+    jti: str | None = None,
+    expires_delta: timedelta | None = None,
 ) -> str:
     """创建 JWT access token。
 
-    access token 用于后续请求鉴权，payload 中包含用户标识、超级用户标记、
-    唯一 jti 和过期时间。业务接口通过解析 token 确认当前用户身份。
+    session_id 让短期 access token 也能和服务端 user_sessions 绑定。这样当同类
+    设备新登录撤销旧 session 后，旧 access token 即使还未自然过期，也会被拒绝。
     """
 
     expire = datetime.now(UTC) + (
@@ -92,49 +87,43 @@ def create_access_token(
         else timedelta(minutes=settings.jwt_access_token_expire_minutes)
     )
 
-    payload:dict[str,Any] = {
+    payload: dict[str, Any] = {
         "sub": subject,
         "user_id": user_id,
         "is_superuser": is_superuser,
-        "jti":uuid4().hex,
-        "exp":expire,
+        "jti": jti or generate_access_token_jti(),
+        "exp": expire,
     }
+
+    if session_id is not None:
+        payload["session_id"] = session_id
 
     return jwt.encode(
         payload,
         settings.jwt_secret_key,
         algorithm=settings.jwt_algorithm,
-
     )
 
 
-def decode_access_token(token:str) -> TokenPayload:
-    """解析并校验 JWT access token。
-
-    token 无效、过期或签名不匹配时抛出 UnauthorizedException，由统一异常
-    处理器转换为 401 响应。
-    """
+def decode_access_token(token: str) -> TokenPayload:
+    """解析并校验 JWT access token。"""
 
     try:
         payload = jwt.decode(
             token,
             settings.jwt_secret_key,
-            algorithms=[settings.jwt_algorithm]
+            algorithms=[settings.jwt_algorithm],
         )
         return TokenPayload(**payload)
     except JWTError as exc:
         raise UnauthorizedException(
-            message = "invalide or expired token",
-            details=[{"field":"authorization","reason":"token is invalid or expired"}]
+            message="invalid or expired token",
+            details=[{"field": "authorization", "reason": "token is invalid or expired"}],
         ) from exc
 
 
-
 def generate_refresh_token() -> str:
-    """生成 refresh token 明文。
-
-    refresh token 只在签发时返回给客户端，服务端数据库保存的是哈希值。
-    """
+    """生成 refresh token 明文。"""
 
     return secrets.token_urlsafe(48)
 

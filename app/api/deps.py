@@ -1,8 +1,7 @@
 """API 依赖定义。
 
-该文件集中定义 Router 常用的依赖项，例如异步数据库会话、Bearer Token
-和当前登录用户。所有需要登录的接口都应通过 AsyncCurrentUser 获取用户，
-避免信任请求体中的 user_id。
+集中定义 Router 常用依赖，例如异步数据库会话、Bearer Token 和当前登录用户。
+所有需要登录的接口都应通过 AsyncCurrentUser 获取用户，避免信任请求体中的 user_id。
 """
 
 from typing import Annotated
@@ -11,11 +10,13 @@ from fastapi import Depends
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.database import get_async_db
 from app.core.exceptions import UnauthorizedException
 from app.core.security import decode_access_token
 from app.models.user import User
 from app.repositories.user_repo import AsyncUserRepository
+from app.services.session_service import AsyncSessionService
 from app.services.token_blacklist_service import TokenBlacklistService
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
@@ -30,11 +31,17 @@ async def get_current_user_async(
 ) -> User:
     """根据 JWT access token 解析当前用户。
 
-    该依赖会检查 token 是否被注销、用户是否存在以及用户状态是否可用。
-    Router 通过它拿到的 current_user 是后续用户隔离的第一道边界。
+    除了检查 token 黑名单和用户状态，本依赖还会按配置校验服务端 session。
+    这样同类设备新登录撤销旧 session 后，旧 access token 也会立即失效。
     """
 
     payload = decode_access_token(token)
+
+    if get_settings().auth_access_token_session_check_enabled:
+        await AsyncSessionService(db).validate_access_session(
+            session_id=payload.session_id,
+            user_id=payload.user_id,
+        )
 
     if TokenBlacklistService().is_access_token_blacklisted(payload.jti):
         raise UnauthorizedException(
@@ -62,5 +69,6 @@ async def get_current_user_async(
         )
 
     return user
+
 
 AsyncCurrentUser = Annotated[User, Depends(get_current_user_async)]

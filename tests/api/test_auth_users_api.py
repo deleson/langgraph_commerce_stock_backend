@@ -8,8 +8,11 @@ from collections.abc import Callable
 from uuid import uuid4
 
 from httpx import AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
+from app.models.user_session import UserSession
 
 
 API_PREFIX = "/api/v1"
@@ -296,3 +299,216 @@ async def test_update_current_user_with_existing_username_returns_conflict(
     body = response.json()
     assert body["code"] == 10009
     assert body["message"] == "username already exists"
+
+async def test_login_user_with_device_context_returns_session_metadata(
+    async_client: AsyncClient,
+    unique_email: Callable[[str], str],
+) -> None:
+    password = "TestPassword123"
+    payload = _build_register_payload(
+        unique_email,
+        prefix="login_device_context",
+        password=password,
+    )
+    register_response = await async_client.post(
+        f"{API_PREFIX}/auth/register",
+        json=payload,
+    )
+    assert register_response.status_code == 200
+
+    login_response = await async_client.post(
+        f"{API_PREFIX}/auth/login",
+        json={
+            "email": payload["email"],
+            "password": password,
+            "platform": "android",
+            "device_fingerprint": "phone-a",
+            "device_name": "Pixel 7",
+            "app_version": "1.0.0",
+        },
+    )
+
+    assert login_response.status_code == 200
+    data = login_response.json()["data"]
+    assert data["session_id"] is not None
+    assert data["device_category"] == "mobile"
+    assert data["replaced_sessions_count"] == 0
+
+
+async def test_same_mobile_login_revokes_previous_session(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+    unique_email: Callable[[str], str],
+) -> None:
+    password = "TestPassword123"
+    payload = _build_register_payload(
+        unique_email,
+        prefix="single_mobile_session",
+        password=password,
+    )
+    assert (
+        await async_client.post(f"{API_PREFIX}/auth/register", json=payload)
+    ).status_code == 200
+
+    first_login = await async_client.post(
+        f"{API_PREFIX}/auth/login",
+        json={
+            "email": payload["email"],
+            "password": password,
+            "platform": "android",
+            "device_fingerprint": "phone-a",
+        },
+    )
+    second_login = await async_client.post(
+        f"{API_PREFIX}/auth/login",
+        json={
+            "email": payload["email"],
+            "password": password,
+            "platform": "ios",
+            "device_fingerprint": "phone-b",
+        },
+    )
+
+    assert first_login.status_code == 200
+    assert second_login.status_code == 200
+    first_data = first_login.json()["data"]
+    second_data = second_login.json()["data"]
+    assert second_data["device_category"] == "mobile"
+    assert second_data["replaced_sessions_count"] == 1
+
+    old_session = await db_session.scalar(
+        select(UserSession).where(UserSession.id == first_data["session_id"])
+    )
+    assert old_session is not None
+    assert old_session.is_revoked is True
+    assert old_session.revoked_reason == "replaced_by_same_category_login"
+    assert old_session.replaced_by_session_id == second_data["session_id"]
+
+    old_access_response = await async_client.get(
+        f"{API_PREFIX}/users/me",
+        headers={"Authorization": f"Bearer {first_data['access_token']}"},
+    )
+    assert old_access_response.status_code == 401
+    old_access_body = old_access_response.json()
+    assert old_access_body["details"][0]["reason"] == "replaced_by_same_category_login"
+
+    old_refresh_response = await async_client.post(
+        f"{API_PREFIX}/auth/refresh",
+        json={"refresh_token": first_data["refresh_token"]},
+    )
+    assert old_refresh_response.status_code == 401
+    assert old_refresh_response.json()["details"][0]["reason"] == "replaced_by_same_category_login"
+
+    new_access_response = await async_client.get(
+        f"{API_PREFIX}/users/me",
+        headers={"Authorization": f"Bearer {second_data['access_token']}"},
+    )
+    assert new_access_response.status_code == 200
+
+
+async def test_mobile_and_web_sessions_can_coexist(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+    unique_email: Callable[[str], str],
+) -> None:
+    password = "TestPassword123"
+    payload = _build_register_payload(
+        unique_email,
+        prefix="mobile_web_session",
+        password=password,
+    )
+    assert (
+        await async_client.post(f"{API_PREFIX}/auth/register", json=payload)
+    ).status_code == 200
+
+    mobile_login = await async_client.post(
+        f"{API_PREFIX}/auth/login",
+        json={
+            "email": payload["email"],
+            "password": password,
+            "platform": "android",
+            "device_fingerprint": "phone-a",
+        },
+    )
+    web_login = await async_client.post(
+        f"{API_PREFIX}/auth/login",
+        json={
+            "email": payload["email"],
+            "password": password,
+            "platform": "web",
+            "device_fingerprint": "browser-a",
+        },
+    )
+
+    assert mobile_login.status_code == 200
+    assert web_login.status_code == 200
+    mobile_data = mobile_login.json()["data"]
+    web_data = web_login.json()["data"]
+    assert web_data["device_category"] == "web"
+    assert web_data["replaced_sessions_count"] == 0
+
+    mobile_session = await db_session.scalar(
+        select(UserSession).where(UserSession.id == mobile_data["session_id"])
+    )
+    assert mobile_session is not None
+    assert mobile_session.is_revoked is False
+
+    mobile_response = await async_client.get(
+        f"{API_PREFIX}/users/me",
+        headers={"Authorization": f"Bearer {mobile_data['access_token']}"},
+    )
+    web_response = await async_client.get(
+        f"{API_PREFIX}/users/me",
+        headers={"Authorization": f"Bearer {web_data['access_token']}"},
+    )
+    assert mobile_response.status_code == 200
+    assert web_response.status_code == 200
+
+
+async def test_refresh_token_preserves_device_category_and_rotates_session(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+    unique_email: Callable[[str], str],
+) -> None:
+    password = "TestPassword123"
+    payload = _build_register_payload(
+        unique_email,
+        prefix="refresh_device_session",
+        password=password,
+    )
+    assert (
+        await async_client.post(f"{API_PREFIX}/auth/register", json=payload)
+    ).status_code == 200
+
+    login_response = await async_client.post(
+        f"{API_PREFIX}/auth/login",
+        json={
+            "email": payload["email"],
+            "password": password,
+            "platform": "android",
+            "device_fingerprint": "phone-a",
+        },
+    )
+    assert login_response.status_code == 200
+    login_data = login_response.json()["data"]
+
+    refresh_response = await async_client.post(
+        f"{API_PREFIX}/auth/refresh",
+        json={"refresh_token": login_data["refresh_token"]},
+    )
+    assert refresh_response.status_code == 200
+
+    old_session = await db_session.scalar(
+        select(UserSession).where(UserSession.id == login_data["session_id"])
+    )
+    assert old_session is not None
+    assert old_session.is_revoked is True
+    assert old_session.revoked_reason == "refresh_rotated"
+
+    # 轮换后的新 access token 仍然能访问受保护接口。
+    refreshed_data = refresh_response.json()["data"]
+    response = await async_client.get(
+        f"{API_PREFIX}/users/me",
+        headers={"Authorization": f"Bearer {refreshed_data['access_token']}"},
+    )
+    assert response.status_code == 200

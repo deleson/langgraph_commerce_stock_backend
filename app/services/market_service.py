@@ -550,6 +550,23 @@ class MarketService:
                 providers.append(normalized)
         return providers or [settings.market_data_primary_provider.strip().lower()]
 
+    async def get_market_snapshot(
+        self,
+        *,
+        symbol: str,
+        market: MarketCode,
+    ) -> MarketSnapshot:
+        """读取真实数据库行情快照，缺失时再走 Mock 兼容降级。
+
+        详情页和 AI 主分析都需要同一套行情事实。统一复用这里，避免 AI 图仍然只看
+        MockMarketDataService，导致真实 A 股在详情页可用、AI 分析却 404。
+        """
+
+        return await self._get_market_snapshot(
+            symbol=symbol,
+            market=market,
+        )
+
     async def _get_quote_from_db(
         self,
         symbol: str,

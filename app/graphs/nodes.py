@@ -59,6 +59,13 @@ def load_market_data_node(state: StockAnalysisState) -> StockAnalysisState:
     if symbol is None or market is None:
         raise BadRequestException(message="symbol and market are required")
 
+    existing_snapshot = state.get("market_snapshot")
+    if existing_snapshot is not None:
+        return {
+            "symbol": existing_snapshot.symbol,
+            "market_snapshot": existing_snapshot,
+        }
+
     market_snapshot = MockMarketDataService().get_snapshot(
         symbol=symbol,
         market=market,

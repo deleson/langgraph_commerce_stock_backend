@@ -35,6 +35,7 @@ from app.schemas.stock_analysis import (
     StockAnalysisQualityContext,
     StockAnalysisRequest,
     StockAnalysisResponse,
+    MarketSnapshot,
 )
 from app.schemas.technical_indicator import TechnicalIndicatorResponse
 from app.services.analysis_record_service import (
@@ -43,6 +44,7 @@ from app.services.analysis_record_service import (
 )
 from app.schemas.user_memory_embedding import UserMemoryRetrievalRequest
 from app.services.market_data_quality_report_service import MarketDataQualityReportService
+from app.services.market_service import MarketService
 from app.services.notification_service import (
     AsyncNotificationService,
     NotificationService,
@@ -190,6 +192,7 @@ class AsyncStockAnalysisService:
         self.notification_service = AsyncNotificationService(db)
         self.user_preference_service = AsyncUserPreferenceService(db)
         self.quality_report_service = MarketDataQualityReportService(db)
+        self.market_service = MarketService(db)
         self.technical_indicator_query_service = TechnicalIndicatorQueryService(db)
         self.strategy_signal_query_service = StrategySignalQueryService(db)
         self.conversation_service = AnalysisConversationService(db)
@@ -216,6 +219,10 @@ class AsyncStockAnalysisService:
         )
 
         quality_context = await self._load_quality_context(
+            symbol=payload.symbol,
+            market=payload.market,
+        )
+        market_snapshot = await self._load_market_snapshot_context(
             symbol=payload.symbol,
             market=payload.market,
         )
@@ -247,6 +254,7 @@ class AsyncStockAnalysisService:
             "analysis_type": payload.analysis_type,
             "risk_preference": preference.risk_preference,
             "quality_context": quality_context,
+            "market_snapshot": market_snapshot,
             "technical_indicators": technical_indicators,
             "strategy_signal": strategy_signal,
             "user_profile_context": user_profile_context,
@@ -454,6 +462,26 @@ class AsyncStockAnalysisService:
             warnings=data_quality.warnings,
             errors=data_quality.errors,
         )
+
+    async def _load_market_snapshot_context(
+        self,
+        *,
+        symbol: str,
+        market: str,
+    ) -> MarketSnapshot | None:
+        try:
+            return await self.market_service.get_market_snapshot(
+                symbol=symbol,
+                market=market,
+            )
+        except Exception:
+            # AI 主分析不能因为旧 Mock 快照缺少真实 A 股而直接 404；
+            # 后续图节点会根据数据质量走降级或不可用路线。
+            logger.exception(
+                "load market snapshot context failed",
+                extra={"symbol": symbol, "market": market},
+            )
+            return None
 
     async def _load_technical_indicators_context(
         self,

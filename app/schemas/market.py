@@ -44,6 +44,8 @@ class MarketStockSearchItem(BaseModel):
     currency: str
     exchange: str | None = None
     source: str | None = None
+    has_daily_candles: bool | None = None
+    latest_candle_time: datetime | None = None
 
 
 class MarketQuoteResponse(BaseModel):

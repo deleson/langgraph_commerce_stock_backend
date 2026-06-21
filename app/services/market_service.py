@@ -89,20 +89,14 @@ class MarketService:
                     keyword=keyword,
                     market=market,
                 )
-                return [
-                    self._build_search_item_from_model(symbol)
-                    for symbol in db_symbols
-                ]
+                return await self._build_search_items_from_models(db_symbols)
 
         provider_symbols = await self._search_symbols_from_provider(
             keyword=keyword,
             market=market,
         )
         if provider_symbols:
-            return [
-                self._build_search_item_from_model(symbol)
-                for symbol in provider_symbols
-            ]
+            return await self._build_search_items_from_models(provider_symbols)
 
         if self.repository is not None and not self._should_use_mock_search_fallback():
             return []
@@ -680,9 +674,38 @@ class MarketService:
             market=market,
         )
 
+    async def _build_search_items_from_models(
+        self,
+        symbols: list[MarketSymbol],
+    ) -> list[MarketStockSearchItem]:
+        """构建搜索结果，并附带日 K 是否已入库的轻量提示。
+
+        股票基础信息和 K 线是两类不同数据。搜索能命中基础信息，不代表详情页一定有日 K。
+        这里批量读取最新日 K 时间，让前端可以提前提示“暂无日 K”，减少用户点进详情才失败的困惑。
+        """
+
+        latest_candle_times: dict[tuple[str, str], datetime] = {}
+        if self.repository is not None:
+            keys = {(symbol.market, symbol.symbol) for symbol in symbols}
+            latest_candle_times = await self.repository.list_latest_candle_times(
+                keys=keys,
+                timeframe="1d",
+                adjust_type="none",
+            )
+
+        return [
+            self._build_search_item_from_model(
+                symbol,
+                latest_candle_time=latest_candle_times.get((symbol.market, symbol.symbol)),
+            )
+            for symbol in symbols
+        ]
+
     def _build_search_item_from_model(
         self,
         symbol: MarketSymbol,
+        *,
+        latest_candle_time: datetime | None = None,
     ) -> MarketStockSearchItem:
         return MarketStockSearchItem(
             symbol=symbol.symbol,
@@ -691,6 +714,8 @@ class MarketService:
             currency=symbol.currency,
             exchange=symbol.exchange,
             source=symbol.source,
+            has_daily_candles=latest_candle_time is not None,
+            latest_candle_time=latest_candle_time,
         )
 
     def _build_candle_response(

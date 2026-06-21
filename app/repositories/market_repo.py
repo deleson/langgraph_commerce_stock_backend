@@ -8,7 +8,7 @@ from collections.abc import Sequence
 
 from datetime import UTC, datetime
 
-from sqlalchemy import select, tuple_
+from sqlalchemy import func, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.market_candle import MarketCandle
@@ -295,6 +295,38 @@ class AsyncMarketRepository:
         if data.get("last_synced_at") is None and data.get("sync_status") == "success":
             data["last_synced_at"] = datetime.now(UTC)
         return data
+
+    async def list_latest_candle_times(
+        self,
+        *,
+        keys: set[tuple[str, str]],
+        timeframe: str = "1d",
+        adjust_type: str = "none",
+    ) -> dict[tuple[str, str], datetime]:
+        """按 market + symbol 批量读取最新 K 线时间，用于搜索结果提示详情可用性。"""
+
+        if not keys:
+            return {}
+
+        stmt = (
+            select(
+                MarketCandle.market,
+                MarketCandle.symbol,
+                func.max(MarketCandle.candle_time),
+            )
+            .where(
+                tuple_(MarketCandle.market, MarketCandle.symbol).in_(keys),
+                MarketCandle.timeframe == timeframe,
+                MarketCandle.adjust_type == adjust_type,
+            )
+            .group_by(MarketCandle.market, MarketCandle.symbol)
+        )
+        result = await self.db.execute(stmt)
+        return {
+            (market, symbol): latest_time
+            for market, symbol, latest_time in result.all()
+            if latest_time is not None
+        }
 
     async def get_candle(
         self,

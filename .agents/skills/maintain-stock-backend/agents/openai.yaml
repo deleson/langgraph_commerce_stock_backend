@@ -1,0 +1,4 @@
+interface:
+  display_name: "Maintain Stock Backend"
+  short_description: "Maintain APIs, data flows, AI graphs, and scheduled jobs"
+  default_prompt: "Use $maintain-stock-backend to inspect and implement this backend task against the current code and documentation."

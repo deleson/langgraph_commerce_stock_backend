@@ -15,11 +15,11 @@ class AppException(Exception):
     """
 
     def __init__(
-            self,
-            message:str,
-            code:int=10000,
-            status_code:int=400,
-            details:list[dict[str,Any]] | None =None,
+        self,
+        message:str,
+        code:int=10000,
+        status_code:int=400,
+        details:list[dict[str,Any]] | None =None,
     ) -> None:
         self.message =message
         self.code = code

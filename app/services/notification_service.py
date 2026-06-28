@@ -10,8 +10,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import NotFoundException
 from app.models.notification import Notification
 from app.models.user import User
-from app.repositories.notification_repo import NotificationRepository,AsyncNotificationRepository
-from app.schemas.notification import NotificationCreateRequest
+from app.repositories.analysis_record_repo import AsyncAnalysisRecordRepository
+from app.repositories.daily_report_repo import AsyncDailyReportRepository
+from app.repositories.notification_repo import (
+    AsyncNotificationRepository,
+    NotificationRepository,
+)
+from app.schemas.analysis_record import AnalysisRecordResponse
+from app.schemas.daily_report import DailyReportResponse
+from app.schemas.notification import (
+    NotificationCreateRequest,
+    NotificationDetailResponse,
+    NotificationResponse,
+)
 
 
 class NotificationService:
@@ -98,6 +109,8 @@ class AsyncNotificationService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self.notification_repo = AsyncNotificationRepository(db)
+        self.analysis_record_repo = AsyncAnalysisRecordRepository(db)
+        self.daily_report_repo = AsyncDailyReportRepository(db)
 
     async def list_my_notifications(
             self,
@@ -134,6 +147,48 @@ class AsyncNotificationService:
             )
 
         return notification
+
+    async def get_my_notification_detail(
+            self,
+            *,
+            user: User,
+            notification_id: int,
+    ) -> NotificationDetailResponse:
+        notification = await self.get_my_notification(
+            user=user,
+            notification_id=notification_id,
+        )
+
+        analysis_record = None
+        daily_report = None
+        if notification.notification_type == "analysis_completed" and notification.related_record_id:
+            record = await self.analysis_record_repo.get_by_id_for_user(
+                record_id=notification.related_record_id,
+                user_id=user.id,
+            )
+            if record is not None:
+                analysis_record = AnalysisRecordResponse.model_validate(record)
+
+        if notification.notification_type == "daily_report":
+            if notification.related_record_id:
+                report = await self.daily_report_repo.get_report(
+                    report_id=notification.related_record_id,
+                    user_id=user.id,
+                )
+            else:
+                report = await self.daily_report_repo.get_report_by_notification_id(
+                    notification_id=notification.id,
+                    user_id=user.id,
+                )
+            if report is not None:
+                daily_report = DailyReportResponse.model_validate(report)
+
+        base_notification = NotificationResponse.model_validate(notification)
+        return NotificationDetailResponse(
+            **base_notification.model_dump(),
+            analysis_record=analysis_record,
+            daily_report=daily_report,
+        )
 
     async def create_notification(
             self,

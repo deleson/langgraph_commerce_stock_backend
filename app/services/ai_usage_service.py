@@ -198,14 +198,18 @@ class AIUsageService:
 
     async def record_usage(self, payload: AIUsageLogCreate):
         usage_log = await self.repo.create_usage_log(payload)
+        account = await self.repo.get_or_create_quota_account(user_id=payload.user_id)
+        timezone_name = account.timezone or self.DEFAULT_TIMEZONE
 
         await self._increment_period_summary(
             payload=payload,
             period_type="day",
+            timezone_name=timezone_name,
         )
         await self._increment_period_summary(
             payload=payload,
             period_type="month",
+            timezone_name=timezone_name,
         )
 
         return usage_log
@@ -215,11 +219,12 @@ class AIUsageService:
         *,
         payload: AIUsageLogCreate,
         period_type: str,
+        timezone_name: str,
     ) -> None:
         period_start, period_end = self._build_period_range(
             timestamp=payload.started_at,
             period_type=period_type,
-            timezone_name=self.DEFAULT_TIMEZONE,
+            timezone_name=timezone_name,
         )
 
         summary = await self.repo.get_or_create_usage_summary(

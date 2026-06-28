@@ -8,7 +8,7 @@ from fastapi import APIRouter, Query
 
 from app.api.deps import AsyncCurrentUser, AsyncDBSession
 from app.schemas.common import ApiResponse
-from app.schemas.notification import NotificationResponse
+from app.schemas.notification import NotificationDetailResponse, NotificationResponse
 from app.services.notification_service import AsyncNotificationService
 from app.utils.responses import success_response
 
@@ -41,18 +41,18 @@ async def list_my_notifications(
 @router.get(
     "/{notification_id}",
     summary="Get My Notification",
-    response_model=ApiResponse[NotificationResponse],
+    response_model=ApiResponse[NotificationDetailResponse],
 )
 async def get_my_notification(
     notification_id: int,
     current_user: AsyncCurrentUser,
     db: AsyncDBSession,
 ):
-    notification = await AsyncNotificationService(db).get_my_notification(
+    detail = await AsyncNotificationService(db).get_my_notification_detail(
         user=current_user,
         notification_id=notification_id,
     )
-    return success_response(data=NotificationResponse.model_validate(notification))
+    return success_response(data=detail)
 
 
 @router.patch(

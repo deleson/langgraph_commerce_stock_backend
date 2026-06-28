@@ -707,3 +707,19 @@ GET /paper-trading/accounts/{account_id}/runs/{run_id}
 4. `warnings` 和 `disclaimer` 不应被忽略。
 5. 用户不能访问其他用户资源，404/403 不应引导用户猜测资源 ID。
 ```
+## 接口行为补充：通知详情与 AI 日额度
+
+### 通知详情关联内容
+
+GET /notifications/{notification_id} 在基础通知字段之外，会按通知类型返回关联业务内容：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| analysis_record | object / null | analysis_completed 通知关联的完整分析记录和 result_snapshot |
+| daily_report | object / null | daily_report 通知关联的完整日报、章节、股票快照、警告和免责声明 |
+
+旧日报通知如果没有 related_record_id，后端会通过 daily_reports.notification_id 兼容查找。读取详情本身不修改状态；前端打开详情后应继续调用 PATCH /notifications/{notification_id}/read，该接口保持幂等。
+
+### AI 日额度时区
+
+AI 日额度和月额度均按额度账户的 timezone 计算周期，默认使用 Asia/Shanghai。用量记录和额度查询必须使用同一时区，避免 UTC 日期与北京时间日期不一致时出现“月额度减少但今日额度未减少”。

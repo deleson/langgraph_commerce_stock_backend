@@ -50,6 +50,19 @@ class AsyncDailyReportRepository:
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_report_by_notification_id(
+        self,
+        *,
+        notification_id: int,
+        user_id: int,
+    ) -> DailyReport | None:
+        stmt = select(DailyReport).where(
+            DailyReport.notification_id == notification_id,
+            DailyReport.user_id == user_id,
+        )
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def get_report_by_date(
         self,
         *,

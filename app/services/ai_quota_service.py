@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from datetime import date
+from collections.abc import Callable
+from datetime import UTC, date, datetime
 from decimal import Decimal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.repositories.ai_usage_repo import AsyncAIUsageRepository
 from app.schemas.ai_usage import (
@@ -20,8 +22,15 @@ class AIQuotaService:
     record blocked logs. Blocked logs are recorded by AIUsageService.
     """
 
-    def __init__(self, repo: AsyncAIUsageRepository) -> None:
+    DEFAULT_TIMEZONE = "Asia/Shanghai"
+
+    def __init__(
+        self,
+        repo: AsyncAIUsageRepository,
+        now_provider: Callable[[], datetime] | None = None,
+    ) -> None:
         self.repo = repo
+        self._now_provider = now_provider or (lambda: datetime.now(UTC))
 
     async def check_quota(
         self,
@@ -31,8 +40,8 @@ class AIQuotaService:
             user_id=request.user_id
         )
 
-        today_start, today_end = self._build_today_range()
-        month_start, month_end = self._build_current_month_range()
+        today_start, today_end = self._build_today_range(account.timezone)
+        month_start, month_end = self._build_current_month_range(account.timezone)
 
         today = await self.repo.get_or_create_usage_summary(
             AIUsageSummaryCreate(
@@ -103,8 +112,8 @@ class AIQuotaService:
     ) -> AIQuotaSummaryResponse:
         account = await self.repo.get_or_create_quota_account(user_id=user_id)
 
-        today_start, today_end = self._build_today_range()
-        month_start, month_end = self._build_current_month_range()
+        today_start, today_end = self._build_today_range(account.timezone)
+        month_start, month_end = self._build_current_month_range(account.timezone)
 
         today = await self.repo.get_or_create_usage_summary(
             AIUsageSummaryCreate(
@@ -265,12 +274,12 @@ class AIQuotaService:
 
         return max(Decimal("0"), limit - used)
 
-    def _build_today_range(self) -> tuple[date, date]:
-        today = date.today()
+    def _build_today_range(self, timezone_name: str) -> tuple[date, date]:
+        today = self._local_today(timezone_name)
         return today, today
 
-    def _build_current_month_range(self) -> tuple[date, date]:
-        today = date.today()
+    def _build_current_month_range(self, timezone_name: str) -> tuple[date, date]:
+        today = self._local_today(timezone_name)
         month_start = date(today.year, today.month, 1)
 
         if today.month == 12:
@@ -280,3 +289,17 @@ class AIQuotaService:
 
         month_end = date.fromordinal(next_month_start.toordinal() - 1)
         return month_start, month_end
+
+    def _local_today(self, timezone_name: str) -> date:
+        """Resolve the quota day from the account timezone."""
+
+        now = self._now_provider()
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=UTC)
+
+        try:
+            timezone = ZoneInfo(timezone_name or self.DEFAULT_TIMEZONE)
+        except ZoneInfoNotFoundError:
+            timezone = ZoneInfo(self.DEFAULT_TIMEZONE)
+
+        return now.astimezone(timezone).date()

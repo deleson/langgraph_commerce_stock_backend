@@ -9,6 +9,9 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.analysis_record import AnalysisRecordResponse
+from app.schemas.daily_report import DailyReportResponse
+
 
 NotificationType = Literal[
     "system",
@@ -42,3 +45,9 @@ class NotificationResponse(BaseModel):
     read_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+class NotificationDetailResponse(NotificationResponse):
+    """Notification detail enriched with the related business record."""
+
+    analysis_record: AnalysisRecordResponse | None = None
+    daily_report: DailyReportResponse | None = None

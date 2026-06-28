@@ -265,7 +265,7 @@ class DailyReportQueryService:
                     title=self._build_notification_title(report),
                     content=self._build_notification_content(report),
                     notification_type="daily_report",
-                    related_record_id=None,
+                    related_record_id=report.id,
                 ),
             )
 

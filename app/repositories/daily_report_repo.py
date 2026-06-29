@@ -53,7 +53,7 @@ class AsyncDailyReportRepository:
     async def get_report_by_notification_id(
         self,
         *,
-        notification_id: int,
+        notification_id: int | None,
         user_id: int,
     ) -> DailyReport | None:
         stmt = select(DailyReport).where(
@@ -138,7 +138,7 @@ class AsyncDailyReportRepository:
         self,
         *,
         report: DailyReport,
-        notification_id: int,
+        notification_id: int | None,
     ) -> DailyReport:
         report.notification_id = notification_id
 

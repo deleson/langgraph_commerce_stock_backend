@@ -95,6 +95,18 @@ class PaperTradingAccountService:
         )
         return self._build_account_response(updated_account)
 
+    async def delete_account(
+        self,
+        *,
+        user_id: int,
+        account_id: int,
+    ) -> None:
+        account = await self.get_account_model(
+            user_id=user_id,
+            account_id=account_id,
+        )
+        await self.repository.delete_account_tree(account)
+
     async def get_or_create_default_account(
         self,
         *,

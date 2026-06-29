@@ -105,6 +105,7 @@ Authorization: Bearer <access_token>
 | paper-trading | GET | `/paper-trading/accounts` | 是 | 纸面交易账户列表 |
 | paper-trading | GET | `/paper-trading/accounts/{account_id}` | 是 | 账户详情聚合 |
 | paper-trading | PATCH | `/paper-trading/accounts/{account_id}` | 是 | 更新账户 |
+| paper-trading | DELETE | `/paper-trading/accounts/{account_id}` | 是 | 删除虚拟账户及其模拟子数据 |
 | paper-trading | GET | `/paper-trading/accounts/{account_id}/config` | 是 | 获取账户配置 |
 | paper-trading | PATCH | `/paper-trading/accounts/{account_id}/config` | 是 | 更新账户配置 |
 | paper-trading | GET | `/paper-trading/accounts/{account_id}/positions` | 是 | 模拟持仓 |
@@ -591,7 +592,7 @@ disclaimer
 | `daily_report_enabled` | 用户级日报模式开关，保存在 `user_preferences` 中 |
 | `scheduler_enabled` | 后端部署级 Celery Beat 日报调度是否开启，只由服务端配置控制 |
 | `effective_status` | `disabled`、`enabled`、`enabled_but_scheduler_off` 三种状态 |
-| 手动生成日报 | 不受日报模式开关限制，用户仍可调用 `POST /daily-reports/generate` |
+| 手动生成日报 | 不受日报模式开关限制，用户仍可调用 `POST /daily-reports/generate`；如果当日已有日报但缺少通知，`notify=true` 会补建日报通知 |
 | 自动生成日报 | 只有用户开启日报模式，并且服务端启用定时任务时才会自动提交后台任务 |
 
 `PATCH /daily-reports/mode` 请求体：
@@ -640,6 +641,7 @@ disclaimer
 | `GET /paper-trading/accounts` | 账户列表 |
 | `GET /paper-trading/accounts/{account_id}` | 账户详情聚合 |
 | `PATCH /paper-trading/accounts/{account_id}` | 更新账户名称或状态；设置为 `closed` 表示不可逆关闭并保留历史数据 |
+| `DELETE /paper-trading/accounts/{account_id}` | 删除当前用户的一个虚拟账户，并清理该账户下的配置、持仓、订单、成交、权益快照和运行记录 |
 | `GET /paper-trading/accounts/{account_id}/config` | 获取账户配置 |
 | `PATCH /paper-trading/accounts/{account_id}/config` | 更新账户配置 |
 
@@ -724,7 +726,7 @@ GET /notifications/{notification_id} 在基础通知字段之外，会按通知�
 | analysis_record | object / null | analysis_completed 通知关联的完整分析记录和 result_snapshot |
 | daily_report | object / null | daily_report 通知关联的完整日报、章节、股票快照、警告和免责声明 |
 
-旧日报通知如果没有 related_record_id，后端会通过 daily_reports.notification_id 兼容查找。读取详情本身不修改状态；前端打开详情后应继续调用 PATCH /notifications/{notification_id}/read，该接口保持幂等。
+分析完成通知通过 `related_record_id` 关联分析记录；日报通知不写入 `related_record_id`，而是通过 `daily_reports.notification_id` 反向关联日报，避免与 `analysis_records` 外键冲突。读取详情本身不修改状态；前端打开详情后应继续调用 PATCH /notifications/{notification_id}/read，该接口保持幂等。
 
 `DELETE /notifications/{notification_id}` 只删除当前用户拥有的通知。分析记录和日报不会随通知删除；日报的 `notification_id` 外键会置空。删除其他用户的通知统一返回资源不存在。
 

@@ -9,7 +9,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.paper_trading_account import PaperTradingAccount
@@ -148,6 +148,32 @@ class AsyncPaperTradingRepository:
         await self.db.commit()
         await self.db.refresh(account)
         return account
+
+    async def delete_account_tree(
+        self,
+        account: PaperTradingAccount,
+    ) -> None:
+        """删除一个纸面交易账户及其全部虚拟子数据。
+
+        纸面交易是模拟数据，用户可能创建大量测试账户；这里提供显式清理能力。
+        按子表到父表顺序删除，避免不同数据库对级联约束支持差异导致测试和生产行为不一致。
+        """
+
+        account_id = account.id
+        for model in (
+            PaperTradingRun,
+            PaperTradingTrade,
+            PaperTradingOrder,
+            PaperTradingPosition,
+            PaperTradingEquitySnapshot,
+            PaperTradingAccountConfig,
+        ):
+            await self.db.execute(
+                delete(model).where(model.account_id == account_id)
+            )
+
+        await self.db.delete(account)
+        await self.db.commit()
 
     async def update_account_cash(
         self,

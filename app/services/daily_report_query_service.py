@@ -89,11 +89,19 @@ class DailyReportQueryService:
         )
 
         if existing_report is not None and not request.force_rebuild:
+            notification_created = False
+            # 已有日报可能来自旧版本、notify=false 或通知被用户删除；再次请求 notify 时应补齐通知入口。
+            if request.notify:
+                existing_report, notification_created = await self._create_notification_for_report(
+                    user=user,
+                    report=existing_report,
+                )
+
             response = self._build_response(existing_report)
             return DailyReportGenerationResponse(
                 report=response,
                 created=False,
-                notification_created=False,
+                notification_created=notification_created,
                 ai_used=response.ai_used,
                 fallback_used=self._is_fallback_response(response),
             )
@@ -256,7 +264,18 @@ class DailyReportQueryService:
         """
 
         if report.notification_id is not None:
-            return report, False
+            try:
+                await self.notification_service.get_my_notification(
+                    user=user,
+                    notification_id=report.notification_id,
+                )
+                return report, False
+            except NotFoundException:
+                # 兼容旧数据或外键未自动 SET NULL 的环境：关联通知已不存在时允许补建。
+                report = await self.repo.set_notification(
+                    report=report,
+                    notification_id=None,
+                )
 
         try:
             notification = await self.notification_service.create_notification(
@@ -265,7 +284,9 @@ class DailyReportQueryService:
                     title=self._build_notification_title(report),
                     content=self._build_notification_content(report),
                     notification_type="daily_report",
-                    related_record_id=report.id,
+                    # notifications.related_record_id 仍外键指向 analysis_records。
+                    # 日报通知通过 daily_reports.notification_id 反向关联，避免把日报 ID 写进分析记录外键。
+                    related_record_id=None,
                 ),
             )
 

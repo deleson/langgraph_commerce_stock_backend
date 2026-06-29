@@ -249,4 +249,13 @@ class AsyncNotificationService:
             user=user,
             notification_id=notification_id,
         )
+        report = await self.daily_report_repo.get_report_by_notification_id(
+            user_id=user.id,
+            notification_id=notification_id,
+        )
+        if report is not None:
+            await self.daily_report_repo.set_notification(
+                report=report,
+                notification_id=None,
+            )
         await self.notification_repo.delete(notification)

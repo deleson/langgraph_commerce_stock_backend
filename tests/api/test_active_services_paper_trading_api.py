@@ -123,6 +123,65 @@ async def test_get_today_daily_report_after_generation(
     assert data["report"]["unavailable_reason"] == "empty_watchlist"
 
 
+async def test_existing_daily_report_can_backfill_notification(
+    async_client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    first_response = await async_client.post(
+        f"{API_PREFIX}/daily-reports/generate",
+        json={
+            "use_ai": False,
+            "force_rebuild": True,
+            "notify": False,
+            "include_candidates": False,
+            "include_user_profile": False,
+            "include_relevant_memories": False,
+        },
+        headers=auth_headers,
+    )
+    assert first_response.status_code == 200
+    first_data = first_response.json()["data"]
+    assert first_data["notification_created"] is False
+
+    second_response = await async_client.post(
+        f"{API_PREFIX}/daily-reports/generate",
+        json={
+            "use_ai": False,
+            "force_rebuild": False,
+            "notify": True,
+            "include_candidates": False,
+            "include_user_profile": False,
+            "include_relevant_memories": False,
+        },
+        headers=auth_headers,
+    )
+    assert second_response.status_code == 200
+    second_data = second_response.json()["data"]
+    assert second_data["created"] is False
+    assert second_data["notification_created"] is True
+    assert second_data["report"]["id"] == first_data["report"]["id"]
+
+    notifications_response = await async_client.get(
+        f"{API_PREFIX}/notifications",
+        headers=auth_headers,
+    )
+    assert notifications_response.status_code == 200
+    notifications = notifications_response.json()["data"]
+    daily_notifications = [
+        item for item in notifications if item["notification_type"] == "daily_report"
+    ]
+    assert len(daily_notifications) == 1
+    assert daily_notifications[0]["related_record_id"] is None
+
+    detail_response = await async_client.get(
+        f"{API_PREFIX}/notifications/{daily_notifications[0]['id']}",
+        headers=auth_headers,
+    )
+    assert detail_response.status_code == 200
+    detail_data = detail_response.json()["data"]
+    assert detail_data["daily_report"]["id"] == first_data["report"]["id"]
+
+
 async def test_list_and_get_daily_report_success(
     async_client: AsyncClient,
     auth_headers: dict[str, str],
@@ -511,3 +570,37 @@ async def test_paper_trading_invalid_account_update_returns_422(
     )
 
     assert response.status_code == 422
+
+async def test_delete_paper_trading_account_removes_it_from_list(
+    async_client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    account = await _create_paper_trading_account(async_client, auth_headers, name="待删除模拟账户")
+    account_id = account["id"]
+
+    config_response = await async_client.get(
+        f"{API_PREFIX}/paper-trading/accounts/{account_id}/config",
+        headers=auth_headers,
+    )
+    assert config_response.status_code == 200
+
+    delete_response = await async_client.delete(
+        f"{API_PREFIX}/paper-trading/accounts/{account_id}",
+        headers=auth_headers,
+    )
+    assert delete_response.status_code == 200
+    assert delete_response.json()["data"]["message"] == "paper trading account deleted"
+
+    detail_response = await async_client.get(
+        f"{API_PREFIX}/paper-trading/accounts/{account_id}",
+        headers=auth_headers,
+    )
+    assert detail_response.status_code == 404
+
+    list_response = await async_client.get(
+        f"{API_PREFIX}/paper-trading/accounts",
+        headers=auth_headers,
+    )
+    assert list_response.status_code == 200
+    items = list_response.json()["data"]["items"]
+    assert all(item["id"] != account_id for item in items)

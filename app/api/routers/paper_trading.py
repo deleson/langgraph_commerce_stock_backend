@@ -136,6 +136,31 @@ async def update_paper_trading_account(
     )
     return success_response(data=result)
 
+
+@router.delete(
+    "/accounts/{account_id}",
+    summary="Delete Paper Trading Account",
+    description=(
+        "Permanently delete one virtual paper trading account owned by the current user, "
+        "including simulated positions, orders, trades, equity snapshots, config and runs. "
+        "This does not affect real brokerage accounts because paper trading never places real orders."
+    ),
+    response_model=ApiResponse[dict[str, str]],
+    status_code=status.HTTP_200_OK,
+)
+async def delete_paper_trading_account(
+    account_id: int,
+    current_user: AsyncCurrentUser,
+    db: AsyncDBSession,
+) -> ApiResponse[dict[str, str]]:
+    """删除当前用户的一个纸面交易账户及其虚拟子数据。"""
+
+    await PaperTradingQueryService(db).delete_account(
+        user_id=current_user.id,
+        account_id=account_id,
+    )
+    return success_response(data={"message": "paper trading account deleted"})
+
 @router.get(
     "/accounts/{account_id}/config",
     summary="Get Paper Trading Account Config",

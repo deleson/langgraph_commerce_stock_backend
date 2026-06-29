@@ -163,6 +163,17 @@ class PaperTradingQueryService:
             request=request,
         )
 
+    async def delete_account(
+        self,
+        *,
+        user_id: int,
+        account_id: int,
+    ) -> None:
+        await self.account_service.delete_account(
+            user_id=user_id,
+            account_id=account_id,
+        )
+
     async def get_account_config(
         self,
         *,

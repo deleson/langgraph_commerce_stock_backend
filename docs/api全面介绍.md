@@ -40,6 +40,7 @@ Authorization: Bearer <access_token>
 | notifications | GET | `/notifications/{notification_id}` | 是 | 通知详情 |
 | notifications | PATCH | `/notifications/{notification_id}/read` | 是 | 标记单条通知已读 |
 | notifications | PATCH | `/notifications/read-all` | 是 | 标记全部通知已读 |
+| notifications | DELETE | `/notifications/{notification_id}` | 是 | 删除当前用户通知，保留关联业务记录 |
 | market | GET | `/market/stocks/search` | 是 | 搜索股票 |
 | market | GET | `/market/stocks/{symbol}/quote` | 是 | 获取报价 |
 | market | GET | `/market/stocks/{symbol}/candles` | 是 | 获取 K 线 |
@@ -199,7 +200,7 @@ mobile 与 web 不互踢，可以同时保持登录。
 | `PATCH /watchlist/{item_id}` | 可更新字段 | `WatchlistResponse` | 更新 |
 | `DELETE /watchlist/{item_id}` | `item_id` | message | 删除 |
 
-自选股是用户私有资源，后端会按当前登录用户隔离。
+自选股是用户私有资源，后端会按当前登录用户隔离。删除自选股只解除关注关系，不级联删除纸面交易订单、成交、持仓、权益或运行记录。已有未平模拟持仓会继续参与退出信号扫描，但不再允许根据 `buy` 信号新增仓位；重新加入自选股后才恢复新买入资格。
 
 ### 通知
 
@@ -209,6 +210,7 @@ mobile 与 web 不互踢，可以同时保持登录。
 | `GET /notifications/{notification_id}` | 通知详情 |
 | `PATCH /notifications/{notification_id}/read` | 标记单条已读 |
 | `PATCH /notifications/read-all` | 标记全部已读 |
+| `DELETE /notifications/{notification_id}` | 删除当前用户通知；关联分析记录、日报等来源数据继续保留 |
 
 ### 设备
 
@@ -637,7 +639,7 @@ disclaimer
 | `POST /paper-trading/accounts` | 创建虚拟账户 |
 | `GET /paper-trading/accounts` | 账户列表 |
 | `GET /paper-trading/accounts/{account_id}` | 账户详情聚合 |
-| `PATCH /paper-trading/accounts/{account_id}` | 更新账户名称或状态 |
+| `PATCH /paper-trading/accounts/{account_id}` | 更新账户名称或状态；设置为 `closed` 表示不可逆关闭并保留历史数据 |
 | `GET /paper-trading/accounts/{account_id}/config` | 获取账户配置 |
 | `PATCH /paper-trading/accounts/{account_id}/config` | 更新账户配置 |
 
@@ -654,6 +656,10 @@ disclaimer
 | `min_order_cash_amount` | 最小订单金额 |
 | `fee_rate` | 模拟手续费率 |
 | `enforce_data_quality` | 是否强制数据质量检查 |
+
+当前代码中 `is_enabled` 和 `max_symbols_per_tick` 已进入 tick 主链路；其余风控字段仍主要用于保存和审计快照，尚未全部接入订单计算，前端不能把它们描述成已完全生效。
+
+账户没有物理删除接口。将状态更新为 `closed` 后不能恢复或继续运行，但订单、成交、持仓、权益和运行记录仍可查询，满足模拟金融数据的审计需要。
 
 ### 持仓、订单、成交、权益
 
@@ -719,6 +725,8 @@ GET /notifications/{notification_id} 在基础通知字段之外，会按通知�
 | daily_report | object / null | daily_report 通知关联的完整日报、章节、股票快照、警告和免责声明 |
 
 旧日报通知如果没有 related_record_id，后端会通过 daily_reports.notification_id 兼容查找。读取详情本身不修改状态；前端打开详情后应继续调用 PATCH /notifications/{notification_id}/read，该接口保持幂等。
+
+`DELETE /notifications/{notification_id}` 只删除当前用户拥有的通知。分析记录和日报不会随通知删除；日报的 `notification_id` 外键会置空。删除其他用户的通知统一返回资源不存在。
 
 ### AI 日额度时区
 

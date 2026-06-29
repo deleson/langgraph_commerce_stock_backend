@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
+from app.repositories.paper_trading_repo import AsyncPaperTradingRepository
 from app.schemas.market import MarketOverviewResponse
 from app.schemas.paper_trading import (
     PaperTradingTickRequest,
@@ -31,6 +32,8 @@ class PaperTradingUniverseItem:
     market: str
     name: str | None = None
     notes: str | None = None
+    is_watchlisted: bool = True
+    has_open_position: bool = False
 
 
 @dataclass(slots=True)
@@ -41,6 +44,8 @@ class PaperTradingSignalItem:
     market: str
     name: str | None = None
     notes: str | None = None
+    is_watchlisted: bool = True
+    has_open_position: bool = False
     overview: MarketOverviewResponse | None = None
     can_generate_order: bool = False
     action: str | None = None
@@ -78,7 +83,7 @@ class PaperTradingSignalContext:
 class PaperTradingSignalService:
     """收集纸面交易 tick 所需的确定性信号输入。
 
-    这个 Service 只读取自选股、行情概览、数据质量和策略信号。
+    这个 Service 读取自选股、未平持仓、行情概览、数据质量和策略信号。
     buy / sell 信号会进入 actionable_items；hold / observe 只记录原因，不生成订单。
     """
 
@@ -96,10 +101,12 @@ class PaperTradingSignalService:
         *,
         watchlist_service: AsyncWatchlistService | None = None,
         market_service: MarketService | None = None,
+        repository: AsyncPaperTradingRepository | None = None,
     ) -> None:
         self.db = db
         self.watchlist_service = watchlist_service or AsyncWatchlistService(db)
         self.market_service = market_service or MarketService(db)
+        self.repository = repository or AsyncPaperTradingRepository(db)
 
     async def collect_signal_context(
         self,
@@ -130,7 +137,7 @@ class PaperTradingSignalService:
                 items=[],
                 actionable_items=[],
                 unavailable_reason=PaperTradingUnavailableReason.NO_WATCHLIST,
-                warnings=warnings or ["当前用户自选股为空，无法推进纸面交易。"],
+                warnings=warnings or ["当前用户没有自选股或未平模拟持仓，无法推进纸面交易。"],
                 errors=errors,
             )
 
@@ -169,28 +176,74 @@ class PaperTradingSignalService:
         warnings: list[str],
     ) -> list[PaperTradingUniverseItem]:
         watchlist_items = await self.watchlist_service.list_my_watchlist(user)
-
-        if not watchlist_items:
-            warnings.append("当前用户自选股为空，无法执行纸面交易 tick。")
-            return []
-
-        limited_items = watchlist_items[: request.max_symbols]
-
-        if len(watchlist_items) > len(limited_items):
-            warnings.append(
-                f"本次纸面交易 tick 最多处理 {request.max_symbols} 只自选股，"
-                f"已跳过 {len(watchlist_items) - len(limited_items)} 只。"
+        open_positions = []
+        if request.account_id is not None:
+            open_positions = await self.repository.list_open_positions_for_account(
+                account_id=request.account_id,
+                limit=501,
             )
 
-        return [
-            PaperTradingUniverseItem(
-                symbol=self._normalize_text(item.symbol),
-                market=self._normalize_text(item.market),
+        # 先放入已有持仓，确保移出自选股后仍有机会根据 sell 信号退出；
+        # 自选股只决定是否允许新开仓，不应该抹掉已有模拟资产。
+        universe_by_key: dict[tuple[str, str], PaperTradingUniverseItem] = {}
+        for position in open_positions[: request.max_symbols]:
+            key = (
+                self._normalize_text(position.market),
+                self._normalize_text(position.symbol),
+            )
+            universe_by_key[key] = PaperTradingUniverseItem(
+                symbol=key[1],
+                market=key[0],
+                notes="当前持仓已移出自选股，仅继续监控退出信号",
+                is_watchlisted=False,
+                has_open_position=True,
+            )
+
+        skipped_count = max(0, len(open_positions) - request.max_symbols)
+        for item in watchlist_items:
+            key = (
+                self._normalize_text(item.market),
+                self._normalize_text(item.symbol),
+            )
+            existing = universe_by_key.get(key)
+            if existing is not None:
+                existing.name = item.name
+                existing.notes = item.notes
+                existing.is_watchlisted = True
+                continue
+
+            if len(universe_by_key) >= request.max_symbols:
+                skipped_count += 1
+                continue
+
+            universe_by_key[key] = PaperTradingUniverseItem(
+                symbol=key[1],
+                market=key[0],
                 name=item.name,
                 notes=item.notes,
+                is_watchlisted=True,
+                has_open_position=False,
             )
-            for item in limited_items
-        ]
+
+        if skipped_count:
+            warnings.append(
+                f"本次纸面交易 tick 最多处理 {request.max_symbols} 只股票，"
+                f"已跳过 {skipped_count} 只。"
+            )
+
+        removed_position_count = sum(
+            1 for item in universe_by_key.values()
+            if item.has_open_position and not item.is_watchlisted
+        )
+        if removed_position_count:
+            warnings.append(
+                f"{removed_position_count} 只持仓已不在自选股中：继续监控退出信号，但禁止新买入。"
+            )
+
+        if not universe_by_key:
+            warnings.append("当前用户没有自选股或未平模拟持仓，无法执行纸面交易 tick。")
+
+        return list(universe_by_key.values())
 
     async def _collect_one_item(
         self,
@@ -226,6 +279,8 @@ class PaperTradingSignalService:
                 market=item.market,
                 name=item.name,
                 notes=item.notes,
+                is_watchlisted=item.is_watchlisted,
+                has_open_position=item.has_open_position,
                 overview=None,
                 can_generate_order=False,
                 action=None,
@@ -237,13 +292,18 @@ class PaperTradingSignalService:
         warnings.extend(self._collect_quality_warnings(overview))
         errors.extend(self._collect_quality_errors(overview))
 
-        can_generate_order, action, reason = self._evaluate_actionable_signal(overview)
+        can_generate_order, action, reason = self._evaluate_actionable_signal(
+            item=item,
+            overview=overview,
+        )
 
         return PaperTradingSignalItem(
             symbol=item.symbol,
             market=item.market,
             name=item.name,
             notes=item.notes,
+            is_watchlisted=item.is_watchlisted,
+            has_open_position=item.has_open_position,
             overview=overview,
             can_generate_order=can_generate_order,
             action=action,
@@ -254,6 +314,8 @@ class PaperTradingSignalService:
 
     def _evaluate_actionable_signal(
         self,
+        *,
+        item: PaperTradingUniverseItem,
         overview: MarketOverviewResponse,
     ) -> tuple[bool, str | None, str]:
         """判断单只股票是否可以生成模拟订单。
@@ -291,6 +353,12 @@ class PaperTradingSignalService:
                 strategy_signal.signal,
                 f"当前策略信号为 {strategy_signal.signal}，不生成模拟订单",
             )
+
+        if strategy_signal.signal == "buy" and not item.is_watchlisted:
+            return False, "buy", "股票已移出自选股，保留持仓监控但禁止新买入"
+
+        if strategy_signal.signal == "sell" and not item.has_open_position:
+            return False, "sell", "当前模拟账户没有该股票持仓，不生成卖出订单"
 
         return (
             True,

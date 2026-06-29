@@ -492,3 +492,62 @@ async def test_user_cannot_access_other_users_notification(
 
     assert response.status_code == 404
     assert response.json()["message"] == "notification not found"
+
+
+async def test_delete_notification_removes_only_current_users_message(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+    test_user: User,
+    auth_headers: dict[str, str],
+) -> None:
+    notification = await AsyncNotificationService(db_session).create_notification(
+        user=test_user,
+        payload=NotificationCreateRequest(
+            title="Delete Me",
+            content="Delete notification content",
+            notification_type="system",
+        ),
+    )
+
+    response = await async_client.delete(
+        f"{API_PREFIX}/notifications/{notification.id}",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["message"] == "notification deleted"
+
+    detail_response = await async_client.get(
+        f"{API_PREFIX}/notifications/{notification.id}",
+        headers=auth_headers,
+    )
+    assert detail_response.status_code == 404
+
+
+async def test_user_cannot_delete_other_users_notification(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+    another_test_user: User,
+    auth_headers: dict[str, str],
+) -> None:
+    notification_service = AsyncNotificationService(db_session)
+    notification = await notification_service.create_notification(
+        user=another_test_user,
+        payload=NotificationCreateRequest(
+            title="Other User Delete Guard",
+            content="Other user notification must remain",
+            notification_type="system",
+        ),
+    )
+
+    response = await async_client.delete(
+        f"{API_PREFIX}/notifications/{notification.id}",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 404
+    persisted = await notification_service.get_my_notification(
+        user=another_test_user,
+        notification_id=notification.id,
+    )
+    assert persisted.id == notification.id

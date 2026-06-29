@@ -87,6 +87,12 @@ class NotificationRepository:
         self.db.commit()
         return len(notifications)
 
+    def delete(self, notification: Notification) -> None:
+        """删除通知本身，不删除通知关联的分析记录或日报。"""
+
+        self.db.delete(notification)
+        self.db.commit()
+
 class AsyncNotificationRepository:
     """异步通知数据访问对象。
 
@@ -165,3 +171,9 @@ class AsyncNotificationRepository:
 
         await self.db.commit()
         return len(notifications)
+
+    async def delete(self, notification: Notification) -> None:
+        """删除用户可见通知；关联业务数据通过外键策略继续保留。"""
+
+        await self.db.delete(notification)
+        await self.db.commit()

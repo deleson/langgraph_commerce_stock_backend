@@ -462,6 +462,26 @@ class AsyncPaperTradingRepository:
         result = await self.db.execute(stmt)
         return list(result.scalars().all())
 
+    async def list_open_positions_for_account(
+        self,
+        *,
+        account_id: int,
+        limit: int = 500,
+    ) -> list[PaperTradingPosition]:
+        """读取仍有数量的持仓，供移出自选股后的退出监控使用。"""
+
+        stmt = (
+            select(PaperTradingPosition)
+            .where(
+                PaperTradingPosition.account_id == account_id,
+                PaperTradingPosition.quantity > 0,
+            )
+            .order_by(PaperTradingPosition.updated_at.desc())
+            .limit(limit)
+        )
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
     async def count_positions(
         self,
         *,

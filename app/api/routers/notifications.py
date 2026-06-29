@@ -1,6 +1,6 @@
 """通知 API Router。
 
-该 Router 提供当前用户通知列表、详情、单条已读和全部已读接口。
+该 Router 提供当前用户通知列表、详情、已读状态和删除接口。
 通知数据必须按当前用户隔离，不能跨用户读取或修改。
 """
 
@@ -84,3 +84,26 @@ async def mark_all_my_notifications_as_read(
 ):
     updated_count = await AsyncNotificationService(db).mark_all_my_notifications_as_read(current_user)
     return success_response(data={"updated_count": updated_count})
+
+
+@router.delete(
+    "/{notification_id}",
+    summary="Delete My Notification",
+    description=(
+        "Delete one notification owned by the current user. "
+        "The related analysis record or daily report is retained."
+    ),
+    response_model=ApiResponse[dict[str, str]],
+)
+async def delete_my_notification(
+    notification_id: int,
+    current_user: AsyncCurrentUser,
+    db: AsyncDBSession,
+):
+    """删除通知入口，不级联删除通知来源的业务数据。"""
+
+    await AsyncNotificationService(db).delete_my_notification(
+        user=current_user,
+        notification_id=notification_id,
+    )
+    return success_response(data={"message": "notification deleted"})

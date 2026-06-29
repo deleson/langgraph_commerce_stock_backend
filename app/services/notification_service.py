@@ -103,6 +103,18 @@ class NotificationService:
     def mark_all_my_notifications_as_read(self, user: User) -> int:
         return self.notification_repo.mark_all_as_read(user.id)
 
+    def delete_my_notification(
+        self,
+        *,
+        user: User,
+        notification_id: int,
+    ) -> None:
+        notification = self.get_my_notification(
+            user=user,
+            notification_id=notification_id,
+        )
+        self.notification_repo.delete(notification)
+
 class AsyncNotificationService:
     """异步通知业务服务。"""
 
@@ -224,3 +236,17 @@ class AsyncNotificationService:
 
     async def mark_all_my_notifications_as_read(self, user: User) -> int:
         return await self.notification_repo.mark_all_as_read(user.id)
+
+    async def delete_my_notification(
+        self,
+        *,
+        user: User,
+        notification_id: int,
+    ) -> None:
+        """删除当前用户的一条通知，但保留其来源业务记录。"""
+
+        notification = await self.get_my_notification(
+            user=user,
+            notification_id=notification_id,
+        )
+        await self.notification_repo.delete(notification)

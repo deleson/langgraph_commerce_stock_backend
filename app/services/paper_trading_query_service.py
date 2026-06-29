@@ -100,7 +100,10 @@ class PaperTradingQueryService:
             repository=self.repository,
             account_service=self.account_service,
         )
-        self.signal_service = signal_service or PaperTradingSignalService(db)
+        self.signal_service = signal_service or PaperTradingSignalService(
+            db,
+            repository=self.repository,
+        )
         self.order_service = order_service or PaperTradingOrderService(
             db,
             repository=self.repository,
@@ -400,6 +403,8 @@ class PaperTradingQueryService:
 
         tick_request = tick_request.model_copy(
             update={
+                # 调度任务可能不携带 account_id；解析后写回请求，保证持仓退出扫描绑定正确账户。
+                "account_id": account.id,
                 "max_symbols": min(
                     tick_request.max_symbols,
                     config.max_symbols_per_tick,

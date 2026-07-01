@@ -285,6 +285,9 @@ Query：
 
 overview 是前端股票详情页最推荐使用的聚合接口。
 
+它不是单纯的 K 线接口。查询参数中的 `include_technical_indicators`、`include_data_quality`、`include_sync_status` 和 `include_strategy_signal` 决定是否在同一次请求中聚合技术指标、数据质量、同步状态和策略信号，因此 URL 会明显长于 `GET /candles`。Uvicorn access log 会记录完整 query string，而 `app.request` 结构化日志只记录 path 与耗时；这两条通常是同一次 HTTP 请求的不同日志视角。
+
+
 如果股票基础信息已经通过搜索写入 `market_symbols`，但该股票还没有入库 K 线，overview 会先尝试按当前 Provider 同步所需 K 线，再读取数据库生成详情页响应。Provider 同步失败时，查询接口仍保留开发/测试环境的 Mock 降级能力。
 
 常用 Query：
@@ -310,6 +313,8 @@ data_quality?
 sync_status?
 strategy_signal?
 ```
+
+BaoStock 的 `limit` 表示最近 N 根可用 K 线。近期窗口为空时，Provider 会回查完整历史再截取末尾，因此退市或长期停牌股票仍可展示最后一段历史行情；其数据质量会标记为过期，不能继续生成可用策略信号。
 
 ### 数据同步与质量
 

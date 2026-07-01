@@ -477,11 +477,14 @@ class MarketService:
         from app.core.config import get_settings
 
         settings = get_settings()
-        stale_after_days = settings.celery_beat_watchlist_candle_sync_stale_after_days
+        stale_after_days = settings.market_overview_candle_stale_after_days
 
-        if existing_candles and not self._is_overview_candle_stale(
-            existing_candles[-1],
-            stale_after_days=stale_after_days,
+        if existing_candles and (
+            not market_symbol.is_active
+            or not self._is_overview_candle_stale(
+                existing_candles[-1],
+                stale_after_days=stale_after_days,
+            )
         ):
             return
 
@@ -508,7 +511,7 @@ class MarketService:
             provider_names = self._overview_sync_provider_names(settings)
             for provider_name in provider_names:
                 try:
-                    await MarketDataSyncService(
+                    saved_candles = await MarketDataSyncService(
                         self.db,
                         provider_name=provider_name,
                     ).sync_candles(
@@ -518,7 +521,8 @@ class MarketService:
                         limit=sync_limit,
                         adjust_type=adjust_type,
                     )
-                    return
+                    if saved_candles:
+                        return
                 except Exception:
                     continue
         except Exception:

@@ -24,6 +24,7 @@ class BaoStockProvider(MarketDataProvider):
     """面向 A 股日 K 线的 BaoStock 适配器。"""
 
     provider_name = "baostock"
+    HISTORY_FALLBACK_START_DATE = "1990-01-01"
 
     @property
     def supported_markets(self) -> set[MarketCode]:
@@ -129,7 +130,7 @@ class BaoStockProvider(MarketDataProvider):
                 provider_symbol=provider_symbol,
                 list_status=raw_payload.get("status") or None,
                 source="baostock",
-                is_active=True,
+                is_active=self._is_active_symbol(raw_payload),
                 raw_payload=raw_payload,
             )
         finally:
@@ -154,65 +155,95 @@ class BaoStockProvider(MarketDataProvider):
             raise BadRequestException(message=f"baostock login failed: {login_result.error_msg}")
 
         try:
-            fields = ",".join(
-                [
-                    "date",
-                    "code",
-                    "open",
-                    "high",
-                    "low",
-                    "close",
-                    "volume",
-                    "amount",
-                    "adjustflag",
-                    "tradestatus",
-                ]
-            )
-
-            result = bs.query_history_k_data_plus(
-                provider_symbol,
-                fields,
+            candles = self._query_history_candles(
+                bs=bs,
+                query=query,
+                provider_symbol=provider_symbol,
+                adjustflag=adjustflag,
                 start_date=start_date.isoformat(),
                 end_date=end_date.isoformat(),
-                frequency="d",
-                adjustflag=adjustflag,
             )
 
-            if result.error_code != "0":
-                raise BadRequestException(message=f"baostock query failed: {result.error_msg}")
-
-            candles: list[MarketProviderCandle] = []
-
-            while result.next():
-                row = dict(zip(result.fields, result.get_row_data(), strict=False))
-
-                if row.get("tradestatus") not in (None, "", "1"):
-                    continue
-
-                if not row.get("date"):
-                    continue
-
-                candles.append(
-                    MarketProviderCandle(
-                        symbol=query.symbol,
-                        market=query.market,
-                        timeframe=query.timeframe,
-                        candle_time=self._parse_candle_time(row["date"]),
-                        open_price=self._to_decimal(row.get("open")),
-                        high_price=self._to_decimal(row.get("high")),
-                        low_price=self._to_decimal(row.get("low")),
-                        close_price=self._to_decimal(row.get("close")),
-                        volume=self._to_int(row.get("volume")),
-                        amount=self._to_optional_decimal(row.get("amount")),
-                        source="baostock",
-                        is_adjusted=query.adjust_type != "none",
-                        adjust_type=query.adjust_type,
-                    )
+            if not candles:
+                # limit 表示“最近 N 根可用 K 线”，不能只等价成“最近若干自然日”。
+                # 退市、长期停牌股票近期窗口可能为空，此时回查完整历史再截取末尾。
+                candles = self._query_history_candles(
+                    bs=bs,
+                    query=query,
+                    provider_symbol=provider_symbol,
+                    adjustflag=adjustflag,
+                    start_date=self.HISTORY_FALLBACK_START_DATE,
+                    end_date=end_date.isoformat(),
                 )
 
             return candles[-query.limit :]
         finally:
             bs.logout()
+
+    def _query_history_candles(
+        self,
+        *,
+        bs,
+        query: MarketCandleQuery,
+        provider_symbol: str,
+        adjustflag: str,
+        start_date: str,
+        end_date: str,
+    ) -> list[MarketProviderCandle]:
+        fields = ",".join(
+            [
+                "date",
+                "code",
+                "open",
+                "high",
+                "low",
+                "close",
+                "volume",
+                "amount",
+                "adjustflag",
+                "tradestatus",
+            ]
+        )
+        result = bs.query_history_k_data_plus(
+            provider_symbol,
+            fields,
+            start_date=start_date,
+            end_date=end_date,
+            frequency="d",
+            adjustflag=adjustflag,
+        )
+
+        if result.error_code != "0":
+            raise BadRequestException(message=f"baostock query failed: {result.error_msg}")
+
+        candles: list[MarketProviderCandle] = []
+        while result.next():
+            row = dict(zip(result.fields, result.get_row_data(), strict=False))
+
+            if row.get("tradestatus") not in (None, "", "1"):
+                continue
+            if not row.get("date"):
+                continue
+
+            candles.append(
+                MarketProviderCandle(
+                    symbol=query.symbol,
+                    market=query.market,
+                    timeframe=query.timeframe,
+                    candle_time=self._parse_candle_time(row["date"]),
+                    open_price=self._to_decimal(row.get("open")),
+                    high_price=self._to_decimal(row.get("high")),
+                    low_price=self._to_decimal(row.get("low")),
+                    close_price=self._to_decimal(row.get("close")),
+                    volume=self._to_int(row.get("volume")),
+                    amount=self._to_optional_decimal(row.get("amount")),
+                    source="baostock",
+                    is_adjusted=query.adjust_type != "none",
+                    adjust_type=query.adjust_type,
+                )
+            )
+
+        return candles
 
     def _to_baostock_code(
         self,
@@ -227,6 +258,16 @@ class BaoStockProvider(MarketDataProvider):
             return f"sh.{normalized_symbol}"
 
         return f"sz.{normalized_symbol}"
+
+    def _is_active_symbol(
+        self,
+        raw_payload: dict[str, str],
+    ) -> bool:
+        """BaoStock status=0 或存在退市日期时，该股票不再处于正常上市状态。"""
+
+        status = (raw_payload.get("status") or "").strip()
+        out_date = (raw_payload.get("outDate") or "").strip()
+        return status != "0" and not out_date
 
     def _infer_exchange(
         self,

@@ -135,6 +135,7 @@ class Settings(BaseSettings):
     market_data_default_market: str = Field(default="CN")
     market_data_default_timeframe: str = Field(default="1d")
     market_data_candle_sync_limit: int = Field(default=250)
+    market_overview_candle_stale_after_days: int = Field(default=3, ge=0, le=365)
     market_data_quote_cache_ttl_seconds: int = Field(default=60)
     market_data_request_timeout_seconds: float = Field(default=20.0)
     market_data_cache_enabled: bool = Field(default=True)

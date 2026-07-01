@@ -393,14 +393,31 @@ class PaperTradingRunService:
             "latest_price": self._to_json_value(
                 getattr(quote, "latest_price", None)
             ),
-            "data_quality_status": getattr(data_quality, "status", None),
-            "strategy_action": getattr(strategy_signal, "action", None),
-            "strategy_confidence": self._to_json_value(
-                getattr(strategy_signal, "confidence", None)
+            "data_quality_status": self._data_quality_status(data_quality),
+            "strategy_action": getattr(strategy_signal, "signal", None),
+            "strategy_strength": getattr(strategy_signal, "strength", None),
+            "strategy_score": self._to_json_value(
+                getattr(strategy_signal, "score", None)
             ),
             "warnings": item.warnings,
             "errors": item.errors,
         }
+
+    def _data_quality_status(
+        self,
+        data_quality,
+    ) -> str | None:
+        if data_quality is None:
+            return None
+        if data_quality.errors:
+            return "error"
+        if data_quality.is_empty:
+            return "empty"
+        if not data_quality.is_enough:
+            return "insufficient"
+        if data_quality.is_stale:
+            return "stale"
+        return "available"
 
     def _build_run_response(
         self,

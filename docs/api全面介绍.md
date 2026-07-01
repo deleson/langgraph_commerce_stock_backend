@@ -464,6 +464,8 @@ ReAct 追问会允许 LLM 在白名单工具中选择调用，例如读取行情
 
 响应包含 `summary`、`metrics`、`trades`、`daily_equity`、`signal_snapshots`、`warnings`、`disclaimer`。
 
+单股回测采用数据库优先策略。如果当前股票的 K 线为空、数量不足或已过期，后端会在一次请求内按配置的主 Provider 和 fallback Provider 做受控补齐，数据入库并重新通过质量门控后才执行回测。数据库数据已满足要求时不会调用外部 Provider；同步仍失败时返回 `status=unavailable` 和具体 `warnings`，而不是生成不可靠结果。
+
 ### `POST /portfolio-backtests`
 
 组合回测请求体核心字段：
@@ -705,6 +707,8 @@ disclaimer
 GET /paper-trading/accounts/{account_id}/runs
 GET /paper-trading/accounts/{account_id}/runs/{run_id}
 ```
+
+纸面交易 tick 的 `items` 会返回本次扫描到的全部股票。发生模拟成交时包含 `order_id` 和 `trade_id`；未成交时仍返回策略动作和不可执行原因，例如 `sell` 但账户没有该股票持仓。没有成交不等于任务未运行，前端应同时展示 `input_snapshot`、`items` 和 `warnings`。
 
 ## 十一、前端展示通用注意事项
 

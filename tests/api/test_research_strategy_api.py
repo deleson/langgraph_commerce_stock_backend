@@ -4,6 +4,8 @@
 这些测试验证历史研究链路可用，不证明策略未来收益。
 """
 
+from datetime import date, timedelta
+
 from httpx import AsyncClient
 
 
@@ -144,6 +146,42 @@ async def test_run_single_stock_backtest_success(
     assert data["input_snapshot"]["source"] == "mock"
     assert data["daily_equity"]
     assert data["disclaimer"]
+
+
+async def test_run_single_stock_backtest_syncs_missing_current_candles(
+    async_client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    today = date.today()
+
+    response = await async_client.post(
+        f"{API_PREFIX}/backtests",
+        json={
+            "symbol": "AAPL",
+            "market": "US",
+            "start_date": (today - timedelta(days=180)).isoformat(),
+            "end_date": today.isoformat(),
+            "timeframe": "1d",
+            "initial_cash": "100000",
+            "position_size_ratio": 1,
+            "adjust_type": "none",
+            "source": "mock",
+            "min_required_candles": 60,
+            "enforce_data_quality": True,
+            "include_trades": True,
+            "include_daily_equity": True,
+            "include_signal_snapshots": False,
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()["data"]
+    assert data["status"] == "available"
+    assert data["metrics"] is not None
+    assert data["input_snapshot"]["candle_count"] >= 60
+    assert data["input_snapshot"]["source"] == "mock"
 
 
 async def test_run_single_stock_backtest_without_data_returns_unavailable(

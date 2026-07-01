@@ -522,7 +522,10 @@ class PaperTradingQueryService:
             )
 
             if not signal_context.actionable_items:
-                warnings.append("本次 tick 没有 buy / sell 信号，仅更新权益快照。")
+                warnings.append(
+                    "本次 tick 未生成模拟成交：当前信号均不满足下单条件，"
+                    "每只股票的具体原因见 items。"
+                )
 
             completed_run = await self.run_service.mark_completed(
                 run=run,
@@ -627,7 +630,10 @@ class PaperTradingQueryService:
             unavailable_reason=unavailable_reason,
             account=self._build_account_response(account),
             run_id=run.id if run is not None else None,
-            items=self._build_tick_items(execution_result),
+            items=self._build_tick_items(
+                signal_context=signal_context,
+                execution_result=execution_result,
+            ),
             equity_snapshot=equity_snapshot,
             input_snapshot=PaperTradingTickInputSnapshot(
                 account_id=account.id,
@@ -645,22 +651,54 @@ class PaperTradingQueryService:
 
     def _build_tick_items(
         self,
+        *,
+        signal_context: PaperTradingSignalContext | None,
         execution_result: PaperTradingOrderExecutionResult | None,
     ) -> list[PaperTradingTickItem]:
-        if execution_result is None:
-            return []
+        """返回全部扫描项，让“未成交”也有明确、可审计的原因。"""
 
+        execution_by_key = {
+            (item.market, item.symbol): item
+            for item in (execution_result.items if execution_result else [])
+        }
         items: list[PaperTradingTickItem] = []
-        for item in execution_result.items:
+
+        for signal_item in signal_context.items if signal_context else []:
+            execution_item = execution_by_key.get(
+                (signal_item.market, signal_item.symbol)
+            )
+            if execution_item is not None:
+                items.append(
+                    PaperTradingTickItem(
+                        symbol=execution_item.symbol,
+                        market=execution_item.market,
+                        action=str(execution_item.action),
+                        order_id=(
+                            execution_item.order.id
+                            if execution_item.order is not None
+                            else None
+                        ),
+                        trade_id=(
+                            execution_item.trade.id
+                            if execution_item.trade is not None
+                            else None
+                        ),
+                        message=execution_item.message or "本条纸面交易动作已处理。",
+                        warnings=execution_item.warnings[:10],
+                    )
+                )
+                continue
+
             items.append(
                 PaperTradingTickItem(
-                    symbol=item.symbol,
-                    market=item.market,
-                    action=str(item.action),
-                    order_id=item.order.id if item.order is not None else None,
-                    trade_id=item.trade.id if item.trade is not None else None,
-                    message=item.message or "本条纸面交易动作已处理。",
-                    warnings=item.warnings[:10],
+                    symbol=signal_item.symbol,
+                    market=signal_item.market,
+                    action=signal_item.action or "skip",
+                    message=signal_item.reason or "当前信号不满足模拟下单条件。",
+                    warnings=[
+                        *signal_item.warnings,
+                        *signal_item.errors,
+                    ][:10],
                 )
             )
 

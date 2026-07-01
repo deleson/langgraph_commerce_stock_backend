@@ -5,6 +5,11 @@ from types import SimpleNamespace
 from app.repositories.market_repo import AsyncMarketRepository
 from app.schemas.market_data import MarketSymbolCreate
 from app.services.market_service import MarketService
+from tests.fixtures.quant_data import (
+    build_market_symbol_payload,
+    build_stale_candles,
+    persist_quant_symbol_and_candles,
+)
 
 
 async def test_overview_sync_continues_to_fallback_when_provider_returns_no_candles(
@@ -63,3 +68,77 @@ async def test_overview_sync_continues_to_fallback_when_provider_returns_no_cand
     )
 
     assert calls == ["primary", "fallback"]
+
+
+async def test_overview_strategy_inherits_data_quality_stale_threshold(
+    db_session,
+    monkeypatch,
+) -> None:
+    await persist_quant_symbol_and_candles(
+        db_session,
+        symbol_payload=build_market_symbol_payload(symbol="QTOVST"),
+        candle_payloads=build_stale_candles(symbol="QTOVST", count=40),
+    )
+    monkeypatch.setattr(
+        "app.core.config.get_settings",
+        lambda: SimpleNamespace(market_overview_candle_stale_after_days=3650),
+    )
+
+    overview = await MarketService(db_session).get_overview(
+        symbol="QTOVST",
+        market="US",
+        timeframe="1d",
+        limit=40,
+        include_data_quality=True,
+        data_quality_source="mock",
+        data_quality_min_required=35,
+        data_quality_stale_after_days=30,
+        include_strategy_signal=True,
+        strategy_signal_limit=40,
+        strategy_signal_source="mock",
+        strategy_signal_min_required=35,
+    )
+
+    assert overview.data_quality is not None
+    assert overview.data_quality.is_stale is True
+    assert overview.strategy_signal is not None
+    assert overview.strategy_signal.status == "available"
+    assert overview.strategy_signal.signal == "observe"
+    assert overview.strategy_signal.score == 40
+
+
+async def test_overview_explicit_strategy_stale_threshold_takes_precedence(
+    db_session,
+    monkeypatch,
+) -> None:
+    await persist_quant_symbol_and_candles(
+        db_session,
+        symbol_payload=build_market_symbol_payload(symbol="QTOVOV"),
+        candle_payloads=build_stale_candles(symbol="QTOVOV", count=40),
+    )
+    monkeypatch.setattr(
+        "app.core.config.get_settings",
+        lambda: SimpleNamespace(market_overview_candle_stale_after_days=3650),
+    )
+
+    overview = await MarketService(db_session).get_overview(
+        symbol="QTOVOV",
+        market="US",
+        timeframe="1d",
+        limit=40,
+        include_data_quality=True,
+        data_quality_source="mock",
+        data_quality_min_required=35,
+        data_quality_stale_after_days=30,
+        include_strategy_signal=True,
+        strategy_signal_limit=40,
+        strategy_signal_source="mock",
+        strategy_signal_min_required=35,
+        strategy_signal_stale_after_days=3650,
+    )
+
+    assert overview.data_quality is not None
+    assert overview.data_quality.is_stale is True
+    assert overview.strategy_signal is not None
+    assert overview.strategy_signal.status == "available"
+    assert overview.strategy_signal.signal == "buy"

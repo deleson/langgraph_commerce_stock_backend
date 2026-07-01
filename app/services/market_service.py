@@ -409,6 +409,13 @@ class MarketService:
             candles_source=candles_response.source,
         )
 
+        # 详情页如果已经定义了数据过期阈值，策略信号应默认沿用同一口径，
+        # 避免同一批 K 线被质量报告判定为过期，却仍输出方向性的 buy / sell。
+        effective_strategy_signal_stale_after_days = (
+            strategy_signal_stale_after_days
+            if strategy_signal_stale_after_days is not None
+            else data_quality_stale_after_days
+        )
         strategy_signal = await self._get_strategy_signal_for_overview(
             symbol=symbol,
             market=market,
@@ -419,7 +426,7 @@ class MarketService:
             strategy_signal_source=strategy_signal_source,
             strategy_signal_include_detail=strategy_signal_include_detail,
             strategy_signal_min_required=strategy_signal_min_required,
-            strategy_signal_stale_after_days=strategy_signal_stale_after_days,
+            strategy_signal_stale_after_days=effective_strategy_signal_stale_after_days,
         )
 
         return MarketOverviewResponse(

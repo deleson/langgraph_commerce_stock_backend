@@ -314,7 +314,7 @@ sync_status?
 strategy_signal?
 ```
 
-BaoStock 的 `limit` 表示最近 N 根可用 K 线。近期窗口为空时，Provider 会回查完整历史再截取末尾，因此退市或长期停牌股票仍可展示最后一段历史行情；其数据质量会标记为过期，不能继续生成可用策略信号。
+BaoStock 的 `limit` 表示最近 N 根可用 K 线。近期窗口为空时，Provider 会回查完整历史再截取末尾，因此退市或长期停牌股票仍可展示最后一段历史行情。若未单独传入 `strategy_signal_stale_after_days`，策略信号会继承 `data_quality_stale_after_days`；过期数据只返回 `observe` 风险观察状态，不再生成方向性的 `buy` / `sell` 信号。显式传入策略阈值时，以策略阈值为准。
 
 ### 数据同步与质量
 

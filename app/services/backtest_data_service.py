@@ -143,7 +143,7 @@ class BacktestDataService:
 
         if request.timeframe != "1d":
             warnings.append(
-                "阶段六第一版主要面向日 K 回测，非日 K 结果需要谨慎解读。"
+                "当前回测模型主要针对日 K 数据，非日 K 结果请谨慎解读。"
             )
 
         return warnings

@@ -467,7 +467,7 @@ ReAct 追问会允许 LLM 在白名单工具中选择调用，例如读取行情
 | `include_daily_equity` | `true` | 是否返回权益曲线 |
 | `include_signal_snapshots` | `false` | 是否返回每日信号快照 |
 
-响应包含 `summary`、`metrics`、`trades`、`daily_equity`、`signal_snapshots`、`warnings`、`disclaimer`。
+响应包含 `summary`、`metrics`、`trades`、`daily_equity`、`signal_snapshots`、`warnings`、`disclaimer`。其中 `summary` 是面向用户的简短结果概览，`warnings` 只描述实际数据或模拟假设，不包含开发阶段、步骤编号或后续开发计划。
 
 单股回测采用数据库优先策略。如果当前股票的 K 线为空、数量不足或已过期，后端会在一次请求内按配置的主 Provider 和 fallback Provider 做受控补齐，数据入库并重新通过质量门控后才执行回测。数据库数据已满足要求时不会调用外部 Provider；同步仍失败时返回 `status=unavailable` 和具体 `warnings`，而不是生成不可靠结果。
 

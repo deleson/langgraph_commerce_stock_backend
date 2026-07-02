@@ -247,6 +247,10 @@ async def test_run_backtest_uses_next_open_price_and_builds_equity_curve() -> No
 
     assert result.status == "available"
     assert result.metrics is not None
+    assert "阶段" not in result.summary
+    assert "步骤" not in result.summary
+    assert "ReAct" not in result.summary
+    assert all("阶段" not in warning for warning in result.warnings)
     assert len(result.trades) == 1
     assert len(result.daily_equity) == 40
     assert len(result.signal_snapshots) == 40

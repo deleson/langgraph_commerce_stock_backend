@@ -83,6 +83,7 @@ class PaperTradingUnavailableReason(StrEnum):
 
     NO_ACCOUNT = "no_account"
     NO_WATCHLIST = "no_watchlist"
+    NO_UNIVERSE = "no_universe"
     NO_DATA = "no_data"
     DATA_ERROR = "data_error"
     MARKET_CLOSED = "market_closed"
@@ -95,6 +96,20 @@ class PaperTradingAccountCreate(BaseModel):
     name: str = Field(default="默认纸面交易账户", min_length=1, max_length=120)
     initial_cash: Decimal = Field(default=Decimal("100000"), gt=0)
     currency: str = Field(default="CNY", min_length=3, max_length=8)
+    watchlist_item_ids: list[int] = Field(
+        min_length=1,
+        max_length=50,
+        description="Watchlist item ids frozen into this account when it is created.",
+    )
+
+    @field_validator("watchlist_item_ids")
+    @classmethod
+    def validate_unique_watchlist_item_ids(cls, value: list[int]) -> list[int]:
+        if any(item_id <= 0 for item_id in value):
+            raise ValueError("watchlist item ids must be positive")
+        if len(value) != len(set(value)):
+            raise ValueError("watchlist item ids must be unique")
+        return value
 
     @field_validator("currency", mode="before")
     @classmethod
@@ -123,6 +138,7 @@ class PaperTradingAccountResponse(BaseModel):
     cash_balance: Decimal
     currency: str
     status: PaperTradingAccountStatus
+    closed_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
     disclaimer: str = Field(default=PAPER_TRADING_DISCLAIMER, max_length=300)
@@ -428,6 +444,37 @@ class PaperTradingRunDetailResponse(PaperTradingRunResponse):
     position_snapshot: dict[str, Any] = Field(default_factory=dict)
     equity_snapshot: PaperTradingEquitySnapshotResponse | None = None
 
+
+class PaperTradingAccountSymbolResponse(BaseModel):
+    """账户创建时冻结的股票组合项。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    account_id: int
+    symbol: str
+    market: MarketCode
+    name: str | None = None
+    source_watchlist_item_id: int | None = None
+    created_at: datetime
+
+
+class PaperTradingPerformanceSummary(BaseModel):
+    """虚拟账户从创建到当前或关闭时刻的表现汇总。"""
+
+    started_at: datetime
+    ended_at: datetime
+    duration_days: int = Field(ge=1)
+    is_final: bool
+    initial_cash: Decimal
+    final_equity: Decimal
+    total_pnl: Decimal
+    total_return: float
+    max_drawdown: float | None = None
+    trade_count: int = Field(ge=0)
+    open_position_count: int = Field(ge=0)
+
+
 class PaperTradingAccountDetailResponse(BaseModel):
     """纸面交易账户详情聚合响应。"""
 
@@ -436,6 +483,8 @@ class PaperTradingAccountDetailResponse(BaseModel):
     positions: list[PaperTradingPositionResponse] = Field(default_factory=list)
     latest_equity: PaperTradingEquitySnapshotResponse | None = None
     latest_run: PaperTradingRunResponse | None = None
+    universe: list[PaperTradingAccountSymbolResponse] = Field(default_factory=list)
+    performance: PaperTradingPerformanceSummary
 
 class PaperTradingListQuery(BaseModel):
     """纸面交易列表接口通用分页查询。"""

@@ -98,18 +98,70 @@ async def _create_other_paper_trading_account(
     async_client: AsyncClient,
     another_auth_headers: dict[str, str],
 ) -> int:
+    watchlist_response = await async_client.post(
+        f"{API_PREFIX}/watchlist",
+        json={
+            "symbol": "AAPL",
+            "market": "US",
+            "name": "Apple",
+        },
+        headers=another_auth_headers,
+    )
+    assert watchlist_response.status_code == 201
+    watchlist_item_id = watchlist_response.json()["data"]["id"]
+
     response = await async_client.post(
         f"{API_PREFIX}/paper-trading/accounts",
         json={
             "name": "Other User Paper Account",
             "initial_cash": "100000",
             "currency": "CNY",
+            "watchlist_item_ids": [watchlist_item_id],
         },
         headers=another_auth_headers,
     )
 
     assert response.status_code == 201
     return response.json()["data"]["id"]
+
+
+async def test_paper_trading_account_rejects_other_users_watchlist_item(
+    async_client: AsyncClient,
+    auth_headers: dict[str, str],
+    another_auth_headers: dict[str, str],
+) -> None:
+    other_watchlist_response = await async_client.post(
+        f"{API_PREFIX}/watchlist",
+        json={
+            "symbol": "AAPL",
+            "market": "US",
+            "name": "Apple",
+        },
+        headers=another_auth_headers,
+    )
+    assert other_watchlist_response.status_code == 201
+    other_item_id = other_watchlist_response.json()["data"]["id"]
+
+    response = await async_client.post(
+        f"{API_PREFIX}/paper-trading/accounts",
+        json={
+            "name": "Invalid Cross User Account",
+            "initial_cash": "100000",
+            "currency": "CNY",
+            "watchlist_item_ids": [other_item_id],
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["message"] == "paper trading universe must use current user's watchlist items"
+
+    list_response = await async_client.get(
+        f"{API_PREFIX}/paper-trading/accounts",
+        headers=auth_headers,
+    )
+    assert list_response.status_code == 200
+    assert list_response.json()["data"]["total"] == 0
 
 
 async def _create_other_background_task(

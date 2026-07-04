@@ -99,6 +99,28 @@ class AsyncWatchlistRepository:
         result = await self.db.execute(stmt)
         return list(result.scalars().all())
 
+    async def list_by_ids_for_user(
+        self,
+        *,
+        user_id: int,
+        item_ids: list[int],
+    ) -> list[WatchlistItem]:
+        """批量读取当前用户选中的自选股，供纸面账户创建固定组合快照。"""
+
+        if not item_ids:
+            return []
+
+        stmt = (
+            select(WatchlistItem)
+            .where(
+                WatchlistItem.user_id == user_id,
+                WatchlistItem.id.in_(item_ids),
+            )
+            .order_by(WatchlistItem.id.asc())
+        )
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
     async def list_distinct_symbols(
         self,
         *,

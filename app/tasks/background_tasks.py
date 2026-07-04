@@ -13,7 +13,9 @@ from __future__ import annotations
 """
 
 import asyncio
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from pydantic import ValidationError
 
@@ -47,6 +49,7 @@ from app.services.watchlist_candle_sync_service import WatchlistCandleSyncServic
 from app.services.user_memory_embedding_service import UserMemoryEmbeddingService
 from app.services.user_profile_service import UserProfileService
 from app.repositories.user_repo import AsyncUserRepository
+from app.repositories.paper_trading_repo import AsyncPaperTradingRepository
 from app.services.daily_report_query_service import DailyReportQueryService
 from app.schemas.quant_alert import QuantAlertScanRequest, QuantAlertScanSource
 from app.services.quant_alert_query_service import QuantAlertQueryService
@@ -471,8 +474,8 @@ async def _submit_scheduled_alert_scans_async() -> dict[str, object]:
 async def _submit_scheduled_paper_trading_ticks_async() -> dict[str, object]:
     """由 Celery Beat 批量提交纸面交易 tick 任务。
 
-    纸面交易 tick 会读取用户自选股、策略信号并推进虚拟账户，
-    所以必须按用户拆分任务，不能用一个全局任务混在一起执行。
+    调度粒度是“活跃账户”而不是“用户”：同一用户可以有多个不同固定组合，
+    每个账户都必须独立生成任务，避免只推进默认账户。
     """
 
     settings = get_settings()
@@ -480,28 +483,39 @@ async def _submit_scheduled_paper_trading_ticks_async() -> dict[str, object]:
     submitted_count = 0
     failed_count = 0
     skipped_count = 0
+    duplicate_count = 0
     submitted_task_ids: list[int] = []
     errors: list[dict[str, object]] = []
 
     async with AsyncSessionLocal() as db:
         user_repository = AsyncUserRepository(db)
+        paper_repository = AsyncPaperTradingRepository(db)
         task_repository = AsyncBackgroundTaskRepository(db)
+
+        schedule_date = datetime.now(ZoneInfo(settings.celery_timezone)).date()
+        schedule_date_text = schedule_date.isoformat()
 
         offset = 0
         batch_size = settings.celery_beat_paper_trading_tick_batch_size
 
         while True:
-            users = await user_repository.list_active_users(
+            accounts = await paper_repository.list_active_accounts(
                 limit=batch_size,
                 offset=offset,
             )
 
-            if not users:
+            if not accounts:
                 break
 
-            for user in users:
+            for account in accounts:
+                user = await user_repository.get_by_id(account.user_id)
+                if user is None or not user.is_active or user.status != "active":
+                    skipped_count += 1
+                    continue
+
                 payload = PaperTradingTickTaskPayload(
                     target_user_id=user.id,
+                    account_id=account.id,
                     source=PaperTradingTickSource.SCHEDULER,
                     force=settings.celery_beat_paper_trading_tick_force,
                     max_symbols=settings.celery_beat_paper_trading_tick_max_symbols,
@@ -513,14 +527,21 @@ async def _submit_scheduled_paper_trading_ticks_async() -> dict[str, object]:
                     payload=payload.model_dump(mode="json", exclude_none=True),
                     priority="normal",
                     source="scheduler",
+                    idempotency_key=(
+                        f"paper-trading-tick:{account.id}:{schedule_date_text}"
+                    ),
                     max_retries=settings.celery_beat_paper_trading_tick_max_retries,
                 )
 
                 try:
-                    task = await task_repository.create_task(
+                    task, created = await task_repository.create_task_once(
                         payload=request,
                         user_id=user.id,
                     )
+                    if not created:
+                        duplicate_count += 1
+                        skipped_count += 1
+                        continue
 
                     async_result = celery_app.send_task(
                         "background_tasks.dispatch_background_task",
@@ -540,6 +561,7 @@ async def _submit_scheduled_paper_trading_ticks_async() -> dict[str, object]:
                     errors.append(
                         {
                             "user_id": user.id,
+                            "account_id": account.id,
                             "error": _safe_error_message(exc),
                         }
                     )
@@ -549,10 +571,15 @@ async def _submit_scheduled_paper_trading_ticks_async() -> dict[str, object]:
     if submitted_count == 0 and failed_count == 0:
         return {
             "status": "skipped",
-            "reason": "no_active_users_for_paper_trading_tick",
+            "reason": (
+                "paper_trading_ticks_already_submitted"
+                if duplicate_count > 0
+                else "no_active_accounts_for_paper_trading_tick"
+            ),
             "submitted_count": submitted_count,
             "failed_count": failed_count,
             "skipped_count": skipped_count,
+            "duplicate_count": duplicate_count,
         }
 
     return {
@@ -563,6 +590,7 @@ async def _submit_scheduled_paper_trading_ticks_async() -> dict[str, object]:
         "skipped_count": skipped_count,
         "submitted_task_ids": submitted_task_ids[:50],
         "submitted_task_count": len(submitted_task_ids),
+        "duplicate_count": duplicate_count,
         "errors": errors[:20],
     }
 

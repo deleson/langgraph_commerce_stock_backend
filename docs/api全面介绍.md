@@ -201,7 +201,7 @@ mobile 与 web 不互踢，可以同时保持登录。
 | `PATCH /watchlist/{item_id}` | 可更新字段 | `WatchlistResponse` | 更新 |
 | `DELETE /watchlist/{item_id}` | `item_id` | message | 删除 |
 
-自选股是用户私有资源，后端会按当前登录用户隔离。删除自选股只解除关注关系，不级联删除纸面交易订单、成交、持仓、权益或运行记录。已有未平模拟持仓会继续参与退出信号扫描，但不再允许根据 `buy` 信号新增仓位；重新加入自选股后才恢复新买入资格。
+自选股是用户私有资源，后端会按当前登录用户隔离。新建纸面交易账户时，后端会把用户明确选择的自选股复制为账户固定股票池；之后增删自选股只改变关注关系，不改变已有账户的扫描范围，也不级联删除纸面交易数据。
 
 ### 通知
 
@@ -597,6 +597,7 @@ disclaimer
 | 字段 / 行为 | 说明 |
 | --- | --- |
 | `daily_report_enabled` | 用户级日报模式开关，保存在 `user_preferences` 中 |
+| `scheduled_time` | 服务端按 `CELERY_BEAT_DAILY_REPORT_HOUR` / `MINUTE` 计算的 `HH:mm` 展示值 |
 | `scheduler_enabled` | 后端部署级 Celery Beat 日报调度是否开启，只由服务端配置控制 |
 | `effective_status` | `disabled`、`enabled`、`enabled_but_scheduler_off` 三种状态 |
 | 手动生成日报 | 不受日报模式开关限制，用户仍可调用 `POST /daily-reports/generate`；如果当日已有日报但缺少通知，`notify=true` 会补建日报通知 |
@@ -616,6 +617,7 @@ disclaimer
 {
   "daily_report_enabled": true,
   "timezone": "Asia/Shanghai",
+  "scheduled_time": "18:00",
   "scheduler_enabled": false,
   "effective_status": "enabled_but_scheduler_off",
   "message": "日报模式已开启，但当前服务器未启用日报定时任务。你仍然可以手动生成日报。"
@@ -644,7 +646,7 @@ disclaimer
 
 | 接口 | 说明 |
 | ---- | ---- |
-| `POST /paper-trading/accounts` | 创建虚拟账户 |
+| `POST /paper-trading/accounts` | 创建虚拟账户，并从当前用户自选股冻结固定股票池 |
 | `GET /paper-trading/accounts` | 账户列表 |
 | `GET /paper-trading/accounts/{account_id}` | 账户详情聚合 |
 | `PATCH /paper-trading/accounts/{account_id}` | 更新账户名称或状态；设置为 `closed` 表示不可逆关闭并保留历史数据 |
@@ -652,12 +654,35 @@ disclaimer
 | `GET /paper-trading/accounts/{account_id}/config` | 获取账户配置 |
 | `PATCH /paper-trading/accounts/{account_id}/config` | 更新账户配置 |
 
+
+创建账户请求体示例：
+
+```json
+{
+  "name": "A 股趋势组合",
+  "initial_cash": "100000",
+  "currency": "CNY",
+  "watchlist_item_ids": [12, 18, 25]
+}
+```
+
+`watchlist_item_ids` 必须包含 1 到 50 个不重复的正整数，且每个 ID 都必须属于当前登录用户。后端会在同一创建事务中复制 `symbol`、`market`、`name` 和来源 ID 到 `paper_trading_account_symbols`。该表不外键关联 `watchlist_items`，因此用户之后删除自选股不会破坏账户研究区间。
+
+账户详情新增两个聚合字段：
+
+| 字段 | 说明 |
+| ---- | ---- |
+| `universe` | 账户创建时冻结的股票列表，后续 tick 始终以此为扫描范围 |
+| `performance` | 从 `started_at` 到当前或 `closed_at` 的表现汇总，包含 `duration_days`、`final_equity`、`total_pnl`、`total_return`、`max_drawdown`、`trade_count` 和 `open_position_count` |
+
+当账户更新为 `closed` 时，后端写入 `closed_at` 并生成最终权益快照；此后 `performance.is_final=true`，区间终点和绩效不再继续变化。关闭不可逆，但历史数据保留。
+
 账户配置关键字段：
 
 | 字段 | 说明 |
 | ---- | ---- |
 | `is_enabled` | 是否启用 |
-| `max_symbols_per_tick` | 每次 tick 最多扫描股票数 |
+| `max_symbols_per_tick` | 扫描安全上限；不得小于该账户固定股票池数量 |
 | `allow_buy` / `allow_sell` | 是否允许生成买入 / 卖出 |
 | `max_single_order_cash_ratio` | 单笔订单最大现金比例 |
 | `max_total_position_ratio` | 总持仓比例上限 |
@@ -668,7 +693,7 @@ disclaimer
 
 当前代码中 `is_enabled` 和 `max_symbols_per_tick` 已进入 tick 主链路；其余风控字段仍主要用于保存和审计快照，尚未全部接入订单计算，前端不能把它们描述成已完全生效。
 
-账户没有物理删除接口。将状态更新为 `closed` 后不能恢复或继续运行，但订单、成交、持仓、权益和运行记录仍可查询，满足模拟金融数据的审计需要。
+关闭与删除是两个不同动作：将状态更新为 `closed` 后不能恢复或继续运行，但历史数据仍可查询；`DELETE` 会物理清理该虚拟账户及固定股票池、配置、订单、成交、持仓、权益和运行记录，必须由前端二次确认。
 
 ### 持仓、订单、成交、权益
 
@@ -689,7 +714,7 @@ disclaimer
 | ---- | ---- | ---- |
 | `source` | `manual` | 触发来源 |
 | `force` | `false` | 是否强制执行 |
-| `max_symbols` | `50` | 最多扫描股票数 |
+| `max_symbols` | `50` | 请求安全上限；小于固定股票池时后端会自动抬高并完整扫描 |
 | `notify` | `false` | 是否产生通知 |
 
 响应包含：
@@ -713,7 +738,9 @@ GET /paper-trading/accounts/{account_id}/runs
 GET /paper-trading/accounts/{account_id}/runs/{run_id}
 ```
 
-纸面交易 tick 的 `items` 会返回本次扫描到的全部股票。发生模拟成交时包含 `order_id` 和 `trade_id`；未成交时仍返回策略动作和不可执行原因，例如 `sell` 但账户没有该股票持仓。没有成交不等于任务未运行，前端应同时展示 `input_snapshot`、`items` 和 `warnings`。
+纸面交易 tick 从 `paper_trading_account_symbols` 读取账户固定股票池，不再实时重建自选股列表。同一用户的多个活跃账户由 Celery Beat 分别提交任务；调度任务使用“账户 ID + 调度日期”幂等键，避免同一天重复投递造成重复模拟交易。历史异常数据若存在“持仓不在固定池中”，后端仍会防御性扫描退出信号，但禁止新买入。
+
+tick 的 `items` 会返回本次扫描到的全部股票。发生模拟成交时包含 `order_id` 和 `trade_id`；未成交时仍返回策略动作和不可执行原因，例如 `sell` 但账户没有该股票持仓。没有成交不等于任务未运行，前端应同时展示 `input_snapshot`、`items` 和 `warnings`。
 
 ## 十一、前端展示通用注意事项
 

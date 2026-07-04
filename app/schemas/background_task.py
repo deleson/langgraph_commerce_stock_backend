@@ -151,6 +151,7 @@ class BackgroundTaskCreateRequest(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
     priority: BackgroundTaskPriority = "normal"
     source: BackgroundTaskSource = "api"
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=160)
     scheduled_for: datetime | None = None
     max_retries: int = Field(default=3, ge=0, le=5)
 
@@ -185,6 +186,7 @@ class BackgroundTaskResponse(BaseModel):
     result: dict[str, Any] | None = None
     error_message: str | None = None
     celery_task_id: str | None = None
+    idempotency_key: str | None = None
     retry_count: int = 0
     max_retries: int = 3
     scheduled_for: datetime | None = None

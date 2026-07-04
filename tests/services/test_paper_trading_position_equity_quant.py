@@ -9,6 +9,7 @@ from decimal import Decimal, ROUND_DOWN
 
 from app.models.paper_trading_equity_snapshot import PaperTradingEquitySnapshot
 from app.repositories.paper_trading_repo import AsyncPaperTradingRepository
+from app.repositories.watchlist_repo import AsyncWatchlistRepository
 from app.schemas.market import (
     MarketIndicatorResponse,
     MarketOverviewResponse,
@@ -41,6 +42,12 @@ async def _create_account(
     initial_cash: Decimal = Decimal("100000"),
 ):
     account_service = PaperTradingAccountService(db_session)
+    watchlist_item = await AsyncWatchlistRepository(db_session).create(
+        user_id=user_id,
+        symbol="AAPL",
+        market="US",
+        name="Apple",
+    )
 
     response = await account_service.create_account(
         user_id=user_id,
@@ -48,6 +55,7 @@ async def _create_account(
             name="量化专项纸面交易一致性账户",
             initial_cash=initial_cash,
             currency="CNY",
+            watchlist_item_ids=[watchlist_item.id],
         ),
     )
 

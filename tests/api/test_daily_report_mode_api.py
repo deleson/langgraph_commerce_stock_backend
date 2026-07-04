@@ -2,6 +2,7 @@
 
 from httpx import AsyncClient
 
+from app.core.config import get_settings
 
 API_PREFIX = "/api/v1"
 
@@ -19,6 +20,9 @@ async def test_get_and_update_daily_report_mode_success(
     initial_data = get_response.json()["data"]
     assert initial_data["daily_report_enabled"] is False
     assert initial_data["timezone"] == "Asia/Shanghai"
+    settings = get_settings()
+    expected_time = f"{settings.celery_beat_daily_report_hour:02d}:{settings.celery_beat_daily_report_minute:02d}"
+    assert initial_data["scheduled_time"] == expected_time
     assert initial_data["effective_status"] == "disabled"
     assert initial_data["message"]
 

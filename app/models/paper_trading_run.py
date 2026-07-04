@@ -39,6 +39,7 @@ class PaperTradingRun(Base):
             "unavailable_reason IS NULL OR unavailable_reason IN ("
             "'no_account',"
             "'no_watchlist',"
+            "'no_universe',"
             "'no_data',"
             "'data_error',"
             "'market_closed',"

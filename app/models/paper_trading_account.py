@@ -78,6 +78,11 @@ class PaperTradingAccount(Base):
         nullable=False,
     )
 
+    # 账户关闭后冻结研究区间终点，后续详情以该时间汇总整个模拟周期。
+    closed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import BadRequestException, NotFoundException
 from app.models.paper_trading_account import PaperTradingAccount
 from app.repositories.paper_trading_repo import AsyncPaperTradingRepository
+from app.repositories.watchlist_repo import AsyncWatchlistRepository
 from app.schemas.paper_trading import (
     PaperTradingAccountCreate,
     PaperTradingAccountListResponse,
@@ -27,9 +28,11 @@ class PaperTradingAccountService:
         db: AsyncSession,
         *,
         repository: AsyncPaperTradingRepository | None = None,
+        watchlist_repository: AsyncWatchlistRepository | None = None,
     ) -> None:
         self.db = db
         self.repository = repository or AsyncPaperTradingRepository(db)
+        self.watchlist_repository = watchlist_repository or AsyncWatchlistRepository(db)
 
     async def create_account(
         self,
@@ -37,9 +40,29 @@ class PaperTradingAccountService:
         user_id: int,
         request: PaperTradingAccountCreate,
     ) -> PaperTradingAccountResponse:
+        universe_items = await self.watchlist_repository.list_by_ids_for_user(
+            user_id=user_id,
+            item_ids=request.watchlist_item_ids,
+        )
+        found_ids = {item.id for item in universe_items}
+        missing_ids = [
+            item_id for item_id in request.watchlist_item_ids if item_id not in found_ids
+        ]
+        if missing_ids:
+            raise BadRequestException(
+                message="paper trading universe must use current user's watchlist items",
+                details=[
+                    {
+                        "field": "watchlist_item_ids",
+                        "reason": f"watchlist items not found: {missing_ids}",
+                    }
+                ],
+            )
+
         account = await self.repository.create_account(
             user_id=user_id,
             payload=request,
+            universe_items=universe_items,
         )
         return self._build_account_response(account)
 
@@ -112,6 +135,8 @@ class PaperTradingAccountService:
         *,
         user_id: int,
     ) -> PaperTradingAccountResponse:
+        """兼容旧调用：只返回已有账户，不再隐式创建没有固定组合的账户。"""
+
         query = PaperTradingListQuery(limit=1, offset=0)
         accounts = await self.repository.list_accounts(
             user_id=user_id,
@@ -121,11 +146,9 @@ class PaperTradingAccountService:
         if accounts:
             return self._build_account_response(accounts[0])
 
-        account = await self.repository.create_account(
-            user_id=user_id,
-            payload=PaperTradingAccountCreate(),
+        raise BadRequestException(
+            message="paper trading account must be created with a fixed watchlist universe"
         )
-        return self._build_account_response(account)
 
     async def get_account_model(
         self,

@@ -121,6 +121,7 @@ class DailyReportModeResponse(BaseModel):
 
     daily_report_enabled: bool
     timezone: str
+    scheduled_time: str
     scheduler_enabled: bool
     effective_status: str
     message: str

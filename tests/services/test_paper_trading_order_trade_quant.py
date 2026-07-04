@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from app.models.paper_trading_order import PaperTradingOrder
 from app.models.paper_trading_trade import PaperTradingTrade
 from app.repositories.paper_trading_repo import AsyncPaperTradingRepository
+from app.repositories.watchlist_repo import AsyncWatchlistRepository
 from app.schemas.market import (
     MarketIndicatorResponse,
     MarketOverviewResponse,
@@ -35,6 +36,12 @@ from app.services.paper_trading_signal_service import (
 
 async def _create_account(db_session, user_id: int, initial_cash: Decimal = Decimal("100000")):
     account_service = PaperTradingAccountService(db_session)
+    watchlist_item = await AsyncWatchlistRepository(db_session).create(
+        user_id=user_id,
+        symbol="AAPL",
+        market="US",
+        name="Apple",
+    )
 
     response = await account_service.create_account(
         user_id=user_id,
@@ -42,6 +49,7 @@ async def _create_account(db_session, user_id: int, initial_cash: Decimal = Deci
             name="量化专项纸面交易账户",
             initial_cash=initial_cash,
             currency="CNY",
+            watchlist_item_ids=[watchlist_item.id],
         ),
     )
 

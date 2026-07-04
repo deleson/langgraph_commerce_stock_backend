@@ -9,6 +9,7 @@ run_tick 只推进虚拟账户，不连接券商、不真实下单、不构成�
 """
 
 from datetime import UTC, datetime
+from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +26,8 @@ from app.schemas.paper_trading import (
     PaperTradingAccountCreate,
     PaperTradingAccountDetailResponse,
     PaperTradingAccountListResponse,
+    PaperTradingAccountSymbolResponse,
+    PaperTradingPerformanceSummary,
     PaperTradingAccountResponse,
     PaperTradingAccountStatus,
     PaperTradingAccountUpdate,
@@ -157,11 +160,25 @@ class PaperTradingQueryService:
         account_id: int,
         request: PaperTradingAccountUpdate,
     ) -> PaperTradingAccountResponse:
-        return await self.account_service.update_account(
+        response = await self.account_service.update_account(
             user_id=user_id,
             account_id=account_id,
             request=request,
         )
+
+        if request.status == PaperTradingAccountStatus.CLOSED:
+            # 关闭时补一条最终权益快照，冻结研究区间终点，后续详情可稳定复盘。
+            account = await self.account_service.get_account_model(
+                user_id=user_id,
+                account_id=account_id,
+            )
+            await self.equity_service.create_or_update_snapshot(
+                account=account,
+                user_id=user_id,
+            )
+            return self._build_account_response(account)
+
+        return response
 
     async def delete_account(
         self,
@@ -221,6 +238,10 @@ class PaperTradingQueryService:
             account_id=account.id,
             user_id=user_id,
         )
+        universe = await self.repository.list_account_symbols(
+            account_id=account.id,
+            limit=500,
+        )
 
         config_model = await self.account_config_service.get_or_create_config_model(
             account=account,
@@ -229,6 +250,11 @@ class PaperTradingQueryService:
             user_id=user_id,
             account_id=account.id,
         )
+        performance = await self._build_performance_summary(
+            account=account,
+            latest_equity=latest_equity,
+            user_id=user_id,
+        )
 
         return PaperTradingAccountDetailResponse(
             account=self._build_account_response(account),
@@ -236,6 +262,8 @@ class PaperTradingQueryService:
             positions=[self._build_position_response(item) for item in positions],
             latest_equity=latest_equity,
             latest_run=latest_run,
+            universe=[PaperTradingAccountSymbolResponse.model_validate(item) for item in universe],
+            performance=performance,
         )
 
     async def list_positions(
@@ -412,13 +440,16 @@ class PaperTradingQueryService:
         )
         config_snapshot = self.account_config_service.build_config_snapshot(config)
 
+        universe_count = await self.repository.count_account_symbols(
+            account_id=account.id,
+        )
         tick_request = tick_request.model_copy(
             update={
-                # 调度任务可能不携带 account_id；解析后写回请求，保证持仓退出扫描绑定正确账户。
+                # 固定组合必须完整扫描；调用方传入更小值时自动抬高到快照数量。
                 "account_id": account.id,
-                "max_symbols": min(
-                    tick_request.max_symbols,
-                    config.max_symbols_per_tick,
+                "max_symbols": max(
+                    universe_count,
+                    min(tick_request.max_symbols, config.max_symbols_per_tick),
                 ),
             }
         )
@@ -576,23 +607,15 @@ class PaperTradingQueryService:
     ) -> PaperTradingAccount:
         """解析本次 tick 使用的纸面交易账户。
 
-        如果请求没有传 account_id，则获取或创建当前用户默认账户。
-        账户查询始终带 user_id，避免跨用户推进别人的虚拟账户。
+        每次运行必须明确指定账户，避免后台任务误推进另一个账户或隐式创建空账户。
         """
 
-        if request.account_id is not None:
-            return await self.account_service.get_account_model(
-                user_id=user.id,
-                account_id=request.account_id,
-            )
-
-        account_response = await self.account_service.get_or_create_default_account(
-            user_id=user.id,
-        )
+        if request.account_id is None:
+            raise BadRequestException(message="paper trading tick account_id is required")
 
         return await self.account_service.get_account_model(
             user_id=user.id,
-            account_id=account_response.id,
+            account_id=request.account_id,
         )
 
     def _validate_tick_user(
@@ -703,6 +726,48 @@ class PaperTradingQueryService:
             )
 
         return items
+
+    async def _build_performance_summary(
+        self,
+        *,
+        account: PaperTradingAccount,
+        latest_equity: PaperTradingEquitySnapshotResponse | None,
+        user_id: int,
+    ) -> PaperTradingPerformanceSummary:
+        """汇总账户从创建到当前或关闭时刻的完整模拟表现。"""
+
+        ended_at = account.closed_at or datetime.now(UTC)
+        duration_days = max(1, (ended_at.date() - account.created_at.date()).days + 1)
+        if latest_equity is not None:
+            final_equity = latest_equity.total_equity
+            max_drawdown = latest_equity.max_drawdown
+        else:
+            final_equity = account.cash_balance
+            max_drawdown = None
+
+        total_pnl = final_equity - account.initial_cash
+        total_return = float(total_pnl / account.initial_cash)
+        trade_count = await self.repository.count_trades(
+            account_id=account.id,
+            user_id=user_id,
+        )
+        open_position_count = await self.repository.count_open_positions(
+            account_id=account.id,
+        )
+
+        return PaperTradingPerformanceSummary(
+            started_at=account.created_at,
+            ended_at=ended_at,
+            duration_days=duration_days,
+            is_final=account.status == PaperTradingAccountStatus.CLOSED,
+            initial_cash=account.initial_cash,
+            final_equity=final_equity,
+            total_pnl=total_pnl.quantize(Decimal("0.0001")),
+            total_return=total_return,
+            max_drawdown=max_drawdown,
+            trade_count=trade_count,
+            open_position_count=open_position_count,
+        )
 
     def _build_account_response(
         self,

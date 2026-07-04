@@ -385,7 +385,7 @@ class PaperTradingRunService:
             "symbol": item.symbol,
             "market": item.market,
             "name": item.name,
-            "is_watchlisted": item.is_watchlisted,
+            "is_in_universe": item.is_in_universe,
             "has_open_position": item.has_open_position,
             "can_generate_order": item.can_generate_order,
             "action": item.action,

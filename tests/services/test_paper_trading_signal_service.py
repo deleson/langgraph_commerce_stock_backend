@@ -13,17 +13,13 @@ from app.services.paper_trading_signal_service import (
 )
 
 
-class FakeWatchlistService:
-    def __init__(self, items):
-        self.items = items
-
-    async def list_my_watchlist(self, user):
-        return self.items
-
-
 class FakePaperTradingRepository:
-    def __init__(self, positions):
+    def __init__(self, snapshot_items, positions):
+        self.snapshot_items = snapshot_items
         self.positions = positions
+
+    async def list_account_symbols(self, *, account_id: int, limit: int):
+        return self.snapshot_items[:limit]
 
     async def list_open_positions_for_account(self, *, account_id: int, limit: int):
         return self.positions[:limit]
@@ -97,7 +93,7 @@ def test_removed_watchlist_position_can_sell_but_cannot_buy() -> None:
     removed_position = PaperTradingUniverseItem(
         symbol="000001",
         market="CN",
-        is_watchlisted=False,
+        is_in_universe=False,
         has_open_position=True,
     )
 
@@ -122,7 +118,7 @@ def test_watchlist_without_position_does_not_create_sell_order() -> None:
     watchlist_only = PaperTradingUniverseItem(
         symbol="000001",
         market="CN",
-        is_watchlisted=True,
+        is_in_universe=True,
         has_open_position=False,
     )
 
@@ -136,10 +132,10 @@ def test_watchlist_without_position_does_not_create_sell_order() -> None:
     assert "没有该股票持仓" in reason
 
 
-async def test_universe_merges_watchlist_and_open_positions_with_exit_priority() -> None:
-    watchlist_items = [
-        SimpleNamespace(symbol="000001", market="CN", name="平安银行", notes=None),
-        SimpleNamespace(symbol="000002", market="CN", name="万科A", notes="观察"),
+async def test_universe_uses_frozen_snapshot_and_keeps_orphan_exit_priority() -> None:
+    snapshot_items = [
+        SimpleNamespace(symbol="000001", market="CN", name="平安银行"),
+        SimpleNamespace(symbol="000002", market="CN", name="万科A"),
     ]
     positions = [
         SimpleNamespace(symbol="000003", market="CN"),
@@ -147,24 +143,24 @@ async def test_universe_merges_watchlist_and_open_positions_with_exit_priority()
     ]
     service = PaperTradingSignalService(
         db=None,
-        watchlist_service=FakeWatchlistService(watchlist_items),
         market_service=SimpleNamespace(),
-        repository=FakePaperTradingRepository(positions),
+        repository=FakePaperTradingRepository(snapshot_items, positions),
     )
     warnings: list[str] = []
 
     items = await service._build_universe_items(
         user=SimpleNamespace(id=1),
-        request=PaperTradingTickRequest(account_id=7, max_symbols=10),
+        request=PaperTradingTickRequest(account_id=7, max_symbols=1),
         warnings=warnings,
     )
 
     by_symbol = {item.symbol: item for item in items}
     assert set(by_symbol) == {"000001", "000002", "000003"}
-    assert by_symbol["000001"].is_watchlisted is True
+    assert by_symbol["000001"].is_in_universe is True
     assert by_symbol["000001"].has_open_position is True
-    assert by_symbol["000002"].is_watchlisted is True
+    assert by_symbol["000002"].is_in_universe is True
     assert by_symbol["000002"].has_open_position is False
-    assert by_symbol["000003"].is_watchlisted is False
+    assert by_symbol["000003"].is_in_universe is False
     assert by_symbol["000003"].has_open_position is True
     assert any("禁止新买入" in warning for warning in warnings)
+    assert any("自动扩展为完整扫描" in warning for warning in warnings)

@@ -10,18 +10,41 @@ from httpx import AsyncClient
 API_PREFIX = "/api/v1"
 
 
+async def _create_watchlist_item(
+    async_client: AsyncClient,
+    auth_headers: dict[str, str],
+    *,
+    symbol: str = "000001",
+    market: str = "CN",
+    name: str = "平安银行",
+) -> dict:
+    response = await async_client.post(
+        f"{API_PREFIX}/watchlist",
+        json={"symbol": symbol, "market": market, "name": name},
+        headers=auth_headers,
+    )
+    assert response.status_code == 201
+    return response.json()["data"]
+
+
 async def _create_paper_trading_account(
     async_client: AsyncClient,
     auth_headers: dict[str, str],
     *,
     name: str = "测试纸面交易账户",
+    watchlist_item_ids: list[int] | None = None,
 ) -> dict:
+    if watchlist_item_ids is None:
+        watchlist_item = await _create_watchlist_item(async_client, auth_headers)
+        watchlist_item_ids = [watchlist_item["id"]]
+
     response = await async_client.post(
         f"{API_PREFIX}/paper-trading/accounts",
         json={
             "name": name,
             "initial_cash": "100000",
             "currency": "CNY",
+            "watchlist_item_ids": watchlist_item_ids,
         },
         headers=auth_headers,
     )
@@ -404,6 +427,67 @@ async def test_create_list_and_get_paper_trading_account_success(
     assert detail["account"]["status"] == "active"
     assert detail["config"] is not None
     assert detail["positions"] == []
+    assert len(detail["universe"]) == 1
+    assert detail["universe"][0]["symbol"] == "000001"
+    assert detail["performance"]["is_final"] is False
+    assert detail["performance"]["initial_cash"] == "100000.0000"
+    assert detail["performance"]["final_equity"] == "100000.0000"
+    assert detail["performance"]["total_pnl"] == "0.0000"
+    assert detail["performance"]["total_return"] == 0.0
+    assert detail["performance"]["trade_count"] == 0
+    assert detail["performance"]["open_position_count"] == 0
+
+
+async def test_paper_trading_account_universe_survives_watchlist_deletion(
+    async_client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    watchlist_item = await _create_watchlist_item(async_client, auth_headers)
+    account = await _create_paper_trading_account(
+        async_client,
+        auth_headers,
+        watchlist_item_ids=[watchlist_item["id"]],
+    )
+
+    delete_response = await async_client.delete(
+        f"{API_PREFIX}/watchlist/{watchlist_item['id']}",
+        headers=auth_headers,
+    )
+    assert delete_response.status_code == 200
+
+    detail_response = await async_client.get(
+        f"{API_PREFIX}/paper-trading/accounts/{account['id']}",
+        headers=auth_headers,
+    )
+    assert detail_response.status_code == 200
+    universe = detail_response.json()["data"]["universe"]
+    assert [(item["market"], item["symbol"]) for item in universe] == [("CN", "000001")]
+
+
+async def test_close_paper_trading_account_freezes_final_performance(
+    async_client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    account = await _create_paper_trading_account(async_client, auth_headers)
+    close_response = await async_client.patch(
+        f"{API_PREFIX}/paper-trading/accounts/{account['id']}",
+        json={"status": "closed"},
+        headers=auth_headers,
+    )
+    assert close_response.status_code == 200
+    assert close_response.json()["data"]["closed_at"] is not None
+
+    detail_response = await async_client.get(
+        f"{API_PREFIX}/paper-trading/accounts/{account['id']}",
+        headers=auth_headers,
+    )
+    assert detail_response.status_code == 200
+    performance = detail_response.json()["data"]["performance"]
+    assert performance["is_final"] is True
+    assert performance["duration_days"] >= 1
+    assert performance["final_equity"] == "100000.0000"
+    assert performance["total_pnl"] == "0.0000"
+    assert performance["trade_count"] == 0
 
 
 async def test_update_paper_trading_account_and_config_success(
@@ -604,3 +688,41 @@ async def test_delete_paper_trading_account_removes_it_from_list(
     assert list_response.status_code == 200
     items = list_response.json()["data"]["items"]
     assert all(item["id"] != account_id for item in items)
+
+
+async def test_paper_trading_config_rejects_limit_below_fixed_universe(
+    async_client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    first = await _create_watchlist_item(async_client, auth_headers)
+    second = await _create_watchlist_item(
+        async_client,
+        auth_headers,
+        symbol="000002",
+        name="万科A",
+    )
+    account = await _create_paper_trading_account(
+        async_client,
+        auth_headers,
+        watchlist_item_ids=[first["id"], second["id"]],
+    )
+
+    response = await async_client.patch(
+        f"{API_PREFIX}/paper-trading/accounts/{account['id']}/config",
+        json={"max_symbols_per_tick": 1},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["message"] == (
+        "max_symbols_per_tick cannot be smaller than fixed universe size"
+    )
+
+    detail_response = await async_client.get(
+        f"{API_PREFIX}/paper-trading/accounts/{account['id']}",
+        headers=auth_headers,
+    )
+    assert detail_response.status_code == 200
+    detail = detail_response.json()["data"]
+    assert len(detail["universe"]) == 2
+    assert detail["config"]["max_symbols_per_tick"] == 50

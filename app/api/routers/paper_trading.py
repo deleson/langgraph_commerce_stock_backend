@@ -311,7 +311,7 @@ async def list_paper_trading_equity_snapshots(
     summary="Run Paper Trading Tick",
     description=(
         "Run one manual paper trading tick for the current user. "
-        "The tick reads watchlist stocks, market overview, data quality, "
+        "The tick reads the account's frozen stock universe, market overview, data quality, "
         "and deterministic strategy signals. It may create simulated orders, "
         "simulated trades, update virtual positions, and create an equity snapshot. "
         "It does not place real broker orders."

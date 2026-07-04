@@ -75,6 +75,11 @@ class BackgroundTask(Base):
             "status",
             "scheduled_for",
         ),
+        Index(
+            "ux_background_tasks_idempotency_key",
+            "idempotency_key",
+            unique=True,
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -106,6 +111,12 @@ class BackgroundTask(Base):
         String(30),
         default="api",
         nullable=False,
+    )
+
+    # 定时业务使用稳定键防止 Beat 重复投递，同一天同一账户只创建一个任务。
+    idempotency_key: Mapped[str | None] = mapped_column(
+        String(160),
+        nullable=True,
     )
 
     payload: Mapped[dict[str, Any]] = mapped_column(

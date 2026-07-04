@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.background_task import BackgroundTask
@@ -35,6 +36,7 @@ class AsyncBackgroundTaskRepository:
             status="pending",
             priority=payload.priority,
             source=payload.source,
+            idempotency_key=payload.idempotency_key,
             payload=payload.payload,
             retry_count=0,
             max_retries=payload.max_retries,
@@ -45,6 +47,66 @@ class AsyncBackgroundTaskRepository:
         await self.db.commit()
         await self.db.refresh(task)
         return task
+
+    async def create_task_once(
+        self,
+        *,
+        payload: BackgroundTaskCreateRequest,
+        user_id: int | None = None,
+    ) -> tuple[BackgroundTask, bool]:
+        """按幂等键原子创建任务，并返回 ``(task, created)``。
+
+        Beat 可能因重启或并发调度重复触发。数据库唯一索引配合
+        ``ON CONFLICT DO NOTHING`` 保证同一业务键只会生成一条任务记录。
+        """
+
+        if payload.idempotency_key is None:
+            return await self.create_task(payload=payload, user_id=user_id), True
+
+        stmt = (
+            pg_insert(BackgroundTask)
+            .values(
+                user_id=user_id,
+                task_type=payload.task_type,
+                status="pending",
+                priority=payload.priority,
+                source=payload.source,
+                idempotency_key=payload.idempotency_key,
+                payload=payload.payload,
+                retry_count=0,
+                max_retries=payload.max_retries,
+                scheduled_for=payload.scheduled_for,
+            )
+            .on_conflict_do_nothing(index_elements=["idempotency_key"])
+            .returning(BackgroundTask.id)
+        )
+        result = await self.db.execute(stmt)
+        task_id = result.scalar_one_or_none()
+        await self.db.commit()
+
+        if task_id is not None:
+            task = await self.get_task(task_id=task_id)
+            if task is None:  # pragma: no cover - 数据库 RETURNING 的防御性分支
+                raise RuntimeError("created background task could not be reloaded")
+            return task, True
+
+        existing = await self.get_task_by_idempotency_key(
+            idempotency_key=payload.idempotency_key,
+        )
+        if existing is None:  # pragma: no cover - 唯一冲突后理论上必然存在
+            raise RuntimeError("idempotent background task could not be loaded")
+        return existing, False
+
+    async def get_task_by_idempotency_key(
+        self,
+        *,
+        idempotency_key: str,
+    ) -> BackgroundTask | None:
+        stmt = select(BackgroundTask).where(
+            BackgroundTask.idempotency_key == idempotency_key
+        )
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
 
     async def get_task(
         self,

@@ -5,7 +5,7 @@
 不判断策略信号、不计算成交、不更新资金曲线。
 """
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -19,6 +19,8 @@ from app.models.paper_trading_position import PaperTradingPosition
 from app.models.paper_trading_trade import PaperTradingTrade
 from app.models.paper_trading_account_config import PaperTradingAccountConfig
 from app.models.paper_trading_run import PaperTradingRun
+from app.models.paper_trading_account_symbol import PaperTradingAccountSymbol
+from app.models.watchlist_item import WatchlistItem
 from app.schemas.paper_trading import (
     PaperTradingAccountCreate,
     PaperTradingAccountStatus,
@@ -48,6 +50,7 @@ class AsyncPaperTradingRepository:
         *,
         user_id: int,
         payload: PaperTradingAccountCreate,
+        universe_items: list[WatchlistItem],
     ) -> PaperTradingAccount:
         account = PaperTradingAccount(
             user_id=user_id,
@@ -59,6 +62,19 @@ class AsyncPaperTradingRepository:
         )
 
         self.db.add(account)
+        await self.db.flush()
+        self.db.add_all(
+            [
+                PaperTradingAccountSymbol(
+                    account_id=account.id,
+                    symbol=item.symbol.strip().upper(),
+                    market=item.market.strip().upper(),
+                    name=item.name,
+                    source_watchlist_item_id=item.id,
+                )
+                for item in universe_items
+            ]
+        )
         await self.db.commit()
         await self.db.refresh(account)
         return account
@@ -140,9 +156,13 @@ class AsyncPaperTradingRepository:
             mode="json",
             exclude_unset=True,
         )
+        previous_status = account.status
 
         for field, value in update_data.items():
             setattr(account, field, value)
+
+        if payload.status == PaperTradingAccountStatus.CLOSED and previous_status != PaperTradingAccountStatus.CLOSED:
+            account.closed_at = datetime.now(UTC)
 
         self.db.add(account)
         await self.db.commit()
@@ -167,6 +187,7 @@ class AsyncPaperTradingRepository:
             PaperTradingPosition,
             PaperTradingEquitySnapshot,
             PaperTradingAccountConfig,
+            PaperTradingAccountSymbol,
         ):
             await self.db.execute(
                 delete(model).where(model.account_id == account_id)
@@ -187,6 +208,38 @@ class AsyncPaperTradingRepository:
         await self.db.commit()
         await self.db.refresh(account)
         return account
+
+    async def list_account_symbols(
+        self,
+        *,
+        account_id: int,
+        limit: int = 500,
+    ) -> list[PaperTradingAccountSymbol]:
+        """按稳定创建顺序读取账户固定组合，不再查询实时自选股。"""
+
+        stmt = (
+            select(PaperTradingAccountSymbol)
+            .where(PaperTradingAccountSymbol.account_id == account_id)
+            .order_by(PaperTradingAccountSymbol.id.asc())
+            .limit(limit)
+        )
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def count_account_symbols(self, *, account_id: int) -> int:
+        stmt = select(func.count(PaperTradingAccountSymbol.id)).where(
+            PaperTradingAccountSymbol.account_id == account_id
+        )
+        result = await self.db.execute(stmt)
+        return int(result.scalar_one())
+
+    async def count_open_positions(self, *, account_id: int) -> int:
+        stmt = select(func.count(PaperTradingPosition.id)).where(
+            PaperTradingPosition.account_id == account_id,
+            PaperTradingPosition.quantity > 0,
+        )
+        result = await self.db.execute(stmt)
+        return int(result.scalar_one())
 
     async def create_account_config(
         self,

@@ -88,6 +88,16 @@ class PaperTradingAccountConfigService:
             account=account,
             request=request,
         )
+        if request.max_symbols_per_tick is not None:
+            universe_count = await self.repository.count_account_symbols(
+                account_id=account.id,
+            )
+            if request.max_symbols_per_tick < universe_count:
+                raise BadRequestException(
+                    message=(
+                        "max_symbols_per_tick cannot be smaller than fixed universe size"
+                    )
+                )
 
         config = await self.repository.get_or_create_account_config(
             account_id=account.id,

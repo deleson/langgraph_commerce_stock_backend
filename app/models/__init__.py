@@ -37,6 +37,7 @@ from app.models.paper_trading_trade import PaperTradingTrade
 from app.models.paper_trading_equity_snapshot import PaperTradingEquitySnapshot
 from app.models.paper_trading_account_config import PaperTradingAccountConfig
 from app.models.paper_trading_run import PaperTradingRun
+from app.models.paper_trading_account_symbol import PaperTradingAccountSymbol
 
 __all__ = [
     "AnalysisRecord",
@@ -72,4 +73,5 @@ __all__ = [
     "PaperTradingEquitySnapshot",
     "PaperTradingAccountConfig",
     "PaperTradingRun",
+    "PaperTradingAccountSymbol",
 ]

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 """纸面交易信号读取服务。
 
-本文件负责把当前用户自选股转换成纸面交易 tick 的扫描对象，
-并读取 Market Overview、数据质量和策略信号。
+本文件读取账户创建时冻结的股票组合，并为每只股票加载 Market Overview、
+数据质量和策略信号。用户后续增删自选股不会改变既有账户的扫描范围。
 
 它只判断哪些股票具备生成模拟订单的条件，不创建订单、不更新持仓、
 不更新账户现金，也不生成权益快照。
@@ -21,7 +21,6 @@ from app.schemas.paper_trading import (
     PaperTradingUnavailableReason,
 )
 from app.services.market_service import MarketService
-from app.services.watchlist_service import AsyncWatchlistService
 
 
 @dataclass(slots=True)
@@ -32,7 +31,7 @@ class PaperTradingUniverseItem:
     market: str
     name: str | None = None
     notes: str | None = None
-    is_watchlisted: bool = True
+    is_in_universe: bool = True
     has_open_position: bool = False
 
 
@@ -44,7 +43,7 @@ class PaperTradingSignalItem:
     market: str
     name: str | None = None
     notes: str | None = None
-    is_watchlisted: bool = True
+    is_in_universe: bool = True
     has_open_position: bool = False
     overview: MarketOverviewResponse | None = None
     can_generate_order: bool = False
@@ -83,7 +82,7 @@ class PaperTradingSignalContext:
 class PaperTradingSignalService:
     """收集纸面交易 tick 所需的确定性信号输入。
 
-    这个 Service 读取自选股、未平持仓、行情概览、数据质量和策略信号。
+    这个 Service 读取账户固定组合、未平持仓、行情概览、数据质量和策略信号。
     buy / sell 信号会进入 actionable_items；hold / observe 只记录原因，不生成订单。
     """
 
@@ -99,12 +98,10 @@ class PaperTradingSignalService:
         self,
         db: AsyncSession,
         *,
-        watchlist_service: AsyncWatchlistService | None = None,
         market_service: MarketService | None = None,
         repository: AsyncPaperTradingRepository | None = None,
     ) -> None:
         self.db = db
-        self.watchlist_service = watchlist_service or AsyncWatchlistService(db)
         self.market_service = market_service or MarketService(db)
         self.repository = repository or AsyncPaperTradingRepository(db)
 
@@ -136,8 +133,8 @@ class PaperTradingSignalService:
                 universe_items=[],
                 items=[],
                 actionable_items=[],
-                unavailable_reason=PaperTradingUnavailableReason.NO_WATCHLIST,
-                warnings=warnings or ["当前用户没有自选股或未平模拟持仓，无法推进纸面交易。"],
+                unavailable_reason=PaperTradingUnavailableReason.NO_UNIVERSE,
+                warnings=warnings or ["当前模拟账户没有固定股票组合，无法推进纸面交易。"],
                 errors=errors,
             )
 
@@ -175,75 +172,74 @@ class PaperTradingSignalService:
         request: PaperTradingTickRequest,
         warnings: list[str],
     ) -> list[PaperTradingUniverseItem]:
-        watchlist_items = await self.watchlist_service.list_my_watchlist(user)
+        del user  # 用户隔离已在账户解析时完成；固定组合只按 account_id 读取。
+        if request.account_id is None:
+            warnings.append("纸面交易 tick 缺少 account_id，无法读取固定股票组合。")
+            return []
+
+        snapshot_items = await self.repository.list_account_symbols(
+            account_id=request.account_id,
+            limit=500,
+        )
         open_positions = []
-        if request.account_id is not None:
-            open_positions = await self.repository.list_open_positions_for_account(
-                account_id=request.account_id,
-                limit=501,
-            )
+        open_positions = await self.repository.list_open_positions_for_account(
+            account_id=request.account_id,
+            limit=501,
+        )
 
-        # 先放入已有持仓，确保移出自选股后仍有机会根据 sell 信号退出；
-        # 自选股只决定是否允许新开仓，不应该抹掉已有模拟资产。
         universe_by_key: dict[tuple[str, str], PaperTradingUniverseItem] = {}
-        for position in open_positions[: request.max_symbols]:
-            key = (
-                self._normalize_text(position.market),
-                self._normalize_text(position.symbol),
-            )
-            universe_by_key[key] = PaperTradingUniverseItem(
-                symbol=key[1],
-                market=key[0],
-                notes="当前持仓已移出自选股，仅继续监控退出信号",
-                is_watchlisted=False,
-                has_open_position=True,
-            )
-
-        skipped_count = max(0, len(open_positions) - request.max_symbols)
-        for item in watchlist_items:
+        for item in snapshot_items:
             key = (
                 self._normalize_text(item.market),
                 self._normalize_text(item.symbol),
             )
+            universe_by_key[key] = PaperTradingUniverseItem(
+                symbol=key[1],
+                market=key[0],
+                name=item.name,
+                notes="账户创建时冻结的股票组合",
+                is_in_universe=True,
+                has_open_position=False,
+            )
+
+        # 理论上持仓一定来自固定组合；保留防御性合并，避免历史异常数据留下无法退出的持仓。
+        orphan_position_count = 0
+        for position in open_positions:
+            key = (
+                self._normalize_text(position.market),
+                self._normalize_text(position.symbol),
+            )
             existing = universe_by_key.get(key)
             if existing is not None:
-                existing.name = item.name
-                existing.notes = item.notes
-                existing.is_watchlisted = True
-                continue
-
-            if len(universe_by_key) >= request.max_symbols:
-                skipped_count += 1
+                existing.has_open_position = True
                 continue
 
             universe_by_key[key] = PaperTradingUniverseItem(
                 symbol=key[1],
                 market=key[0],
-                name=item.name,
-                notes=item.notes,
-                is_watchlisted=True,
-                has_open_position=False,
+                notes="历史持仓不在固定组合中，仅继续监控退出信号",
+                is_in_universe=False,
+                has_open_position=True,
             )
+            orphan_position_count += 1
 
-        if skipped_count:
+        if orphan_position_count:
             warnings.append(
-                f"本次纸面交易 tick 最多处理 {request.max_symbols} 只股票，"
-                f"已跳过 {skipped_count} 只。"
+                f"{orphan_position_count} 只历史持仓不在固定组合中：继续监控退出信号，但禁止新买入。"
             )
 
-        removed_position_count = sum(
-            1 for item in universe_by_key.values()
-            if item.has_open_position and not item.is_watchlisted
-        )
-        if removed_position_count:
+        items = list(universe_by_key.values())
+        if len(items) > request.max_symbols:
+            # 固定组合和未平仓退出监控不能因调用方上限而被静默截断。
             warnings.append(
-                f"{removed_position_count} 只持仓已不在自选股中：继续监控退出信号，但禁止新买入。"
+                f"固定组合及退出监控共 {len(items)} 只，超过请求上限 {request.max_symbols} 只；"
+                "为保持研究组合连续性，本次自动扩展为完整扫描。"
             )
 
-        if not universe_by_key:
-            warnings.append("当前用户没有自选股或未平模拟持仓，无法执行纸面交易 tick。")
+        if not items:
+            warnings.append("当前模拟账户没有固定股票组合，无法执行纸面交易 tick。")
 
-        return list(universe_by_key.values())
+        return items
 
     async def _collect_one_item(
         self,
@@ -279,7 +275,7 @@ class PaperTradingSignalService:
                 market=item.market,
                 name=item.name,
                 notes=item.notes,
-                is_watchlisted=item.is_watchlisted,
+                is_in_universe=item.is_in_universe,
                 has_open_position=item.has_open_position,
                 overview=None,
                 can_generate_order=False,
@@ -302,7 +298,7 @@ class PaperTradingSignalService:
             market=item.market,
             name=item.name,
             notes=item.notes,
-            is_watchlisted=item.is_watchlisted,
+            is_in_universe=item.is_in_universe,
             has_open_position=item.has_open_position,
             overview=overview,
             can_generate_order=can_generate_order,
@@ -354,8 +350,8 @@ class PaperTradingSignalService:
                 f"当前策略信号为 {strategy_signal.signal}，不生成模拟订单",
             )
 
-        if strategy_signal.signal == "buy" and not item.is_watchlisted:
-            return False, "buy", "股票已移出自选股，保留持仓监控但禁止新买入"
+        if strategy_signal.signal == "buy" and not item.is_in_universe:
+            return False, "buy", "股票不在账户固定组合中，保留持仓监控但禁止新买入"
 
         if strategy_signal.signal == "sell" and not item.has_open_position:
             return False, "sell", "当前模拟账户没有该股票持仓，不生成卖出订单"

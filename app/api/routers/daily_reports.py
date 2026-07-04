@@ -36,7 +36,9 @@ def _build_daily_report_mode_response(
     daily_report_enabled: bool,
     timezone: str,
 ) -> DailyReportModeResponse:
-    scheduler_enabled = get_settings().celery_beat_daily_report_enabled
+    settings = get_settings()
+    scheduler_enabled = settings.celery_beat_daily_report_enabled
+    scheduled_time = f"{settings.celery_beat_daily_report_hour:02d}:{settings.celery_beat_daily_report_minute:02d}"
 
     if not daily_report_enabled:
         effective_status = "disabled"
@@ -51,6 +53,7 @@ def _build_daily_report_mode_response(
     return DailyReportModeResponse(
         daily_report_enabled=daily_report_enabled,
         timezone=timezone,
+        scheduled_time=scheduled_time,
         scheduler_enabled=scheduler_enabled,
         effective_status=effective_status,
         message=message,
